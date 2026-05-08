@@ -137,6 +137,11 @@ public record RoutingPolicy(
     Optional<String> fallbackType,      // what to route to if no agent meets threshold
     String rationale                    // why this threshold — captured for audit
 ) {
+    public boolean isBootstrap(int agentObservations) {
+        return minimumObservations.isPresent()
+            && agentObservations < minimumObservations.getAsInt();
+    }
+
     public boolean isBorderline(double trustScore) {
         return borderlineMargin.isPresent() && threshold.isPresent()
             && trustScore >= threshold.getAsDouble()
@@ -195,6 +200,103 @@ Returns all capabilities across all four types, with routing policies for trust-
 
 ---
 
+## Trust Maturity Model
+
+The routing architecture is designed for a fleet with trust history. A new deployment has none. Without an explicit maturity model, trust-based routing either blocks all work (no agent meets threshold) or is silently bypassed (threshold set to zero). Neither is acceptable.
+
+This section defines how the system behaves across four phases of maturity, how transitions happen automatically, and what `RoutingPolicy` governs each phase.
+
+### The four phases
+
+**Phase 0 — Bootstrap (no trust history)**
+
+All agents are new. Bayesian Beta priors are at `(1,1)` — uniform, 0.5 trust for everyone. No meaningful signal exists.
+
+Routing behaviour: availability-based. Any agent capable of the work is eligible. Identical to Gastown's GUPP model. The system gets work done and accumulates the first attestations.
+
+`RoutingPolicy` fields active: none. `minimumObservations` gate suspends threshold enforcement. `borderlineMargin` not configured. `HumanOversight` triggered only for fleet-gap conditions (no agent capable of the work at all), not for borderline scores.
+
+Exit condition: any agent for this capability exceeds `minimumObservations` — threshold enforcement activates for that agent automatically.
+
+**Phase 1 — Emerging trust (sparse data)**
+
+Some agents have history. Trust scores are starting to differentiate. New agents still in bootstrap.
+
+Routing behaviour: threshold active for agents with sufficient history; availability routing for agents without. New agents are routed to lower-stakes capabilities first — `style-review` before `security-review`. The `minimumObservations` gate prevents a new agent's first-few-attestation score from being treated as reliable signal.
+
+`RoutingPolicy` fields active: `threshold`, `minimumObservations`, `fallbackType` (if no agent meets threshold: fall back to human or hold, never silently route below threshold). `borderlineMargin` not configured.
+
+Exit condition: most required capabilities have multiple agents with sufficient history, allowing meaningful comparison.
+
+**Phase 2 — Active trust routing (mature data)**
+
+Most agents have meaningful histories. Trust scores reliably differentiate. Routing quality is improving automatically from outcomes.
+
+Routing behaviour: full threshold enforcement. `borderlineMargin` activates — agents within margin trigger `HumanOversight` for spot-checking before assignment. `SCOPE_CALIBRATION` dimension accumulating signal from DECLINED commitments (only meaningful once agents are making genuine capability judgements).
+
+`RoutingPolicy` fields active: all of them. `isBorderline()` logic in use.
+
+Exit condition: steady state. Routing quality compounds as each outcome produces new attestations.
+
+**Phase 3 — Adaptive quality routing (rich data)**
+
+Long-running fleet. Per-capability quality dimensions (CAPABILITY_DIMENSION, ledger#76) are meaningful. An agent's `security-review` thoroughness is reliably distinct from their `architecture-review` thoroughness.
+
+Routing behaviour: quality floors per capability active alongside binary trust threshold. `HumanOversight` is primarily a compliance spot-check mechanism, not a gap-filler.
+
+`RoutingPolicy` fields active: extended to include per-capability quality floors once ledger#76 ships (additive, no rework).
+
+### Phase transition mechanism
+
+Transitions are **automatic** — no operator configuration change required. The `RoutingPolicy.minimumObservations` field is the single gate:
+
+```
+agent.observationCount < policy.minimumObservations  →  bootstrap mode (availability routing)
+agent.observationCount ≥ policy.minimumObservations  →  threshold mode (trust routing)
+```
+
+`RoutingPolicy.isBootstrap(int agentObservations)` makes this determination explicit in the API:
+
+```java
+public record RoutingPolicy(...) {
+    public boolean isBootstrap(int agentObservations) {
+        return minimumObservations.isPresent()
+            && agentObservations < minimumObservations.getAsInt();
+    }
+
+    public boolean isBorderline(double trustScore) {
+        return borderlineMargin.isPresent() && threshold.isPresent()
+            && trustScore >= threshold.getAsDouble()
+            && trustScore < threshold.getAsDouble() + borderlineMargin.getAsDouble();
+    }
+}
+```
+
+### The degradation guarantee
+
+**The system never fails or blocks because of missing trust data.** When an agent is in bootstrap for a capability, they are treated as eligible (availability routing). When no agent meets threshold and `fallbackType` is set, the policy defines the fallback. The fallback is never "do nothing."
+
+This guarantee means devtown on day-1 of a fresh installation behaves identically to Gastown — any available agent gets the work. As attestations accumulate, routing quality improves automatically. No deployment ceremony. No manual trust seeding.
+
+### What this means for `DevtownCapabilityRegistry`
+
+The default `minimumObservations` values reflect the stakes of each capability:
+
+| Capability | `minimumObservations` | Reasoning |
+|-----------|----------------------|-----------|
+| `security-review` | 10 | High stakes — need credible history before threshold applies |
+| `merge-executor` | 15 | Irreversible — highest observation requirement |
+| `architecture-review` | 8 | Significant stakes |
+| `style-review` | 5 | Low stakes — faster trust path |
+
+Capabilities with no threshold (`code-analysis`, `ci-runner`, etc.) have no `minimumObservations` — they use availability routing permanently.
+
+### Platform pattern
+
+The maturity model is not devtown-specific. Any CaseHub application that uses trust-based routing faces the same cold-start problem. The pattern — bootstrap → emerging → active → adaptive, governed by `minimumObservations` and `borderlineMargin` in the routing policy — is a reusable methodology. Tracked for PLATFORM.md: casehubio/parent#14.
+
+---
+
 ## File Layout
 
 ```
@@ -240,7 +342,7 @@ devtown-app/src/test/java/io/casehub/devtown/app/
 | `HumanOversightTest` | Constant non-null, non-blank, prefixed `human-oversight:` | Correctness |
 | `DevtownTrustDimensionTest` | All 3 constants non-null, non-blank, unique | Correctness |
 
-### `RoutingPolicy` (correctness + robustness)
+### `RoutingPolicy` (correctness + robustness + maturity phases)
 
 | Test | Type |
 |------|------|
@@ -248,6 +350,10 @@ devtown-app/src/test/java/io/casehub/devtown/app/
 | `isBorderline()` returns false when score is below threshold | Robustness |
 | `isBorderline()` returns false when margin is empty | Robustness |
 | `isBorderline()` returns false when score is above threshold + margin | Correctness |
+| `isBootstrap(4)` returns true when `minimumObservations = 10` | Correctness |
+| `isBootstrap(10)` returns false when `minimumObservations = 10` | Correctness |
+| `isBootstrap(0)` returns false when `minimumObservations` is empty (no gate) | Robustness |
+| `isBootstrap()` and `isBorderline()` are mutually exclusive for valid inputs | Correctness |
 | Record equality — two policies with same fields are equal | Correctness |
 
 ### `DevtownCapabilityRegistry` (happy path + robustness)
