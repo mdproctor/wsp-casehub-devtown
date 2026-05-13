@@ -1,52 +1,51 @@
-# Handoff — devtown Epic 2 complete
+# Handoff — devtown housekeeping + workspace fixes
 
-2026-05-11
+2026-05-13
 
 ## What shipped this session
 
-**Epic 1 (scaffold)** — pushed to origin. Five-module Quarkus Maven project (`devtown-domain`, `devtown-review`, `devtown-queue`, `devtown-github`, `devtown-app`). Quarkus boots, CI/publish workflows wired.
+**devtown#21** — `CapabilityRegistry.isKnown()` promoted to SPI default method. `DevtownCapabilityRegistry` override removed. `CapabilityRegistrySpiTest` added — anonymous impl proves the contract is on the interface. 72 tests passing.
 
-**Epic 2 (domain model)** — implemented, tested, pushed, issue #9 closed.
-- `ReviewDomain`, `AgentQualification`, `HumanDecision`, `HumanOversight` — 4 typed constant classes replacing the original 13-tag flat namespace
-- `DevtownTrustDimension` — 3 dimensions: `review-thoroughness`, `false-positive-rate`, `scope-calibration`
-- `RoutingPolicy` record — threshold, minimumObservations, borderlineMargin, fallbackType, rationale; `isBootstrap(int)` and `isBorderline(double)` implement the trust maturity model
-- `CapabilityRegistry` SPI — `domain/spi/`, pure Java
-- `DevtownCapabilityRegistry` — populated default (10 capabilities, 4 routing policies); `isKnown()` delegates through `capabilities()` for correct subclass behaviour
-- `CapabilityRegistryBean` — `@ApplicationScoped` CDI wrapper in `devtown-app`
-- 65 tests passing (domain unit + Quarkus CDI integration)
+**devtown#22** — assertj-core bumped to 3.27.7. Test-scope only.
+
+**Workspace/project split fixes** — discovered systemic problems; partially fixed:
+- Git Discipline section added to devtown CLAUDE.md: always `git rev-parse --show-toplevel` before any git op; source code commits → project repo, methodology → workspace
+- Routing tables fixed for devtown, aml, clinical: adr/blog/specs → project, design/snapshots/handover → workspace. Foundation repos deferred (active sessions).
+- Design Document Convention added to devtown CLAUDE.md: design doc is `design/JOURNAL.md` (created by `epic`); between epics, skip DESIGN.md sync entirely.
+- Development Workflow section updated: `work-start` → brainstorm → TDD → `java-dev` → review → `implementation-doc-sync`.
+- Specs promoted: Epic 1 + 2 specs copied to `docs/specs/` in project repo.
+
+**Skills Claude is fixing** (deferred, not in this session):
+- `workspace-init` — bake in git discipline + correct routing defaults
+- `java-git-commit` — read design doc path from CLAUDE.md, skip gracefully between epics
+- `publish-blog` — source path mismatch (`docs/_posts/` vs `blog/`), missing `blog_router.py`
 
 ## Active follow-ups
 
 | Issue | What | Priority |
 |-------|------|----------|
-| devtown#21 | `isKnown()` as default method on `CapabilityRegistry` SPI | Before Epic 3 routing consumers wire against SPI |
-| devtown#22 | Bump assertj-core from 3.24.2 to latest | Before Epic 3 |
-| devtown#19 | Dependency tracker for ledger#76 (CAPABILITY_DIMENSION composite trust scores) | Passive — unblocks Phase 3 routing |
-| devtown#20 | CaseOperation naming/placement review (BATCH_BISECT etc.) | Epics 4/5 |
+| devtown#19 | Dependency tracker for ledger#76 (CAPABILITY_DIMENSION) | Passive |
+| devtown#20 | CaseOperation naming/placement review | Epics 4/5 |
 | parent#14 | Trust maturity model → PLATFORM.md | Parent session |
 
-## Living documents updated
+## New idea logged
 
-- `docs/PROGRESS.md` — DT-001–DT-006 all Implemented; foundation gate table current
-- `docs/gastown-casehub-analysis-v2.md` — section 12 summary updated
-- `docs/PROGRESS.md` — ledger#76 (CAPABILITY_DIMENSION) foundation gate added
-- CLAUDE.md (project) — vocabulary, trust dimensions, routing policies updated to implemented design
-- PLATFORM.md (parent, local) — SPI default pattern refined (operational no-op vs vocabulary populated default); commit pending in parent session via parent#12
+Open source contributor trust: DevTown's trust model (Bayesian Beta, EigenTrust, `RoutingPolicy`) extended to model contributor trust from PR outcomes. Vouching by high-trust contributors for newcomers. Spec for stakeholder buy-in to be written in a future session.
+See: `IDEAS.md`
 
 ## Next: Epic 3
 
-**PR Review CasePlanModel** (devtown#10) — content-driven routing and parallel checks. Requires:
-- The domain vocabulary from Epic 2 ✅
-- Foundation: P0.1 ✅, P0.2 ✅ — bindings and trust scoring wired
-- Foundation gap: P1.3 ⚠️ (TrustWeightedSelectionStrategy) — routing thresholds designed but not yet enforced at assignment
-- Foundation gap: HITL wiring ⚠️ — HumanDecision lifecycle not end-to-end yet
+**PR Review CasePlanModel** (devtown#10) — content-driven routing and parallel checks.
 
-Before implementing: resolve devtown#21 and devtown#22. Run Platform Coherence Protocol against local parent docs.
+Pre-conditions all met:
+- Domain vocabulary from Epic 2 ✅
+- Foundation P0.1, P0.2 ✅
+- Foundation gaps: P1.3 (TrustWeightedSelectionStrategy) and HITL wiring — known, not blocking design
 
-## Key reference docs
+Start with `work-start` → brainstorming → plan → implement.
 
-- Spec: `specs/2026-05-08-epic2-domain-model-design.md`
-- Plan (used): `plans/2026-05-09-epic2-domain-model.md`
+## Key references
+
+- Protocol added: `parent/docs/protocols/spi-default-method-contract-test.md`
+- Blog: `blog/2026-05-13-mdp01-contributor-trust-open-source.md`
 - Foundation gates + improvements: `docs/PROGRESS.md` in project repo
-- Gastown comparison: `docs/gastown-casehub-analysis-v2.md` (section 12 = improvement log summary)
-- Blog: `blog/2026-05-11-mdp01-the-vocabulary-problem.md`
