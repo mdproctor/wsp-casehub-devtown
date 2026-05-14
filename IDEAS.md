@@ -8,7 +8,7 @@ Promote to an ADR when ready to decide; discard when no longer relevant.
 ## 2026-05-12 — Open source contributor trust: prioritised routing + vouching
 
 **Priority:** high  
-**Status:** active
+**Status:** promoted
 
 DevTown's trust model (Bayesian Beta scoring, `RoutingPolicy` thresholds) can be extended to model *contributor* trust, not just reviewer trust. A contributor's score accumulates from PR outcomes: clean first-merge strengthens it; returned-for-rework weakens it; outright rejection weakens it faster. High-trust contributors get fast-tracked; zero/low-trust contributors (including AI slop generators and new accounts) land in a triage queue. The adversarial property is useful: slop generators can't easily game this — new GitHub account = Phase 0 = always triage, and negative history accumulates quickly.
 
@@ -20,4 +20,4 @@ The remaining structural gap is identity: trust only accumulates if the same act
 
 **Next step:** Full high-level stakeholder buy-in spec — not an implementation spec. To be written in a future session for sharing with a colleague.
 
-**Promoted to:**
+**Promoted to:** devtown#24 — spec written in two formats (full + TL;DR). TL;DR at `docs/contributor-trust-proposal.md`; full spec at `specs/2026-05-13-contributor-trust-open-source.md`.
