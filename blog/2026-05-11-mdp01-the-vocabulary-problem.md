@@ -6,6 +6,7 @@ type: phase-update
 entry_type: note
 subtype: diary
 projects: [casehub-devtown]
+excerpt: "Thirteen flat task names collapse into four typed classes — ReviewDomain, AgentQualification, HumanDecision, and HumanOversight — resolving where trust scoring belongs and why human approval is a compliance event, not a routing detail."
 ---
 
 The first thing devtown needed was a vocabulary — a set of names for the types of work that happen in software development. The original spec had thirteen: `code-analysis`, `security-review`, `human-approval-gate`, `notify`, `batch-bisect`, and eight others. Flat. One namespace.

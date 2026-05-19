@@ -1,57 +1,55 @@
-# Handoff — devtown housekeeping + contributor trust spec
+# Handoff — Epic 3 shipped: PR review CasePlanModel
 
-2026-05-14
+2026-05-19
 
 ## What shipped this session
 
-**devtown#21** — `CapabilityRegistry.isKnown()` promoted to SPI default method. `DevtownCapabilityRegistry` override removed. `CapabilityRegistrySpiTest` added — anonymous impl proves the contract is on the interface. 72 tests passing.
+**Layer 1 Part B (devtown#27)** — `NaivePrReviewService @DefaultBean`, `PrReviewResource`, 5 unit tests. Teaching baseline that Layer 5 displaces.
 
-**devtown#22** — assertj-core bumped to 3.27.7. Test-scope only.
+**Epic 3 / Layer 5 (devtown#10)** — PR review CasePlanModel fully shipped and pushed to main:
+- `review/src/main/resources/devtown/pr-review.yaml` — 9 bindings, 3 goals, 9 capabilities
+- `PrReviewCaseHub extends YamlCaseHub` + `PrReviewCaseService @ApplicationScoped` (displaces NaivePrReviewService via @DefaultBean pattern)
+- 38 unit tests (28 binding condition + 10 goal condition) — pure Java, no Quarkus
+- 5 `@QuarkusTest` YAML round-trip tests
+- `InMemoryLedgerEntryRepository` stub in test sources (needed for CDI — see GE-20260519-e13b01)
+- Critical bug found and fixed in code review: `pr-approved` goal was missing `securitySensitive == false` guard — non-security PRs could never complete
 
-**Workspace/project split fixes** — discovered systemic problems; partially fixed:
-- Git Discipline section added to devtown CLAUDE.md
-- Routing tables fixed for devtown, aml, clinical: adr/blog/specs → project, design/snapshots/handover → workspace. Foundation repos deferred (active sessions).
-- Design Document Convention added to devtown CLAUDE.md: skip DESIGN.md sync between epics
-- Development Workflow updated: `work-start` → brainstorm → TDD → `java-dev` → review → `implementation-doc-sync`
-- Specs promoted: Epic 1 + 2 specs copied to `docs/specs/`
+**Platform protocols added to casehub-parent:**
+- `docs/protocols/casehub/case-definition-layers.md` — three-layer YAML/schema/canonical architecture (inherited from SW 1.0)
+- `docs/PLATFORM.md` — upstream consistency principle (SW 1.0 / quarkus-flow)
+- Engine issue engine#289 opened for pluggable ExpressionEvaluatorFactory
 
-**Contributor trust spec** — devtown#24 created and fully written:
-- Full spec: `specs/2026-05-13-contributor-trust-open-source.md`
-- TL;DR: `docs/contributor-trust-proposal.md` — tables/bullets, audience is engineers unfamiliar with CaseHub
-- GitHub issue: devtown#24 — TL;DR first, full spec in collapsible section
-- IDEAS.md updated: status → promoted, Promoted to → devtown#24
-- Key arguments: Bayesian Beta for confidence-weighted scoring, EigenTrust for vouching propagation, history mining for day-one bootstrapping, work queues as the practical routing layer, fits DevTown as intake side of existing reviewer-routing pipeline
-- Ghostty comparison: Ghostty approach (contribution guidelines) is step one, not an alternative — works until scale/adversarial pressure breaks it
+## Branch state (⚠️ mismatch — known)
 
-**Skills Claude is fixing** (deferred):
-- `workspace-init` — bake in git discipline + correct routing defaults
-- `java-git-commit` — read design doc path from CLAUDE.md, skip gracefully between epics
-- `publish-blog` — source path mismatch (`docs/_posts/` vs `blog/`), missing `blog_router.py`
+- **Project repo** (`casehub/devtown`): on `main` — all Epic 3 work committed and pushed
+- **Workspace** (`public/casehub/devtown`): on `epic-pr-review-case` — has `design/.meta` (issue: 10), plan, and blog
 
-## Active follow-ups
+The mismatch is intentional (merged early, continued on main). Workspace epic branch needs formal `/epic close` before next epic begins.
+
+## Open issues from this session
 
 | Issue | What | Priority |
 |-------|------|----------|
-| devtown#24 | Contributor trust spec — awaiting colleague feedback | Active |
-| devtown#19 | Dependency tracker for ledger#76 (CAPABILITY_DIMENSION) | Passive |
-| devtown#20 | CaseOperation naming/placement review | Epics 4/5 |
-| parent#14 | Trust maturity model → PLATFORM.md | Parent session |
+| devtown#28 | Layer 1 API stability (PrReviewOutcome.findings type + PrVerdict constant) | Before Layer 2 |
+| devtown#29 | Layer 1 test improvements (fixture + REST integration test) | Low |
+| devtown#30 | HITL end-to-end test once casehub-work-adapter wiring lands | After P1.2 |
+| devtown#31 | quarkus:build fails — engine SPIs unsatisfied without claudony | After claudony integration |
+| devtown#32 | Minor test improvements (parallel check coverage + method reference style) | Low |
+| parent#26 | casehub-platform-api scoped preferences SPI | Pending |
+| engine#289 | CaseDefinitionYamlMapper pluggable ExpressionEvaluatorFactory | Pending |
 
-## Next: Epic 3
+## Next
 
-**PR Review CasePlanModel** (devtown#10) — content-driven routing and parallel checks.
+**Workspace housekeeping first:** run `/epic` (close mode) on workspace `epic-pr-review-case` to promote specs, archive plans, and clean up the branch. Then start the next epic.
 
-Pre-conditions all met:
-- Domain vocabulary from Epic 2 ✅
-- Foundation P0.1, P0.2 ✅
-- Foundation gaps: P1.3 (TrustWeightedSelectionStrategy) and HITL wiring — known, not blocking design
-
-Start with `work-start` → brainstorming → plan → implement.
+**Next layer candidates:**
+- Layer 2 (casehub-work): PR review WorkItem with SLA — formal human task lifecycle
+- Layer 6 (trust routing): TrustWeightedSelectionStrategy — needs P1.3
 
 ## Key references
 
-- Contributor trust TL;DR: `docs/contributor-trust-proposal.md`
-- Contributor trust full spec: `specs/2026-05-13-contributor-trust-open-source.md`
-- Protocol added: `parent/docs/protocols/spi-default-method-contract-test.md`
-- Blog: `blog/2026-05-13-mdp01-contributor-trust-open-source.md`
-- Foundation gates + improvements: `docs/PROGRESS.md` in project repo
+- Blog: `blog/2026-05-19-mdp01-layer-5-case-definition-lands.md`
+- Spec: project `docs/specs/2026-05-19-epic3-pr-review-caseplanmodel-design.md`
+- Plan: workspace `plans/2026-05-19-epic3-pr-review-caseplanmodel.md`
+- LAYER-LOG: project `LAYER-LOG.md` §Layer 5 (complete)
+- Garden: GE-20260519-e13b01 — InMemoryLedgerEntryRepository CDI gotcha

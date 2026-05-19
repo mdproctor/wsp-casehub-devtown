@@ -7,6 +7,7 @@ entry_type: note
 subtype: diary
 projects: [casehub-devtown]
 tags: [trust, open-source, contributor-routing]
+excerpt: "Applying DevTown's trust accumulation model to open-source contributor routing — why slop generators can't game a reputation system and why Phase 0 is identical to the status quo."
 ---
 
 A colleague raised this at the start of a conversation: Quarkus is getting buried in low-quality AI-generated PRs. Reviewers can't keep up. Could DevTown help?
