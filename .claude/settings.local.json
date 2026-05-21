@@ -117,7 +117,11 @@
       "Bash(javap io/casehub/ledger/runtime/model/LedgerAttestation.class)",
       "Bash(mkdir -p schema-inspect)",
       "Bash(javap /tmp/schema-inspect/io/casehub/model/Metadata.class)",
-      "Bash(javap io/casehub/model/Metadata.class)"
+      "Bash(javap io/casehub/model/Metadata.class)",
+      "Skill(epic)",
+      "Bash(curl -s https://raw.githubusercontent.com/casehubio/parent/main/docs/PLATFORM.md)",
+      "Bash(xargs -I{} sh -c 'jar tf {} 2>/dev/null | grep beans.xml')",
+      "Bash(xargs -I{} sh -c \"python3 -c \\\\\"import zipfile,sys; z=zipfile.ZipFile\\('{}'\\); [print\\('{}:', f\\) for f in z.namelist\\(\\) if 'LedgerProcessor' in f]\\\\\" 2>/dev/null\")"
     ]
   }
 }
