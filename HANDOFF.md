@@ -1,51 +1,57 @@
-# Handoff — Epic 3 shipped: PR review CasePlanModel
+# Handoff — devtown#30 shipped: HITL integration test
 
-2026-05-19
+2026-05-21
 
 ## What shipped this session
 
-**Layer 1 Part B (devtown#27)** — `NaivePrReviewService @DefaultBean`, `PrReviewResource`, 5 unit tests. Teaching baseline that Layer 5 displaces.
+**Fruit-picking (devtown#28, #29, #32)** — all closed in the same session start:
+- `PrFinding` + `PrVerdict` types added to `review` module (Layer 1 API stability)
+- Missing `doesNotFire_whenAnalysisNotComplete` tests for parallel checks
+- Method references + fixture extraction in test classes
+- REST integration test for `PrReviewResource`
 
-**Epic 3 / Layer 5 (devtown#10)** — PR review CasePlanModel fully shipped and pushed to main:
-- `review/src/main/resources/devtown/pr-review.yaml` — 9 bindings, 3 goals, 9 capabilities
-- `PrReviewCaseHub extends YamlCaseHub` + `PrReviewCaseService @ApplicationScoped` (displaces NaivePrReviewService via @DefaultBean pattern)
-- 38 unit tests (28 binding condition + 10 goal condition) — pure Java, no Quarkus
-- 5 `@QuarkusTest` YAML round-trip tests
-- `InMemoryLedgerEntryRepository` stub in test sources (needed for CDI — see GE-20260519-e13b01)
-- Critical bug found and fixed in code review: `pr-approved` goal was missing `securitySensitive == false` guard — non-security PRs could never complete
+**devtown#30 (HITL end-to-end test)** — closed. `HumanApprovalLifecycleTest` verifies:
+- `humanTask` binding creates a WorkItem when `linesChanged > threshold`
+- CDI `@ObservesAsync` delivery works in this runtime (via `WorkItemCompletionCapture`)
+- `WorkItemLifecycleAdapter` applies `outputMapping { humanApproval: . }` → case context updated
+- Case completes when all goals satisfied after signalling remaining checks
 
-**Platform protocols added to casehub-parent:**
-- `docs/protocols/casehub/case-definition-layers.md` — three-layer YAML/schema/canonical architecture (inherited from SW 1.0)
-- `docs/PLATFORM.md` — upstream consistency principle (SW 1.0 / quarkus-flow)
-- Engine issue engine#289 opened for pluggable ExpressionEvaluatorFactory
+**Local engine fixes applied (not committed to engine repo):**
+- `HumanTaskScheduleHandler` — PENDING guard relaxed (accepts RUNNING, engine#312)
+- `WorkItemLifecycleAdapter` — `runOnSafeVertxContext` removed, direct `.await()` (engine#316)
+- `LedgerProcessor` — Quarkus 3.32.2 build-step incompatibility fixed
 
-## Branch state (⚠️ mismatch — known)
+**Garden (3 entries):** GE-20260521-a0f5a6, GE-20260521-9188c1 (YAML `when:` never evaluated), GE-20260521-87daa0 (@ObservesAsync external jar)
 
-- **Project repo** (`casehub/devtown`): on `main` — all Epic 3 work committed and pushed
-- **Workspace** (`public/casehub/devtown`): on `epic-pr-review-case` — has `design/.meta` (issue: 10), plan, and blog
-
-The mismatch is intentional (merged early, continued on main). Workspace epic branch needs formal `/epic close` before next epic begins.
-
-## Open issues from this session
-
-| Issue | What | Priority |
-|-------|------|----------|
-| devtown#28 | Layer 1 API stability (PrReviewOutcome.findings type + PrVerdict constant) | Before Layer 2 |
-| devtown#29 | Layer 1 test improvements (fixture + REST integration test) | Low |
-| devtown#30 | HITL end-to-end test once casehub-work-adapter wiring lands | After P1.2 |
-| devtown#31 | quarkus:build fails — engine SPIs unsatisfied without claudony | After claudony integration |
-| devtown#32 | Minor test improvements (parallel check coverage + method reference style) | Low |
-| parent#26 | casehub-platform-api scoped preferences SPI | Pending |
-| engine#289 | CaseDefinitionYamlMapper pluggable ExpressionEvaluatorFactory | Pending |
+**Protocols (2):** PP-20260521-134c38 (HITL test context pre-seeding), PP-20260521-a36692 (MemoryPlanItemStore in selected-alternatives)
 
 ## Immediate next step
 
-Run `/epic` (close mode) on workspace `epic-pr-review-case` to promote specs, archive plans, and clean up the branch. Then decide: Layer 2 (casehub-work WorkItem SLA) or Layer 6 (trust routing, needs P1.3).
+Get the engine team to commit the local engine fixes to the engine repo:
+- `HumanTaskScheduleHandler` PENDING guard (engine#312)
+- `WorkItemLifecycleAdapter` direct await (engine#316)
+- `LedgerProcessor` Quarkus 3.32.2 fix
+
+These changes are in `/Users/mdproctor/claude/casehub/engine/` locally but NOT pushed.
+
+## Cross-Module
+
+**Blocked by:**
+- `engine` — engine#312 (double WorkItem from PlanningStrategyLoopControl), engine#314 (nested evalObjectTemplate), engine#315 (@ObservesAsync external jar), engine#316 (runOnSafeVertxContext) all need engine fixes · M · Med
+
+## What's Left
+
+- devtown#31 — `quarkus:build` fails without claudony (engine SPIs unsatisfied) · XS · Low — blocked by claudony integration
+
+## What's Next
+
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| Layer 2 | HITL WorkItem SLA — human review gate SLA and escalation | L | High | devtown#30 done, Layer 2 is next logical step |
+| Layer 6 | Trust-weighted routing | L | High | Blocked by P1.3 (TrustWeightedSelectionStrategy) |
 
 ## Key references
 
-- Blog: `blog/2026-05-19-mdp01-layer-5-case-definition-lands.md`
-- Spec: project `docs/specs/2026-05-19-epic3-pr-review-caseplanmodel-design.md`
-- Plan: workspace `plans/2026-05-19-epic3-pr-review-caseplanmodel.md`
-- LAYER-LOG: project `LAYER-LOG.md` §Layer 5 (complete)
-- Garden: GE-20260519-e13b01 — InMemoryLedgerEntryRepository CDI gotcha
+- Blog: `blog/2026-05-21-mdp01-one-test-five-discoveries.md` (published)
+- Spec: project `docs/specs/2026-05-21-hitl-human-approval-lifecycle-design.md`
+- Garden: GE-20260521-9188c1 — YAML `when:` conditions never evaluated at runtime
