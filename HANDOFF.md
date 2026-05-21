@@ -52,6 +52,6 @@ These changes are in `/Users/mdproctor/claude/casehub/engine/` locally but NOT p
 
 ## Key references
 
-- Blog: `blog/2026-05-21-mdp01-one-test-five-discoveries.md` (published)
+- Blog: `blog/2026-05-21-mdp01-one-test-five-discoveries.md` (published — all 159 entries across 9 workspaces verified published)
 - Spec: project `docs/specs/2026-05-21-hitl-human-approval-lifecycle-design.md`
 - Garden: GE-20260521-9188c1 — YAML `when:` conditions never evaluated at runtime
