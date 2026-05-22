@@ -1,57 +1,49 @@
-# Handoff — devtown#30 shipped: HITL integration test
+# Handoff — Layer 2 SLA design complete; blocked on platform publish
 
-2026-05-21
+2026-05-22
 
 ## What shipped this session
 
-**Fruit-picking (devtown#28, #29, #32)** — all closed in the same session start:
-- `PrFinding` + `PrVerdict` types added to `review` module (Layer 1 API stability)
-- Missing `doesNotFire_whenAnalysisNotComplete` tests for parallel checks
-- Method references + fixture extraction in test classes
-- REST integration test for `PrReviewResource`
+**CLAUDE.md + LAYER-LOG.md aligned** with AML tutorial-layer discipline: Design Phase References table added, Tutorial Structure with layer status, stale Foundation Gates corrected, LAYER-LOG.md header cleaned of placeholder mechanism.
 
-**devtown#30 (HITL end-to-end test)** — closed. `HumanApprovalLifecycleTest` verifies:
-- `humanTask` binding creates a WorkItem when `linesChanged > threshold`
-- CDI `@ObservesAsync` delivery works in this runtime (via `WorkItemCompletionCapture`)
-- `WorkItemLifecycleAdapter` applies `outputMapping { humanApproval: . }` → case context updated
-- Case completes when all goals satisfied after signalling remaining checks
+**Layer 2 design complete (devtown#38)** — spec at `docs/specs/2026-05-22-layer2-sla-breach-policy-design.md`. `SlaBreachPolicy` SPI in `casehub-work-api` (not platform), sealed `BreachDecision` with `Chained` as separate type, stateless multi-tier escalation via `candidateGroups`, `SlaBreachHandler` in devtown-app, two-tier `SlaBreachLifecycleTest` strategy.
 
-**Local engine fixes applied (not committed to engine repo):**
-- `HumanTaskScheduleHandler` — PENDING guard relaxed (accepts RUNNING, engine#312)
-- `WorkItemLifecycleAdapter` — `runOnSafeVertxContext` removed, direct `.await()` (engine#316)
-- `LedgerProcessor` — Quarkus 3.32.2 build-step incompatibility fixed
+**Cross-session code review of casehub-work design (3 rounds)** — surfaced: `Path.root()` not on platform main (compile blocker), `BreachExecutionFailed` escape to `@Transactional` boundary (silent infinite retry), `EscalateTo` missing `deadline` field. All incorporated by work team.
 
-**Garden (3 entries):** GE-20260521-a0f5a6, GE-20260521-9188c1 (YAML `when:` never evaluated), GE-20260521-87daa0 (@ObservesAsync external jar)
+**devtown#39** — `casehub-platform-api` explicit compile dep + `casehub-platform-testing` test dep added to `devtown-app/pom.xml`.
 
-**Protocols (2):** PP-20260521-134c38 (HITL test context pre-seeding), PP-20260521-a36692 (MemoryPlanItemStore in selected-alternatives)
+**Garden:** GE-20260522-9cd6d5 (Path.root compile blocker), GE-20260522-4e806e (BreachExecutionFailed retry), GE-20260522-f7db12 (stateless tier escalation), GE-20260522-de5ee3 (Chained as separate sealed type).
+
+**Protocols:** PP-20260522-fe93b6 (cross-repo design doc state verification), PP-20260522-f08b62 (transactional loop exception safety).
 
 ## Immediate next step
 
-Get the engine team to commit the local engine fixes to the engine repo:
-- `HumanTaskScheduleHandler` PENDING guard (engine#312)
-- `WorkItemLifecycleAdapter` direct await (engine#316)
-- `LedgerProcessor` Quarkus 3.32.2 fix
+Watch `casehub-platform` for `Path.root()` landing on main and being published. That unblocks `work#212` (SlaBreachPolicy wiring), which unblocks `devtown#38` implementation. Until then, nothing compiles.
 
-These changes are in `/Users/mdproctor/claude/casehub/engine/` locally but NOT pushed.
+When it lands: start Layer 2 implementation with `work-start` on this branch — spec is approved, plan not yet written (invoke `superpowers:writing-plans` from the spec).
 
 ## Cross-Module
 
 **Blocked by:**
-- `engine` — engine#312 (double WorkItem from PlanningStrategyLoopControl), engine#314 (nested evalObjectTemplate), engine#315 (@ObservesAsync external jar), engine#316 (runOnSafeVertxContext) all need engine fixes · M · Med
+- `platform` — `Path.root()` not on any branch; must publish before work#212 compiles · S · Low
+- `work` — work#213 (SlaBreachPolicy SPI), work#212 (wiring) blocked on platform publish · M · Med
+- `engine` — engine#325 (claimDeadlineHours), engine#326 (failure goals), engine#327 (dynamic expiresIn), engine#330 (scope propagation) · M · Med
 
 ## What's Left
 
-- devtown#31 — `quarkus:build` fails without claudony (engine SPIs unsatisfied) · XS · Low — blocked by claudony integration
+- LAYER-LOG.md Layer 5 blog reference still has `🔲 (not yet drafted)` — blog was written 2026-05-19; update the pointer · XS · Low
+- devtown#35 — duplicate `GET /.well-known` endpoint in `@QuarkusTest` (ADR-0007 not applied) · S · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| Layer 2 | HITL WorkItem SLA — human review gate SLA and escalation | L | High | devtown#30 done, Layer 2 is next logical step |
-| Layer 6 | Trust-weighted routing | L | High | Blocked by P1.3 (TrustWeightedSelectionStrategy) |
+| #38 | Layer 2 implementation — `SlaBreachPolicy`, `SlaBreachHandler`, YAML SLA fields | L | Med | Blocked on platform publish of Path.root() + work#212/213 shipping |
+| #38 | Write implementation plan (invoke `superpowers:writing-plans` from the approved spec) | S | Low | Can do now while blocked on compile dep |
+| Layer 3 | casehub-qhorus — typed COMMAND/RESPONSE per reviewer agent | L | High | After Layer 2 ships |
 
 ## Key references
 
-- Blog: `blog/2026-05-21-mdp01-one-test-five-discoveries.md` (published — all 159 entries across 9 workspaces verified published)
-- Spec: project `docs/specs/2026-05-21-hitl-human-approval-lifecycle-design.md`
-- Garden: GE-20260521-9188c1 — YAML `when:` conditions never evaluated at runtime
+- Spec: `docs/specs/2026-05-22-layer2-sla-breach-policy-design.md`
+- Blog: `blog/2026-05-22-mdp01-three-reviews-one-contract.md`
+- Garden: GE-20260522-4e806e — BreachExecutionFailed silent retry (most important for implementation review)
