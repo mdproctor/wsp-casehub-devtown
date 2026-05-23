@@ -1,0 +1,8 @@
+branch: issue-41-layer2-sla-breach-policy
+project-sha: 0aaadc0edc214463c889c67389c8b684a34c0419
+date: 2026-05-23
+issue: 41
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
