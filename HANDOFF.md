@@ -1,49 +1,46 @@
-# Handoff — devtown#31 closed, history squashed, Layer 2 unblocked
+# Handoff — Layer 2 shipped, devtown#40 closed, CI green
 
-2026-05-23
+2026-05-24
 
 ## What shipped this session
 
-**devtown#31 closed** — 43 CDI deployment failures resolved:
-- `casehub-platform-expression` added (engine#316 JQEvaluator dep)
-- `casehub-platform` added (MockPreferenceProvider for casehub-work)
-- `%prod.quarkus.arc.exclude-types` for WorkloadProvider ambiguity
-- `%prod.quarkus.index-dependency` for engine + engine-common (no Jandex)
-- `casehub-engine-common` indexed in test properties post engine#316 rebuild
-- Stale casehub-work jar rebuilt (5-part cron default, work#218 fix)
+**devtown#41 closed** — Layer 2: SLA-bounded human review gate with escalation:
+- `DefaultSlaBreachPolicy` — stateless two-tier escalation via `candidateGroups`
+- `SlaBreachPolicyBean @ApplicationScoped` — displaces `NoOpSlaBreachPolicy`
+- `SlaBreachHandler @Observes SlaBreachEvent` — signals case on terminal Fail
+- `pr-review.yaml` — `candidateGroups: [pr-reviewers]`, `expiresIn: PT24H`
+- Key insight: `SlaBreachEvent` fired via `Event.fire()` (synchronous) — must use `@Observes` not `@ObservesAsync` (Javadoc example was wrong; filed work#224)
 
-**devtown#40 filed** — persistence SPI production assembly (32 remaining CDI errors).
+**devtown#40 closed** — Engine persistence SPIs wired via `@ApplicationScoped` subclasses in `app/spi/`:
+- `quarkus.arc.selected-alternatives` silently does nothing during `quarkus:build` — filed as GE-20260524-2b587e
+- Non-`@Alternative` subclass in app module is `@Default`, always indexed — filed as GE-20260524-d75218
 
-**work-end (issue-38-layer2-sla-escalation)** — branch closed, DESIGN.md created from journal, blog published, devtown#38 closed.
+**CI green** — Missing `<repositories>` in devtown parent pom was blocking all CI since repo creation. Maven can't resolve the parent POM without knowing where to look, and the repo URL is defined in the parent. Added wildcard entry to devtown's own pom — GE-20260524-122018.
 
-**git squash** — 50 commits → 20 on `origin/main` and `upstream/main` (casehubio/devtown). Backup: `backup/pre-squash-main-20260523`.
-
-**Engine blockers cleared** — engine#312 and engine#315 both CLOSED. No remaining cross-module blockers.
+**Both remotes pushed** — mdproctor and casehubio on same HEAD.
 
 ## Immediate next step
 
-Start Layer 2 implementation — run `work-start` to open a new branch for the actual `SlaBreachPolicy` wiring. Design spec is approved: `docs/specs/2026-05-22-layer2-sla-breach-policy-design.md`. Invoke `superpowers:writing-plans` from the spec before coding.
-
-## Cross-Module
-
-None. All engine blockers cleared this session. Platform `Path.root()` status unknown — verify before starting Layer 2 implementation (`work#212` depends on it).
+Start Layer 3: `work-start` for casehub-qhorus typed COMMAND/RESPONSE/DONE/DECLINE per reviewer agent interaction. Check for open issues first — no #41 equivalent exists yet, will need to create one.
 
 ## What's Left
 
-- devtown#40 — persistence SPI production assembly · M · Med — three fix options in the issue
 - LAYER-LOG.md Layer 5 blog reference — update pointer from placeholder to actual entry · XS · Low
+- LAYER-LOG.md Layer 2 entry — write in full when layer closes (engine#326 failure goal is the remaining gap) · M · Low
+- devtown#42 — SlaBreachHandlerWiringTest (focused CDI wiring test) · S · Low
+- parent#63 — update casehub-devtown.md layer table (Layer 2 pending → in progress) · XS · Low (peer repo issue, not us)
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| Layer 2 | SlaBreachPolicy wiring — expiry, escalation, YAML SLA fields | L | Med | Spec approved; verify Path.root() on platform before `work-start` |
-| devtown#40 | Persistence SPI production assembly | M | Med | Three options in issue; claudony or dev-profile |
-| Layer 3 | casehub-qhorus typed COMMAND/RESPONSE per reviewer agent | L | High | After Layer 2 ships |
+| Layer 3 | casehub-qhorus typed COMMAND/RESPONSE/DONE/DECLINE per reviewer agent | L | High | Design first; read qhorus#124 status (claudony persona mapping) |
+| engine#326 | Failure goal support (`kind: failure`) | M | Med | Needed to close Layer 2 fully; work on engine side |
+| Layer 2 LAYER-LOG | Write Layer 2 entry in full when engine#326 done | M | Low | See LAYER-LOG.md convention — full at close only |
 
 ## Key references
 
+- Blog: `blog/2026-05-24-mdp01-four-subclasses-missing-repo.md`
+- Garden: GE-20260524-2b587e (selected-alternatives silent failure), GE-20260524-d75218 (CDI @Alternative subclass technique), GE-20260524-122018 (Maven parent bootstrap), GE-20260524-baae14 (BOM scope inheritance)
 - Layer 2 spec: `docs/specs/2026-05-22-layer2-sla-breach-policy-design.md`
-- Blog: `blog/2026-05-23-mdp01-forty-three-cdi-errors.md`
-- Garden: GE-20260523-54f02a (exclude-types jar scan), GE-20260523-c2cca8 (dormant Quartz cron)
-- Squash backup: `backup/pre-squash-main-20260523` on casehub/devtown
+- Stale project branches (all < 14 days, deletion scheduled): `backup/pre-squash-main-20260523`, `epic-pr-review-case`, `issue-293-wire-work-adapter-hitl`, `issue-30-hitl-human-approval-test`, `issue-38-layer2-sla-escalation`
