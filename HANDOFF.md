@@ -1,4 +1,4 @@
-# Handoff — Layer 2 shipped, devtown#40 closed, CI green
+# Handoff — Layer 2 shipped, devtown#40 closed, CI green, all work closed
 
 2026-05-24
 
@@ -18,6 +18,10 @@
 **CI green** — Missing `<repositories>` in devtown parent pom was blocking all CI since repo creation. Maven can't resolve the parent POM without knowing where to look, and the repo URL is defined in the parent. Added wildcard entry to devtown's own pom — GE-20260524-122018.
 
 **Both remotes pushed** — mdproctor and casehubio on same HEAD.
+
+**All workspace branches properly closed** — added missing `design/EPIC-CLOSED.md` to `epic-pr-review-case`; all three stale branches now have the work-end marker.
+
+**All 7 blog entries published** — `2026-05-24-mdp01-four-subclasses-missing-repo.md` pushed to mdproctor.github.io.
 
 ## Immediate next step
 
