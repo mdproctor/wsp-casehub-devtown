@@ -1,0 +1,8 @@
+branch: issue-42-sla-breach-handler-wiring-test
+project-sha: 60e8ecc
+date: 2026-05-25
+issue: 42
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
