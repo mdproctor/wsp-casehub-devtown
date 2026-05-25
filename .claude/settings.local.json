@@ -117,7 +117,17 @@
       "Bash(javap io/casehub/ledger/runtime/model/LedgerAttestation.class)",
       "Bash(mkdir -p schema-inspect)",
       "Bash(javap /tmp/schema-inspect/io/casehub/model/Metadata.class)",
-      "Bash(javap io/casehub/model/Metadata.class)"
+      "Bash(javap io/casehub/model/Metadata.class)",
+      "Skill(publish-blog)",
+      "mcp__intellij__search_in_files_by_text",
+      "Bash(gh run *)",
+      "Bash(gh secret *)",
+      "Bash(mvn dependency:get -Dartifact=io.casehub:casehub-parent:0.2-SNAPSHOT:pom -Drepos=github::https://maven.pkg.github.com/casehubio/* --batch-mode)",
+      "Skill(work-end)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/casehubio/parent/main/docs/PLATFORM.md\")",
+      "mcp__intellij__search_symbol",
+      "mcp__intellij__read_file",
+      "Bash(curl -s \"https://raw.githubusercontent.com/casehubio/parent/main/docs/repos/casehub-devtown.md\")"
     ]
   }
 }
