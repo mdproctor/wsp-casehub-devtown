@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-25-mdp01-the-spec-said-capturingbreachpolicy.md](2026-05-25-mdp01-the-spec-said-capturingbreachpolicy.md) | 2026-05-25 | Wiring test: why CapturingBreachPolicy was rejected; direct Event.fire() as test driver; eight-binding YAML analysis; MapPreferences.empty() Javadoc wrong |
 | [2026-05-24-mdp01-four-subclasses-missing-repo.md](2026-05-24-mdp01-four-subclasses-missing-repo.md) | 2026-05-24 | Layer 2 ships; @Observes vs @ObservesAsync gotcha in SlaBreachEvent; selected-alternatives silent failure in quarkus:build; Maven parent bootstrap CI fix |
 | [2026-05-23-mdp01-forty-three-cdi-errors.md](2026-05-23-mdp01-forty-three-cdi-errors.md) | 2026-05-23 | 43 CDI deployment failures: JQEvaluator gaps, WorkloadProvider ambiguity, dormant Quartz bean activated by dependency chain |
 | [2026-05-22-mdp01-three-reviews-one-contract.md](2026-05-22-mdp01-three-reviews-one-contract.md) | 2026-05-22 | Layer 2 SLA breach policy designed; stateless multi-tier escalation; three review rounds catch compile blocker and silent retry loop |
