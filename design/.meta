@@ -1,0 +1,8 @@
+branch: issue-32-s-xs-cleanup
+project-sha: 9afd5d6a992eaead5a70f7a0727f95adb09aa24c
+date: 2026-05-25
+issue: 32
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
