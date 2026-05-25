@@ -11,3 +11,4 @@
 | [2026-05-11-mdp01-the-vocabulary-problem.md](2026-05-11-mdp01-the-vocabulary-problem.md) | 2026-05-11 | The vocabulary problem — why 13 flat capability tags became 4 typed classes, and the trust maturity model |
 | [2026-05-13-mdp01-contributor-trust-open-source.md](2026-05-13-mdp01-contributor-trust-open-source.md) | 2026-05-13 | Could DevTown's trust model filter AI-generated PR slop in open source projects? |
 | [2026-05-25-mdp02-the-feedback-loop-closes.md](2026-05-25-mdp02-the-feedback-loop-closes.md) | 2026-05-25 | P0 complete but trust routing still inert — honest 30% progress assessment after sweeping all foundation repos |
+| [2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md](2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md) | 2026-05-25 | git-squash session — merge commit diagnosis, 40→17 commits |
