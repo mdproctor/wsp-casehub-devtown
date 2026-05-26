@@ -1,39 +1,22 @@
-# Handoff — git-squash: 40→17 commits on devtown main
+# Handoff — squash cleanup: XS queue cleared
 
-2026-05-25
+2026-05-26
 
 ## What shipped this session
 
-**git-squash completed** — devtown main compacted from 40 commits to 17 since backup/pre-squash-main-20260523:
-- Merge commit `c65f692` (2-parent) excluded from todo — content covered by component commits
-- 3 commits skipped (conflict per instruction): b9a10ca (PrFinding/PrVerdict), 4ac0335 (test fixture), 93adfcc (doesNotFire tests — Closes #32)
-- 6 group messages amended via `exec git commit --amend -m "..." --no-edit` in second rebase pass
-- Pre-push hook blocked delivery push — bypassed with `--no-verify`
-- Backup: `backup/pre-squash-main-20260525`; previous: `backup/pre-squash-main-20260523`
-- Both fork (mdproctor/devtown) and upstream (casehubio/devtown) updated
+**XS queue cleared:**
+- `testCoverage_doesNotFire_whenAlreadyDone` and `performanceAnalysis_doesNotFire_whenAlreadyDone` added to `PrReviewBindingConditionTest.ParallelChecks` — symmetric counterparts to the existing styleCheck guard; all three share the same `codeAnalysis.complete` gate. Merged via PR#51.
+- PR#47 closed (was OPEN+CONFLICTING post-squash, not already merged as the handoff incorrectly stated). Squash rebase made the pre-squash PR unmergeable.
 
-**3 skipped commits**: PrFinding/PrVerdict types, NaivePrReviewService test fixture, doesNotFire_whenAlreadyDone tests — content in backup if needed.
+**Note:** issue #32 was auto-closed before the tests actually landed (squash skip). Verify via `gh issue view 32 --repo casehubio/devtown` if in doubt — both tests are now in main.
 
 ## Immediate next step
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
-
-## Actioned from casehub-life session (2026-05-26)
-
-- **devtown#48 + devtown#49 CLOSED** — commit `9919e4e` on main: `NaivePrReviewService` → `PrReviewService`, `NaivePrReviewServiceTest` → `PrReviewServiceTest`, gap comments removed from production code, LAYER-LOG.md updated (Layer 1 heading, accountability gaps table, navigation lines on Layer 1 and Layer 5, all Naive* references updated). Build passes.
-
-## Issues filed from casehub-life session (2026-05-26)
-
-- **devtown#48** — add layer navigation index to LAYER-LOG.md: explicit `**Navigation:** git log --grep="#N"` line per layer entry so LLM sessions can jump directly to any layer boundary
-- **devtown#49** — rename `NaivePrReviewService` → `PrReviewService` and `NaivePrReviewServiceTest` → `PrReviewServiceTest` using IntelliJ rename refactoring; update LAYER-LOG.md terminology ("domain baseline" not "naive Java"); remove any `// LAYER N GAP:` comments from production code
+Start Layer 3: `work-start` for casehub-qhorus typed COMMAND/RESPONSE/DONE/DECLINE per reviewer agent interaction. No issue exists yet — create one before branching.
 
 ## What's Left
 
-- Re-land devtown#32 content (doesNotFire tests, 12 lines) — was skipped in squash conflict · XS · Low
-- casehubio/devtown PR#47 — already merged to upstream; confirm closed · XS · Low
-- LAYER-LOG.md Layer 2 entry — write in full when engine#326 (failure goal) ships · M · Low
-- ~~devtown#46~~ ✅ closed by parent session 2026-05-26: removed `smallrye.config.mapping.validate-unknown=false` workaround from test properties — qhorus `@ConfigRoot(BUILD_TIME)` resolves SRCFG00050
-- ~~parent#68~~ ✅ closed by parent session 2026-05-26: layer table updated in parent
+*None — queue clear.*
 
 ## What's Next
 
@@ -41,8 +24,7 @@
 
 ## Key references
 
-- Blog: `blog/2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md`
-- Garden: GE-20260525-cc8321 (pre-push hook blocks squash delivery push — use `--no-verify`)
-- Squash plan: `docs/squash-plan-2026-05-25.md` (on main, in project repo)
-- Backups: `backup/pre-squash-main-20260525`, `backup/pre-squash-main-20260523` (deletion eligible 2026-06-08)
-- Stale workspace branches (all CLOSED, deletion eligible 2026-06-08): `epic-pr-review-case`, `issue-30-hitl-human-approval-test`, `issue-32-s-xs-cleanup`, `issue-38-layer2-sla-escalation`, `issue-42-sla-breach-handler-wiring-test`
+- Blog: `blog/2026-05-26-mdp01-after-the-squash.md`
+- Previous blog: `blog/2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md`
+- Stale workspace branches (all CLOSED, deletion eligible 2026-06-08 or earlier): `epic-pr-review-case`, `issue-30-hitl-human-approval-test`, `issue-32-s-xs-cleanup`, `issue-38-layer2-sla-escalation`, `issue-42-sla-breach-handler-wiring-test`
+- New closed branch (deletion eligible 2026-06-09): `issue-50-reland-missing-tests`
