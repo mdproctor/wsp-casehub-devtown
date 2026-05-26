@@ -22,9 +22,9 @@
 
 - Re-land devtown#32 content (doesNotFire tests, 12 lines) — was skipped in squash conflict · XS · Low
 - casehubio/devtown PR#47 — already merged to upstream; confirm closed · XS · Low
-- parent#68 — update layer table (Layer 2 code complete; LAYER-LOG pending engine#326) · XS · Low (peer repo)
 - LAYER-LOG.md Layer 2 entry — write in full when engine#326 (failure goal) ships · M · Low
-- devtown#46 — replace `#N` placeholder in test properties TODO comment · XS · Low
+- ~~devtown#46~~ ✅ closed by parent session 2026-05-26: removed `smallrye.config.mapping.validate-unknown=false` workaround from test properties — qhorus `@ConfigRoot(BUILD_TIME)` resolves SRCFG00050
+- ~~parent#68~~ ✅ closed by parent session 2026-05-26: layer table updated in parent
 
 ## What's Next
 
