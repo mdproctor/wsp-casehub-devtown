@@ -18,6 +18,10 @@
 
 *Unchanged — `git show HEAD~1:HANDOFF.md`*
 
+## Actioned from casehub-life session (2026-05-26)
+
+- **devtown#48 + devtown#49 CLOSED** — commit `9919e4e` on main: `NaivePrReviewService` → `PrReviewService`, `NaivePrReviewServiceTest` → `PrReviewServiceTest`, gap comments removed from production code, LAYER-LOG.md updated (Layer 1 heading, accountability gaps table, navigation lines on Layer 1 and Layer 5, all Naive* references updated). Build passes.
+
 ## Issues filed from casehub-life session (2026-05-26)
 
 - **devtown#48** — add layer navigation index to LAYER-LOG.md: explicit `**Navigation:** git log --grep="#N"` line per layer entry so LLM sessions can jump directly to any layer boundary
