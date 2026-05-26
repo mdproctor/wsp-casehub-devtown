@@ -1,0 +1,8 @@
+branch: issue-50-reland-missing-tests
+project-sha: 9919e4ee3d3289a42e173da3d4b1d9fc96c1ad7c
+date: 2026-05-26
+issue: 50
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
