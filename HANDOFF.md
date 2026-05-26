@@ -18,6 +18,11 @@
 
 *Unchanged — `git show HEAD~1:HANDOFF.md`*
 
+## Issues filed from casehub-life session (2026-05-26)
+
+- **devtown#48** — add layer navigation index to LAYER-LOG.md: explicit `**Navigation:** git log --grep="#N"` line per layer entry so LLM sessions can jump directly to any layer boundary
+- **devtown#49** — rename `NaivePrReviewService` → `PrReviewService` and `NaivePrReviewServiceTest` → `PrReviewServiceTest` using IntelliJ rename refactoring; update LAYER-LOG.md terminology ("domain baseline" not "naive Java"); remove any `// LAYER N GAP:` comments from production code
+
 ## What's Left
 
 - Re-land devtown#32 content (doesNotFire tests, 12 lines) — was skipped in squash conflict · XS · Low
