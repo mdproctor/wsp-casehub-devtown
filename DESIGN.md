@@ -1,6 +1,15 @@
 # DevTown Design — casehub-devtown
 
-Living design document. Sections updated as epics close via journal merge.
+**Role:** Cross-cutting architectural decision record. Captures the *why* behind
+technical choices that affect multiple layers or don't belong in a single layer entry.
+Distilled from `design/JOURNAL.md` at each epic close. Each entry is cross-referenced
+from the relevant `LAYER-LOG.md` layer entry and vice versa.
+
+**Not a design spec** (those live in `docs/specs/`). Not an ADR (those in `docs/adr/`).
+Not session narrative (that is `blog/`). See `AGENTIC-HARNESS-GUIDE.md §Three-Document
+Design System` for the full chain.
+
+Sections updated as epics close via journal merge.
 
 ---
 
