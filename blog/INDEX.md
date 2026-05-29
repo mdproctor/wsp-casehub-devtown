@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-29-mdp02-layer3-obligation-explicit.md](2026-05-29-mdp02-layer3-obligation-explicit.md) | 2026-05-29 | Layer 3: COMMAND/DONE/DECLINE via casehub-qhorus; shared channel per PR; CDI displacement for tutorial layers; DECLINE as first-class outcome |
 | [2026-05-25-mdp01-the-spec-said-capturingbreachpolicy.md](2026-05-25-mdp01-the-spec-said-capturingbreachpolicy.md) | 2026-05-25 | Wiring test: why CapturingBreachPolicy was rejected; direct Event.fire() as test driver; eight-binding YAML analysis; MapPreferences.empty() Javadoc wrong |
 | [2026-05-24-mdp01-four-subclasses-missing-repo.md](2026-05-24-mdp01-four-subclasses-missing-repo.md) | 2026-05-24 | Layer 2 ships; @Observes vs @ObservesAsync gotcha in SlaBreachEvent; selected-alternatives silent failure in quarkus:build; Maven parent bootstrap CI fix |
 | [2026-05-23-mdp01-forty-three-cdi-errors.md](2026-05-23-mdp01-forty-three-cdi-errors.md) | 2026-05-23 | 43 CDI deployment failures: JQEvaluator gaps, WorkloadProvider ambiguity, dormant Quartz bean activated by dependency chain |
