@@ -13,3 +13,4 @@
 | [2026-05-25-mdp02-the-feedback-loop-closes.md](2026-05-25-mdp02-the-feedback-loop-closes.md) | 2026-05-25 | P0 complete but trust routing still inert — honest 30% progress assessment after sweeping all foundation repos |
 | [2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md](2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md) | 2026-05-25 | git-squash session — merge commit diagnosis, 40→17 commits |
 | [2026-05-26-mdp01-after-the-squash.md](2026-05-26-mdp01-after-the-squash.md) | 2026-05-26 | Squash debris: missing tests, CONFLICTING PR, symmetry restored |
+| [2026-05-29-mdp01-arc42stories-meets-reality.md](2026-05-29-mdp01-arc42stories-meets-reality.md) | 2026-05-29 | ARC42STORIES.MD generated for devtown; spec gaps fixed: lighter chapters, matrix, definition of done, migration guide; tutorial-strategy.md archived |
