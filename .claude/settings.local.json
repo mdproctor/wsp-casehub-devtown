@@ -118,7 +118,17 @@
       "Bash(mkdir -p schema-inspect)",
       "Bash(javap /tmp/schema-inspect/io/casehub/model/Metadata.class)",
       "Bash(javap io/casehub/model/Metadata.class)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Skill(publish-blog)",
+      "Skill(project-init)",
+      "Bash(typora *)",
+      "mcp__intellij__search_in_files_by_text",
+      "Skill(write-content)",
+      "mcp__intellij__read_file",
+      "Bash(/usr/libexec/java_home -v 21)",
+      "Bash(JAVA_HOME=$\\(/usr/libexec/java_home -v 21\\) find review/target/classes -name \"*.class\")",
+      "Bash(mvn dependency:tree)",
+      "Bash(xargs '-I{}' python3 -c ' *)"
     ]
   }
 }

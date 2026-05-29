@@ -1,30 +1,43 @@
-# Handoff — squash cleanup: XS queue cleared
+# HANDOFF — 2026-05-29
 
-2026-05-26
+## Last Session
 
-## What shipped this session
+Generated devtown's ARC42STORIES.MD from LAYER-LOG.md + DESIGN.md, then used the application
+to find and fix gaps in the Arc42Stories spec itself. Main outcomes: tutorial language
+systematically removed from three parent docs; Chapter entries made lightweight with a new
+Layer × Chapter matrix; spec gained definition of done, migration guide, and expanded
+"Why this exists" section; java-update-design skill updated to route to ARC42STORIES.MD §10
+when that file exists; tutorial-strategy.md archived.
 
-**XS queue cleared:**
-- `testCoverage_doesNotFire_whenAlreadyDone` and `performanceAnalysis_doesNotFire_whenAlreadyDone` added to `PrReviewBindingConditionTest.ParallelChecks` — symmetric counterparts to the existing styleCheck guard; all three share the same `codeAnalysis.complete` gate. Merged via PR#51.
-- PR#47 closed (was OPEN+CONFLICTING post-squash, not already merged as the handoff incorrectly stated). Squash rebase made the pre-squash PR unmergeable.
+## Immediate Next Step
 
-**Note:** issue #32 was auto-closed before the tests actually landed (squash skip). Verify via `gh issue view 32 --repo casehubio/devtown` if in doubt — both tests are now in main.
+Commit ARC42STORIES.MD and blog entry to workspace, then proceed with issue #52
+(Layer 3 qhorus messaging) — the actual code work on this branch hasn't started yet.
 
-## Immediate next step
-
-Start Layer 3: `work-start` for casehub-qhorus typed COMMAND/RESPONSE/DONE/DECLINE per reviewer agent interaction. No issue exists yet — create one before branching.
+```bash
+git -C /Users/mdproctor/claude/public/casehub/devtown add ARC42STORIES.MD blog/2026-05-29-mdp01-arc42stories-meets-reality.md blog/INDEX.md
+git -C /Users/mdproctor/claude/public/casehub/devtown commit -m "docs: add ARC42STORIES.MD and session blog entry 2026-05-29"
+```
 
 ## What's Left
 
-*None — queue clear.*
+- **Commit parent repo docs** (AGENTIC-HARNESS-GUIDE.md, arc42stories-spec.md, arc42stories-casehub-profile.md, tutorial-strategy.md archive) — edited in the parent repo this session; commit from the parent session, not here
+- **issue #52 — Layer 3 qhorus messaging** — no code written this session; branch is at init scaffold · M · High
 
 ## What's Next
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+| # | Description | Scale | Complexity | Notes |
+|---|---|---|---|---|
+| #52 | Layer 3 casehub-qhorus — typed COMMAND dispatch, DECLINE as formal scope boundary, commitment lifecycle | L | High | Current branch; no code yet; follow AML Layer 3 QhorusAmlInvestigator pattern |
+| — | Migrate other projects (AML, clinical, QuarkMind, life) to ARC42STORIES.MD | M | Med | At each project's next layer close; migration guide now in arc42stories-spec.md |
+| — | Cross-project coherence checker | M | High | Deferred until 2+ projects have ARC42STORIES.MDs |
 
-## Key references
+## References
 
-- Blog: `blog/2026-05-26-mdp01-after-the-squash.md`
-- Previous blog: `blog/2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md`
-- Stale workspace branches (all CLOSED, deletion eligible 2026-06-08 or earlier): `epic-pr-review-case`, `issue-30-hitl-human-approval-test`, `issue-32-s-xs-cleanup`, `issue-38-layer2-sla-escalation`, `issue-42-sla-breach-handler-wiring-test`
-- New closed branch (deletion eligible 2026-06-09): `issue-50-reland-missing-tests`
+- `ARC42STORIES.MD` — devtown reference architecture record (new this session; uncommitted)
+- `blog/2026-05-29-mdp01-arc42stories-meets-reality.md` — session narrative (uncommitted)
+- `../parent/docs/arc42stories-spec.md` — updated spec (needs commit from parent session)
+- `../parent/docs/arc42stories-casehub-profile.md` — updated profile (needs commit from parent session)
+- `../parent/docs/AGENTIC-HARNESS-GUIDE.md` — updated (needs commit from parent session)
+- `../parent/docs/archive/tutorial-strategy-2026-05.md` — archived planning doc
+- Garden entry `GE-20260529-4518ac` — Mermaid sequence diagram lexer gotchas (pushed)
