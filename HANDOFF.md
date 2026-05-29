@@ -1,78 +1,43 @@
-# Handoff — Arc42Stories and SIAL Design
+# HANDOFF — 2026-05-29
 
-2026-05-28
+## Last Session
 
-## What shipped this session
+Generated devtown's ARC42STORIES.MD from LAYER-LOG.md + DESIGN.md, then used the application
+to find and fix gaps in the Arc42Stories spec itself. Main outcomes: tutorial language
+systematically removed from three parent docs; Chapter entries made lightweight with a new
+Layer × Chapter matrix; spec gained definition of done, migration guide, and expanded
+"Why this exists" section; java-update-design skill updated to route to ARC42STORIES.MD §10
+when that file exists; tutorial-strategy.md archived.
 
-Session pivoted entirely from Layer 3 implementation to methodology. The main output is
-**Arc42Stories** — an extension of arc42 for LLM-driven projects — and a restructured
-devtown LAYER-LOG.md as the reference implementation.
+## Immediate Next Step
 
-**casehub-parent commits (pushed to main):**
-- `arc42stories-spec.md` — universal Arc42Stories specification (candidate for Hortora)
-- `arc42stories-casehub-profile.md` — CaseHub instantiation (Foundation Layer taxonomy,
-  artifact schema with DT/AML/CLI prefixes, devtown example Journey and Chapters)
-- `AGENTIC-HARNESS-GUIDE.md` — production-first anti-patterns, vertical slice framing,
-  three-document design system (ARC42STORIES.MD + JOURNAL.md + HANDOFF.md)
-- `tutorial-strategy.md` — taxonomy (style guide / field tutorial / spot tutorial),
-  §2.2 vertical slice planning with minimal-delta sequencing, §7.5.0 devtown slice table
-- `ARCHITECTURE.md` — vertical slices added as application-tier pattern, stale "not chosen" section removed
-- `vertical-slice-planning.md` (SIAL protocol) — rewritten cleanly; dual-purpose framing
+Commit ARC42STORIES.MD and blog entry to workspace, then proceed with issue #52
+(Layer 3 qhorus messaging) — the actual code work on this branch hasn't started yet.
 
-**devtown workspace/project commits (on issue-52-layer3-qhorus-messaging):**
-- `LAYER-LOG.md` — restructured as SIAL: Vertical Slice Index (S1-S5), ordering rationale,
-  arch pattern headers on Layer 1 and Layer 5, Layer 2 skeleton in learning order
-- `DESIGN.md` — role header added explaining its place in the three-document system
-
-## Immediate next step
-
-**New session (separate):** generate `ARC42STORIES.MD` for devtown and do critical analysis.
-Prompt is ready — use it verbatim:
-
+```bash
+git -C /Users/mdproctor/claude/public/casehub/devtown add ARC42STORIES.MD blog/2026-05-29-mdp01-arc42stories-meets-reality.md blog/INDEX.md
+git -C /Users/mdproctor/claude/public/casehub/devtown commit -m "docs: add ARC42STORIES.MD and session blog entry 2026-05-29"
 ```
-Read these files in this order:
-1. /Users/mdproctor/claude/casehub/parent/docs/arc42stories-spec.md
-2. /Users/mdproctor/claude/casehub/parent/docs/arc42stories-casehub-profile.md
-3. /Users/mdproctor/claude/casehub/devtown/LAYER-LOG.md
-4. /Users/mdproctor/claude/public/casehub/devtown/DESIGN.md
-5. /Users/mdproctor/claude/casehub/parent/docs/ARCHITECTURE.md
-6. /Users/mdproctor/claude/casehub/devtown/docs/gastown-casehub-analysis-v2.md
-7. /Users/mdproctor/claude/casehub/devtown/docs/orchestration-advantages.md
-
-TASK 1: Generate ARC42STORIES.MD for devtown.
-Write to: /Users/mdproctor/claude/public/casehub/devtown/ARC42STORIES.MD
-Layers 1, 2 (skeleton), 5 have content. Layers 3,4,6 not built — mark 🔲.
-Include all three C4 views: Layer Architecture (C4Container), Chapter View
-(C4Component) per complete Chapter, Journey Map (Mermaid flowchart).
-Use DT-NNN prefix per CaseHub artifact schema.
-
-TASK 2: Critical analysis comparing ARC42STORIES.MD vs source docs.
-Write as ## Arc42Stories Self-Assessment at bottom of ARC42STORIES.MD.
-Assess: completeness, navigability, C4 diagram value, LLM replication,
-remaining gaps.
-
-Use Opus for this task.
-```
-
-**After that new session returns:** do mechanical reference updates (see What's Next).
 
 ## What's Left
 
-- issue-52-layer3-qhorus-messaging branch open — no Layer 3 implementation done.
-  Layer 3 design deferred; branch has docs-only commits. · M · Med
+- **Commit parent repo docs** (AGENTIC-HARNESS-GUIDE.md, arc42stories-spec.md, arc42stories-casehub-profile.md, tutorial-strategy.md archive) — edited in the parent repo this session; commit from the parent session, not here
+- **issue #52 — Layer 3 qhorus messaging** — no code written this session; branch is at init scaffold · M · High
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
-|---|-------------|-------|------------|-------|
-| mechanical | Update all references from LAYER-LOG.md → ARC42STORIES.MD: AGENTIC-HARNESS-GUIDE.md, vertical-slice-planning.md protocol, devtown CLAUDE.md, casehub-devtown.md deep-dive, issues aml#37 cli#40 lif#14 | M | Low | After new session generates ARC42STORIES.MD |
-| devtown#52 | Layer 3 qhorus implementation — still pending; branch is open | L | High | After mechanical updates settled |
-| parent blog | Blog entry for this session belongs in parent workspace, not devtown | S | Low | Separate session |
+|---|---|---|---|---|
+| #52 | Layer 3 casehub-qhorus — typed COMMAND dispatch, DECLINE as formal scope boundary, commitment lifecycle | L | High | Current branch; no code yet; follow AML Layer 3 QhorusAmlInvestigator pattern |
+| — | Migrate other projects (AML, clinical, QuarkMind, life) to ARC42STORIES.MD | M | Med | At each project's next layer close; migration guide now in arc42stories-spec.md |
+| — | Cross-project coherence checker | M | High | Deferred until 2+ projects have ARC42STORIES.MDs |
 
-## Key references
+## References
 
-- Arc42Stories spec: `../parent/docs/arc42stories-spec.md`
-- CaseHub profile: `../parent/docs/arc42stories-casehub-profile.md`
-- Devtown LAYER-LOG (restructured): `proj/LAYER-LOG.md`
-- Garden entry: GE-20260528-99941f ("vertical slice" / VSA naming collision)
-- Open branch: `issue-52-layer3-qhorus-messaging` (both repos)
+- `ARC42STORIES.MD` — devtown reference architecture record (new this session; uncommitted)
+- `blog/2026-05-29-mdp01-arc42stories-meets-reality.md` — session narrative (uncommitted)
+- `../parent/docs/arc42stories-spec.md` — updated spec (needs commit from parent session)
+- `../parent/docs/arc42stories-casehub-profile.md` — updated profile (needs commit from parent session)
+- `../parent/docs/AGENTIC-HARNESS-GUIDE.md` — updated (needs commit from parent session)
+- `../parent/docs/archive/tutorial-strategy-2026-05.md` — archived planning doc
+- Garden entry `GE-20260529-4518ac` — Mermaid sequence diagram lexer gotchas (pushed)
