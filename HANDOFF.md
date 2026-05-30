@@ -18,17 +18,12 @@ No issue exists yet — create one, then run brainstorming. Layer 4 uses the
 `/observe` channel created by Layer 3 as its primary event sink. Check
 foundation gate: engine#326 (failure goal support) is still open.
 
-## What's Left
-
-- **casehubio/parent#105** — sync layer table in `docs/repos/casehub-devtown.md`
-  (Layer 3 now complete; peer repo issue filed this session) · XS · Low
-
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Layer 4 — tamper-evident ledger audit trail (new issue needed) | L | Med | Uses /observe channel from L3; engine#326 still open |
-| — | Trust routing P1.3 | M | High | Gates on engine#336, engine#337, qhorus#199 |
+| — | Layer 4 — tamper-evident ledger audit trail (new issue needed) | L | Med | Uses /observe channel from L3 |
+| — | Trust routing P1.3 (new issue needed) | M | High | All foundation gates closed (engine#336, engine#337, qhorus#199) |
 | #43 | CaseMemoryStore for contributor and review pattern context | M | Med | |
 
 ## References
