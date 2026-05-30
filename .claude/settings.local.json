@@ -118,7 +118,12 @@
       "Bash(mkdir -p schema-inspect)",
       "Bash(javap /tmp/schema-inspect/io/casehub/model/Metadata.class)",
       "Bash(javap io/casehub/model/Metadata.class)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(gh repo *)",
+      "Skill(project-init)",
+      "WebSearch",
+      "mcp__intellij__search_in_files_by_text",
+      "Skill(git-squash)"
     ]
   }
 }
