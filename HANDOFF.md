@@ -1,43 +1,36 @@
-# HANDOFF — 2026-05-29
+# HANDOFF — 2026-05-30
 
 ## Last Session
 
-Generated devtown's ARC42STORIES.MD from LAYER-LOG.md + DESIGN.md, then used the application
-to find and fix gaps in the Arc42Stories spec itself. Main outcomes: tutorial language
-systematically removed from three parent docs; Chapter entries made lightweight with a new
-Layer × Chapter matrix; spec gained definition of done, migration guide, and expanded
-"Why this exists" section; java-update-design skill updated to route to ARC42STORIES.MD §10
-when that file exists; tutorial-strategy.md archived.
+Designed and shipped Layer 3 (casehub-qhorus typed messaging) for devtown issue #52. Full
+cycle: brainstorming (channel strategy analysis), spec (reviewed with 4 blockers resolved),
+subagent-driven implementation (6 tasks, 19 tests green), work-end (spec promoted,
+blog published, squashed 15→4 commits, pushed to casehubio/devtown main). Branch closed.
 
 ## Immediate Next Step
 
-Commit ARC42STORIES.MD and blog entry to workspace, then proceed with issue #52
-(Layer 3 qhorus messaging) — the actual code work on this branch hasn't started yet.
-
-```bash
-git -C /Users/mdproctor/claude/public/casehub/devtown add ARC42STORIES.MD blog/2026-05-29-mdp01-arc42stories-meets-reality.md blog/INDEX.md
-git -C /Users/mdproctor/claude/public/casehub/devtown commit -m "docs: add ARC42STORIES.MD and session blog entry 2026-05-29"
-```
+Write the LAYER-LOG.md Layer 3 entry — promised in the issue #52 close comment and is the
+natural next thing before starting any new issue. It's an XS task: one section documenting
+what Layer 3 built, the non-obvious wiring (CDI displacement ordering, shared /work channel
+per PR, commitment via `target=capability`), and the AML divergence (handle(PrPayload) not
+handle(Message)).
 
 ## What's Left
 
-- **Commit parent repo docs** (AGENTIC-HARNESS-GUIDE.md, arc42stories-spec.md, arc42stories-casehub-profile.md, tutorial-strategy.md archive) — edited in the parent repo this session; commit from the parent session, not here
-- **issue #52 — Layer 3 qhorus messaging** — no code written this session; branch is at init scaffold · M · High
+- **LAYER-LOG.md Layer 3 entry** — promised at #52 close · XS · Low
+- **ARC42STORIES.MD §10 update** — Layer 3 shipped; architecture record should reflect it · S · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
-|---|---|---|---|---|
-| #52 | Layer 3 casehub-qhorus — typed COMMAND dispatch, DECLINE as formal scope boundary, commitment lifecycle | L | High | Current branch; no code yet; follow AML Layer 3 QhorusAmlInvestigator pattern |
-| — | Migrate other projects (AML, clinical, QuarkMind, life) to ARC42STORIES.MD | M | Med | At each project's next layer close; migration guide now in arc42stories-spec.md |
-| — | Cross-project coherence checker | M | High | Deferred until 2+ projects have ARC42STORIES.MDs |
+|---|-------------|-------|------------|-------|
+| #41 | Layer 2 — casehub-work SLA gate per specialist reviewer | L | High | Check if branch already exists |
+| — | Layer 4 — tamper-evident ledger audit trail (new issue needed) | L | Med | Layer 4 uses /observe channel established by Layer 3 |
+| — | Trust routing unblocked by qhorus#199 fix | M | High | P1.3 gates on engine#336, engine#337, qhorus#199 |
 
 ## References
 
-- `ARC42STORIES.MD` — devtown reference architecture record (new this session; uncommitted)
-- `blog/2026-05-29-mdp01-arc42stories-meets-reality.md` — session narrative (uncommitted)
-- `../parent/docs/arc42stories-spec.md` — updated spec (needs commit from parent session)
-- `../parent/docs/arc42stories-casehub-profile.md` — updated profile (needs commit from parent session)
-- `../parent/docs/AGENTIC-HARNESS-GUIDE.md` — updated (needs commit from parent session)
-- `../parent/docs/archive/tutorial-strategy-2026-05.md` — archived planning doc
-- Garden entry `GE-20260529-4518ac` — Mermaid sequence diagram lexer gotchas (pushed)
+- `blog/2026-05-29-mdp02-layer3-obligation-explicit.md` — Layer 3 session narrative
+- `plans/attic/issue-52-layer3-qhorus-messaging/2026-05-29-layer3-qhorus-messaging.md` — implementation plan (archived)
+- Garden: GE-20260529-d3d4b6 — MessageDispatch builder API docs mismatch
+- Protocol: PP-20260529-10866a — tutorial-layer-cdi-displacement
