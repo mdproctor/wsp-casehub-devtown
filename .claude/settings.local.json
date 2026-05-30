@@ -118,7 +118,9 @@
       "Bash(mkdir -p schema-inspect)",
       "Bash(javap /tmp/schema-inspect/io/casehub/model/Metadata.class)",
       "Bash(javap io/casehub/model/Metadata.class)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Skill(project-init)",
+      "Skill(git-squash)"
     ]
   }
 }
