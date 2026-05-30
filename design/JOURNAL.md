@@ -1,1 +1,1 @@
-# Design Journal — issue-41-layer2-sla-breach-policy
+# Design Journal — issue-57-layer6-trust-routing
