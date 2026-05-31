@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-05-31-mdp02-xs-s-cleanup-trust-gate.md](2026-05-31-mdp02-xs-s-cleanup-trust-gate.md) | 2026-05-31 | Seven issues closed (3 superseded, 1 dead-end, 1 deferred); DoublePreference moved to domain.preferences; trust gate wired (devtown#58) |
 | [2026-05-31-mdp01-layer6-trust-routing.md](2026-05-31-mdp01-layer6-trust-routing.md) | 2026-05-31 | Layer 6 ships: trust-weighted reviewer routing, FALSE_POSITIVE_RATE → PRECISION, casehub-memory consumer requirements filed |
 | [2026-05-30-mdp01-from-tutorial-to-architecture.md](2026-05-30-mdp01-from-tutorial-to-architecture.md) | 2026-05-30 | LAYER-LOG Layer 3 entry written; ARC42STORIES.MD Chapter 3 complete; tutorial/showcase framing stripped per Arc42Stories direction |
 | [2026-05-29-mdp02-layer3-obligation-explicit.md](2026-05-29-mdp02-layer3-obligation-explicit.md) | 2026-05-29 | Layer 3: COMMAND/DONE/DECLINE via casehub-qhorus; shared channel per PR; CDI displacement for tutorial layers; DECLINE as first-class outcome |
