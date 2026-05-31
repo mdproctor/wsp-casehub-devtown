@@ -1,1 +1,1 @@
-# Design Journal — issue-41-layer2-sla-breach-policy
+# Design Journal — issue-59-s-xs-cleanup
