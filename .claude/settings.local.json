@@ -120,7 +120,15 @@
       "Bash(javap io/casehub/model/Metadata.class)",
       "Bash(gh pr *)",
       "Skill(project-init)",
-      "Skill(git-squash)"
+      "Skill(git-squash)",
+      "Bash(xargs '-I{}' python3 -c ' *)",
+      "mcp__intellij__search_symbol",
+      "mcp__intellij__read_file",
+      "Bash(xargs -I {} sh -c 'jar tf \"{}\" 2>/dev/null | grep -l \"TrustGateService\" && echo \"{}\"')",
+      "Bash(JAVA_HOME=$\\(/usr/libexec/java_home -v 26\\) jar tf /Users/mdproctor/.m2/repository/io/casehub/casehub-ledger/0.2-SNAPSHOT/casehub-ledger-0.2-SNAPSHOT.jar)",
+      "Bash(JAVA_HOME=$\\(/usr/libexec/java_home -v 26\\) jar tf /Users/mdproctor/.m2/repository/io/casehub/casehub-engine-ledger/0.2-SNAPSHOT/casehub-engine-ledger-0.2-SNAPSHOT.jar)",
+      "mcp__intellij__search_in_files_by_text",
+      "mcp__intellij__search_in_files_by_regex"
     ]
   }
 }
