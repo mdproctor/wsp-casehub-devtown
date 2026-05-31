@@ -123,7 +123,8 @@
       "Skill(project-init)",
       "WebSearch",
       "mcp__intellij__search_in_files_by_text",
-      "Skill(git-squash)"
+      "Skill(git-squash)",
+      "Skill(write-content)"
     ]
   }
 }
