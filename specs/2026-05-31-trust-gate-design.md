@@ -114,10 +114,12 @@ Consistent with `DevtownTrustRoutingPolicyProvider` placement.
 
 Use `@Alternative` static inner classes for test doubles per `spi-testing-alternative-inner-classes.md`.
 
-| Scenario | Setup | Expected |
-|----------|-------|----------|
-| Gate disabled | threshold pref = null | permits (null guard → 0.0 → disabled) |
-| Gate disabled explicit | threshold = 0.0 | permits |
+Both rows below exercise the same branch (step 3: `floor <= 0.0 → true`) but via distinct code paths — the null guard is a separate path from an explicit 0.0 preference.
+
+| Scenario | Setup path | Expected |
+|----------|------------|----------|
+| Gate disabled (null pref) | `prefs.get()` returns null → null guard → floor = 0.0 | permits |
+| Gate disabled (explicit 0.0) | `prefs.get()` returns `DoublePreference.of(0.0)` → floor = 0.0 | permits |
 | Bootstrap agent | threshold = 0.30, currentScore = empty | permits |
 | Score above floor | threshold = 0.30, score = 0.50 | permits |
 | Score at floor | threshold = 0.30, score = 0.30 | permits |
@@ -135,7 +137,7 @@ Use `@Alternative` static inner classes for test doubles per `spi-testing-altern
 
 3. **Below-threshold non-bootstrap path**: insert an `ActorTrustScore` row for a test agent with global score 0.15, threshold 0.30 configured → call `permits()` → must return false.
 
-4. **Global score assumption check**: insert an `ActorTrustScore` row for capability `security-review` only (no global row) → call `currentScore(actorId)` directly → verify it returns empty (confirming the gate exempts agents with only capability scores but no global aggregate, and revealing any assumption about global score population being automatic).
+4. **Global score assumption check**: insert an `ActorTrustScore` row for capability `security-review` only (no global row) → call `trustGateService.currentScore(actorId)` directly (inject `TrustGateService` as a separate `@Inject` field alongside the policy) → verify it returns empty (confirming the gate exempts agents with only capability scores but no global aggregate, and revealing any assumption about global score population being automatic). `TrustGateService` is `@ApplicationScoped` and resolves cleanly from the test context.
 
 ## Acceptance criteria
 
