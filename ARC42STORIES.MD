@@ -172,7 +172,7 @@ Each layer adds an `@ApplicationScoped` implementation in `devtown-review`. CDI 
 
 ### Layer Architecture View
 
-Current delivery state — Layers 1, 2, 5. Layers 3, 4, 6 added as Chapters C3, C4, C5 ship.
+Current delivery state — Layers 1, 2, 3, 5, 6. Layer 4 (casehub-ledger) added when Chapter C4 ships.
 
 ```mermaid
 C4Container
@@ -182,23 +182,33 @@ C4Container
   Person(reviewer, "Human Reviewer", "Claims SLA-bounded task")
 
   Container_Boundary(b1, "Layer: Domain Baseline (L1)") {
-    Container(vocab, "Typed Vocabulary", "Pure Java", "ReviewDomain · AgentQualification · HumanDecision · HumanOversight · DevtownTrustDimension")
+    Container(vocab, "Typed Vocabulary", "Pure Java", "ReviewDomain · AgentQualification · HumanDecision · HumanOversight · DevtownTrustDimension · TrustRoutingPolicyKeys")
     Container(registry, "CapabilityRegistry SPI + DevtownCapabilityRegistry", "Pure Java", "10 capabilities · 4 routing policies with trust thresholds")
-    Container(port, "PrReviewApplicationService", "Java port (review module)", "CDI displacement boundary — implemented by L1 naive, displaced by L5")
-    Container(baseline, "PrReviewService @DefaultBean", "Quarkus CDI (app module)", "Naive baseline — direct stub calls; 5 documented accountability gaps")
+    Container(port, "PrReviewApplicationService", "Java port (review module)", "CDI displacement boundary — 3 implementations across L1/L3/L5")
+    Container(baseline, "PrReviewService @DefaultBean", "Quarkus CDI (app module)", "Naive baseline — direct stub calls; displaced by L3 @Priority(1) or L5 @Priority(2)")
     Container(rest, "PrReviewResource", "JAX-RS (app module)", "POST /api/reviews — thin dispatcher; auth-retrofit ready")
   }
 
   Container_Boundary(b2, "Layer: casehub-work (L2)") {
     Container(workitem, "WorkItem + claimDeadline", "casehub-work", "SLA-bounded human review task with escalation policy")
     Container(policy, "SlaBreachPolicy SPI + DefaultSlaBreachPolicy", "casehub-work-api / devtown-domain", "Sealed BreachDecision: Fail · EscalateTo · Extend · Chained")
-    Container(bridge, "HumanApprovalLifecycleHandler", "Quarkus CDI (app module)", "WorkItemLifecycleEvent → PlanItem bridge")
+    Container(breach_h, "SlaBreachHandler", "Quarkus CDI (app module)", "SlaBreachEvent observer — signals case context on Fail via caseHub.signal()")
+  }
+
+  Container_Boundary(b3, "Layer: casehub-qhorus (L3)") {
+    Container(qhorus_svc, "QhorusPrReviewService @Alternative @Priority(1)", "Quarkus CDI (app module)", "CDI-inactive in full build (Priority 1 < L5 Priority 2); injectable by concrete type in tests")
+    Container(reviewer_port, "ReviewerAgent SPI + stubs", "Java port (review module) + Quarkus CDI (app module)", "Driven port: capability() + handle(PrPayload) · stubs: SecurityReviewAgent · ArchitectureReviewAgent · TestCoverageReviewAgent")
   }
 
   Container_Boundary(b5, "Layer: casehub-engine (L5)") {
     Container(yaml, "pr-review.yaml CasePlanModel", "YAML / CMMN (review module resources)", "9 bindings · 3 goals · 9 capabilities — content-driven routing")
     Container(casehub, "PrReviewCaseHub", "YamlCaseHub (app module)", "Loads CasePlanModel from review module classpath")
-    Container(caseservice, "PrReviewCaseService @ApplicationScoped", "Quarkus CDI (app module)", "Displaces @DefaultBean baseline; opens CaseInstance per review")
+    Container(caseservice, "PrReviewCaseService @Alternative @Priority(2)", "Quarkus CDI (app module)", "ACTIVE in full build — displaces @DefaultBean baseline and L3; opens CaseInstance per review")
+  }
+
+  Container_Boundary(b6, "Layer: Trust Routing (L6)") {
+    Container(trust_provider, "DevtownTrustRoutingPolicyProvider", "Quarkus CDI (app module)", "Displaces DefaultTrustRoutingPolicyProvider @DefaultBean — reads threshold/minObs/margin from registry; blendFactor/floors from YAML")
+    Container(trust_gate, "DevtownObligorTrustPolicy", "Quarkus CDI (app module)", "Global trust floor 0.30; bootstrap exemption: no observations → permit; score < 0.30 → refuse")
   }
 
   Rel(developer, rest, "POST /api/reviews", "HTTP")
@@ -206,8 +216,9 @@ C4Container
   Rel(caseservice, yaml, "opens case using")
   Rel(caseservice, workitem, "schedules human task via")
   Rel(workitem, policy, "calls on SLA breach")
-  Rel(bridge, caseservice, "signals PlanItem completion")
+  Rel(breach_h, casehub, "signals case context on Fail")
   Rel(casehub, yaml, "parses at startup")
+  Rel(qhorus_svc, reviewer_port, "dispatches COMMAND to")
 ```
 
 ### Three-Tier Module Structure
@@ -492,7 +503,7 @@ Human review assignments are now SLA-bounded — a reviewer who misses their dea
 | Layer | Delta |
 |---|---|
 | L1 Domain Baseline | Low — `DefaultSlaBreachPolicy` added to `devtown-domain` |
-| L2 casehub-work | Medium — `WorkItem`, `SlaBreachPolicy SPI`, `BreachDecision` sealed interface, `HumanApprovalLifecycleHandler` |
+| L2 casehub-work | Medium — `WorkItem`, `SlaBreachPolicy SPI`, `BreachDecision` sealed interface, `SlaBreachPolicyBean`, `SlaBreachHandler` |
 | L5 casehub-engine | Low — `HumanTaskTarget` wiring in `pr-review.yaml` |
 
 *C2 diagram retained — the L2↔L5 bridge (`WorkItemLifecycleEvent → PlanItem`) is the cross-layer interaction this Chapter introduces.*
@@ -505,7 +516,7 @@ C4Component
     Component(workitem, "🟢 WorkItem + claimDeadline", "casehub-work", "SLA-bounded human review task")
     Component(policy, "🟢 SlaBreachPolicy SPI", "casehub-work-api", "BreachDecision: Fail · EscalateTo · Extend · Chained")
     Component(breach, "🟢 DefaultSlaBreachPolicy", "Pure Java (devtown-domain)", "Multi-tier escalation via candidateGroups")
-    Component(handler, "🟢 HumanApprovalLifecycleHandler", "Quarkus CDI", "WorkItemLifecycleEvent to PlanItem bridge")
+    Component(handler, "🟢 SlaBreachHandler", "Quarkus CDI", "SlaBreachEvent observer — signals case context on Fail via caseHub.signal()")
   }
 
   Container_Boundary(b_engine, "Layer: casehub-engine (L5 — context)") {
