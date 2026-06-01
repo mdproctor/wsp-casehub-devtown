@@ -18,3 +18,4 @@
 | [2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md](2026-05-25-mdp03-the-merge-commit-that-wouldnt-squash.md) | 2026-05-25 | git-squash session — merge commit diagnosis, 40→17 commits |
 | [2026-05-26-mdp01-after-the-squash.md](2026-05-26-mdp01-after-the-squash.md) | 2026-05-26 | Squash debris: missing tests, CONFLICTING PR, symmetry restored |
 | [2026-05-29-mdp01-arc42stories-meets-reality.md](2026-05-29-mdp01-arc42stories-meets-reality.md) | 2026-05-29 | ARC42STORIES.MD generated for devtown; spec gaps fixed: lighter chapters, matrix, definition of done, migration guide; tutorial-strategy.md archived |
+| [2026-06-02-mdp01-the-class-that-doesnt-exist.md](2026-06-02-mdp01-the-class-that-doesnt-exist.md) | 2026-06-02 | ARC42STORIES.MD quality sweep — class names, stale §12 issues, CDI annotations, cross-repo migration issues |
