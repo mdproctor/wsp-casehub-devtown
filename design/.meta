@@ -1,0 +1,8 @@
+branch: issue-63-arc42stories-sync
+project-sha: 58b7266ab5c7c0e2ce5c83f595696c6d30e3875d
+date: 2026-06-01
+issue: 63
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
