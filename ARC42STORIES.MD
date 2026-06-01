@@ -140,24 +140,29 @@ CaseHub harness applications integrate foundation modules in a defined progressi
 | casehub-engine | `casehub-engine` | L5 | ✅ complete |
 | Trust routing | `casehub-ledger` (trust APIs) | L6 | 🚧 in progress |
 
-**Note on teaching order vs build order:** Layer 5 (casehub-engine) was built before Layers 2–4 because the CasePlanModel adaptive routing was the architectural priority. The layer ordering above is the *reading* order — the sequence a developer follows to understand how the system was assembled. LAYER-LOG.md entries follow reading order; build order is reflected in the blog entries.
+**Note on teaching order vs build order:** Layer 5 (casehub-engine) was built before Layers 2–4 because the CasePlanModel adaptive routing was the architectural priority. The layer ordering above is the *reading* order — the sequence a developer follows to understand how the system was assembled. `ARC42STORIES.MD §9.4` entries follow reading order; build order is reflected in the blog entries.
 
 ### `@DefaultBean` CDI Displacement — the Teaching Pattern
 
-Devtown's progressive layer integration is mechanised through CDI displacement:
+Devtown's progressive layer integration is mechanised through CDI displacement. The full three-level chain as it stands today:
 
 ```java
 // Layer 1: always present, never deleted
 @ApplicationScoped
-@DefaultBean  // displaced by any @ApplicationScoped impl without @DefaultBean
+@DefaultBean  // displaced by any @Alternative @Priority(N) impl
 public class PrReviewService implements PrReviewApplicationService { ... }
 
-// Layer 5: displaces the above — no explicit CDI configuration required
-@ApplicationScoped  // no @DefaultBean
+// Layer 3: present in all builds; CDI-inactive when L5 is present (Priority 1 < 2)
+// Injectable by concrete type in tests without a test profile
+@ApplicationScoped @Alternative @Priority(1)
+public class QhorusPrReviewService implements PrReviewApplicationService { ... }
+
+// Layer 5: ACTIVE in full build — wins CDI selection at Priority 2
+@ApplicationScoped @Alternative @Priority(2)
 public class PrReviewCaseService implements PrReviewApplicationService { ... }
 ```
 
-Each layer adds an `@ApplicationScoped` implementation in `devtown-review`. CDI priority rules mean the newer implementation wins; the baseline remains in the build but is inactive. No code is deleted across layers. This means each layer is a coherent, deployable state — remove higher-layer JARs and the previous layer's service takes over. No code is deleted; the baseline remains a legitimate fallback in production.
+All three implementations live in `devtown-app`. No code is deleted across layers — remove the Layer 5 JAR and Layer 3 becomes active; remove both and the `@DefaultBean` baseline takes over. Each layer is a coherent, independently deployable state. Layer 3 required adding `@Alternative @Priority(N)` to both competing beans — `@Priority` alone does not resolve CDI ambiguity without `@Alternative`.
 
 ### Chapter Sequencing Rationale (summary — full rationale in §9.2)
 
@@ -226,20 +231,26 @@ C4Container
 ```
 devtown-domain/   — pure Java; zero Quarkus, zero JPA
   domain/         vocabulary types + CapabilityRegistry SPI + default impl + RoutingPolicy
+                  domain/trust/   TrustRoutingPolicyKeys + TrustGatePreferenceKeys
+                  domain/sla/     SlaPreferenceKeys + DefaultSlaBreachPolicy + StringPreference
+                  domain/preferences/  DoublePreference + IntPreference
   (no CDI, no @ApplicationScoped)
 
 devtown-review/   — integration logic; casehub-engine-api, casehub-work-api deps
   review/         PrReviewApplicationService port + DTOs (PrPayload, PrReviewOutcome)
-                  Layer N implementations of the port (one per layer)
+                  ReviewerAgent SPI (driven port for qhorus agent dispatch)
                   pr-review.yaml CasePlanModel in resources/devtown/
                   Binding condition unit tests (no Quarkus required)
 
 devtown-app/      — CDI wiring only; runtime assembly
   app/            CapabilityRegistryBean (one-liner CDI wrapper)
-                  PrReviewService @DefaultBean (Layer 1 naive)
-                  PrReviewCaseHub + PrReviewCaseService (Layer 5)
+                  PrReviewService @DefaultBean (Layer 1 naive baseline)
+                  SlaBreachPolicyBean + SlaBreachHandler (Layer 2)
+                  QhorusPrReviewService @Alternative @Priority(1) + stub agents (Layer 3)
+                  PrReviewCaseHub + PrReviewCaseService @Alternative @Priority(2) (Layer 5)
+                  DevtownTrustRoutingPolicyProvider + DevtownObligorTrustPolicy (Layer 6)
                   PrReviewResource (REST adapter)
-                  SPI subclasses for engine/ledger persistence
+                  spi/  engine/ledger/work SPI subclasses (DevtownCaseInstanceRepository etc.)
 ```
 
 ---
@@ -651,21 +662,24 @@ None closed by L1 — this layer *establishes* the gaps that subsequent layers c
 `devtown-domain` has zero framework dependencies. All constants, SPI, and default implementation live there. `devtown-app` owns all CDI and Quarkus wiring. This split enforces the dependency rule — domain logic must be independent of the framework. If CDI annotations leak into `devtown-domain`, the clean architectural boundary breaks and the module structure no longer enforces the correct dependency direction.
 
 **`@DefaultBean` displacement pattern.**
-The baseline service carries `@DefaultBean`. Each subsequent layer adds an `@ApplicationScoped` implementation in `review/` without it — CDI displacement means the new one wins. Both classes coexist across all layers; no code is deleted.
+The baseline service carries `@DefaultBean`. Each subsequent layer adds a higher-priority implementation in `devtown-app` — CDI displacement means the new one wins. All classes coexist across all layers; no code is deleted. The pattern evolved in Layer 3 to use `@Alternative @Priority(N)`:
 
 ```java
 // app/PrReviewService.java — Layer 1, always present
-@ApplicationScoped
-@DefaultBean
+@ApplicationScoped @DefaultBean
 public class PrReviewService implements PrReviewApplicationService { ... }
 
-// review/PrReviewCaseService.java — Layer 5+, displaces the above
-@ApplicationScoped  // no @DefaultBean — takes CDI priority
+// app/QhorusPrReviewService.java — Layer 3, present; CDI-inactive in full build
+@ApplicationScoped @Alternative @Priority(1)
+public class QhorusPrReviewService implements PrReviewApplicationService { ... }
+
+// app/PrReviewCaseService.java — Layer 5, ACTIVE in full build
+@ApplicationScoped @Alternative @Priority(2)
 public class PrReviewCaseService implements PrReviewApplicationService { ... }
 ```
 
 **Port interface in `review/`, not `app/`.**
-`PrReviewApplicationService`, `PrPayload`, and `PrReviewOutcome` live in `devtown-review`. Layer 2+ implementations also live in `devtown-review` (they depend on `casehub-engine-api`, `casehub-work-api`, etc. — already in the `review` pom). If the port lived in `app/`, any `review`-module implementation would need to depend on `app`, creating a module dependency cycle. Caught in code review; fixed in `18b22e0`.
+`PrReviewApplicationService`, `PrPayload`, and `PrReviewOutcome` (the port and DTOs) live in `devtown-review`. The implementations (`PrReviewService`, `QhorusPrReviewService`, `PrReviewCaseService`) live in `devtown-app`. If the port lived in `app/`, any Tier-2 code that referenced it would create an `app` → `review` dependency inversion. Placing the port in `review/` allows both tiers to depend on it without a cycle. Caught in code review; fixed in `18b22e0`.
 
 **`CapabilityRegistry` SPI as vocabulary/registry SPI, not no-op.**
 Platform protocol distinguishes operational no-op SPIs (empty default) from vocabulary/registry SPIs (populated default). `DevtownCapabilityRegistry` is the latter — the default is a fully populated implementation. `CapabilityRegistryBean` is a one-liner `@ApplicationScoped` subclass that promotes it to CDI without any logic duplication.
@@ -684,7 +698,7 @@ Initially written as a concrete method in `DevtownCapabilityRegistry` calling th
 
 #### Pattern introduced
 
-**`@DefaultBean` CDI displacement** — each layer adds a higher-priority `@ApplicationScoped` implementation in `devtown-review` that displaces the baseline without deleting it. The baseline remains in the build across all layers.
+**`@DefaultBean` CDI displacement** — each layer adds a higher-priority implementation in `devtown-app` that displaces the baseline without deleting it. The baseline remains in the build across all layers. Layer 3 evolved the pattern to use `@Alternative @Priority(N)` to support multiple competing implementations — see Layer casehub-qhorus §9.4 Key wiring for the full three-level chain.
 
 #### Pattern anchor
 
@@ -998,7 +1012,7 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
 
 - `review/src/main/resources/devtown/pr-review.yaml` — YAML CasePlanModel: 9 bindings (4 groups), 3 goals, 9 capabilities
 - `app/src/main/java/io/casehub/devtown/app/PrReviewCaseHub.java` — `@ApplicationScoped extends YamlCaseHub("devtown/pr-review.yaml")`
-- `app/src/main/java/io/casehub/devtown/app/PrReviewCaseService.java` — `@ApplicationScoped` (no `@DefaultBean`); displaces `PrReviewService`
+- `app/src/main/java/io/casehub/devtown/app/PrReviewCaseService.java` — `@ApplicationScoped @Alternative @Priority(2)`; wins CDI selection in the full build; annotation updated when Layer 3 introduced `QhorusPrReviewService @Priority(1)` (commit `c7fbbff`)
 - `review/src/test/java/io/casehub/devtown/review/PrReviewCaseDefinition.java` — fluent DSL factory for binding condition unit tests
 - `review/src/test/java/io/casehub/devtown/review/MapCaseContext.java` — `CaseContext` test helper backed by `Map<String,Object>`
 - `review/src/test/java/io/casehub/devtown/review/PrReviewBindingConditionTest.java` — 28 pure unit tests for all 9 binding conditions; no Quarkus required
@@ -1009,7 +1023,7 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
 
 **YAML lives in `review/`, wired in `app/`.** `pr-review.yaml` lives in `review/src/main/resources/devtown/` — Quarkus classloader picks it up from the review module JAR at test time; no copy to `app/` needed. `PrReviewCaseHub` and `PrReviewCaseService` live in `app/` — consistent with the three-tier module protocol: all CDI wiring in Tier 3.
 
-**`@DefaultBean` displacement.** `PrReviewCaseService @ApplicationScoped` (no `@DefaultBean`) displaces `PrReviewService @DefaultBean`. Both remain in the build; Layer 1 is never deleted.
+**`@DefaultBean` displacement — now a three-level chain.** `PrReviewCaseService @Alternative @Priority(2)` wins CDI selection in the full build. `QhorusPrReviewService @Alternative @Priority(1)` (added in Layer 3) is present in all builds, CDI-inactive when L5 is present, injectable by concrete type in tests. `PrReviewService @DefaultBean` remains in the build and is never deleted. All three live in `devtown-app`.
 
 **Initial CaseContext.** `PrReviewCaseService.review(PrPayload)` builds `{ pr: {...}, policy: {...} }` from the payload and `@ConfigProperty`-injected policy values. `PreferenceProvider.resolve(scope).asMap()` is now available via `casehub-platform-config` (parent#26 closed) — Layer 5 migration to `PreferenceProvider` is tracked as technical debt.
 
@@ -1216,8 +1230,8 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 ### Port interface in `devtown-review`, not `devtown-app`
 
 **Date:** 2026-05-15
-**Context:** `PrReviewApplicationService`, `PrPayload`, `PrReviewOutcome` were initially in `devtown-app`. Layer 2 implementations (in `devtown-review`) need to implement the port. If the port is in `app`, `review` must depend on `app`, creating a cycle.
-**Decision:** Move port interface and DTOs to `devtown-review`. `devtown-app` depends on `devtown-review`; `devtown-review` implements the port without a cycle.
+**Context:** `PrReviewApplicationService`, `PrPayload`, `PrReviewOutcome` were initially in `devtown-app`. `devtown-review` (Tier 2) defines test helpers and binding conditions that reference these types. With the port in `app`, `review` must depend on `app`, creating a cycle.
+**Decision:** Move port interface and DTOs to `devtown-review`. `devtown-app` depends on `devtown-review`; port and DTOs are accessible to both tiers without a cycle. Implementations (`PrReviewService`, `QhorusPrReviewService`, `PrReviewCaseService`) remain in `devtown-app` — only the port definition moves.
 **Consequences:** This rule applies to all CaseHub harness applications — ports belong in the module that owns the domain boundary (Tier 2), not the runtime assembly (Tier 3). Fixed in `18b22e0`.
 **Source:** §9.4 Layer — Domain Baseline §Gotchas
 
@@ -1231,7 +1245,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 | SLA breach | A reviewer missing their deadline triggers automatic escalation within the policy-configured window | C2 delivers (casehub-work) |
 | Content-driven routing | A PR containing cryptographic code routes to security review without author labelling | C1 delivers (casehub-engine binding condition) |
 | Formal DECLINE | A specialist that cannot review the PR produces a structural DECLINE, not a timeout | ✅ C3 delivers — qhorus DECLINE speech act recorded with reason; C1 partial (DECLINED on blackboard) was the interim state |
-| Trust accuracy | Routing quality improves automatically as outcome attestations accumulate | C5 delivers |
+| Trust accuracy | Routing quality improves automatically as outcome attestations accumulate | C5 🚧 in progress — routing infrastructure wired (#57, #58); attestation accumulation pending Layer 4 |
 | Zero-framework domain | `devtown-domain` compiles with no Quarkus, no JPA, no reactive types | Enforced from Layer 1 |
 | EU AI Act Art.12 | Tamper-evident record of every agent decision and action | C4 delivers (Merkle chain) |
 
@@ -1269,7 +1283,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 | Term | Definition |
 |---|---|
 | `@DefaultBean` displacement | CDI pattern where a `@ApplicationScoped` implementation (no `@DefaultBean`) takes priority over a `@ApplicationScoped @DefaultBean` baseline. Used in devtown to layer implementations without deleting the baseline. |
-| Accountability gap | A formal requirement — compliance, audit, or user-visible — not met before a given layer ships. Documented in LAYER-LOG/ARC42STORIES so the reader knows what each layer is still missing. |
+| Accountability gap | A formal requirement — compliance, audit, or user-visible — not met before a given layer ships. Documented in `ARC42STORIES.MD §9.4` per layer entry so the reader knows what each layer is still missing. |
 | ACM (Adaptive Case Management) | A coordination paradigm where goals are declared and the system finds the path from accumulated context. Contrasts with workflow (fixed steps declared at design time). |
 | `AgentQualification` | Execution capability constants (`ci-runner`, `merge-executor`) — trust-scored on outcome reliability. |
 | Binding | A condition + capability pair in a CasePlanModel. When the condition is satisfied against the current CaseContext, the engine dispatches work to an agent with the specified capability. |
