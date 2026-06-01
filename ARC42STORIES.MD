@@ -1318,11 +1318,11 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 - The orchestration advantages (orchestration-advantages.md §1–7) are represented by §6 Runtime View (2 scenarios) and a reference to the full document. The 37% cycle time reduction claim and the LlmPlanningStrategy scenario are not reproduced — this is appropriate; §6 is orientation, not a duplicate.
 - Specific commit hashes (`10d0d42`, `ccbe944`, etc.) are in the git log and referenced via `git log --grep` — not embedded in the document. This is correct per the spec.
 
-**Genuinely missing from ARC42STORIES.MD:**
-- The four-phase trust maturity model (DT-006 in `docs/PROGRESS.md`) — referenced but not described. A reader cannot understand *why* bootstrap mode routing is correct without this.
-- The HITL wiring test details (devtown#30, `HumanApprovalLifecycleTest`) — mentioned as "resolved" but not shown as a specific gotcha entry under Layer 5. It should be a Gotcha with Symptom → Cause → Fix.
-- The Layer 2 `EscalateTo.deadline` distinction (controls COMPLETION_EXPIRED only, not CLAIM_EXPIRED) — in DESIGN.md review findings but not in §9.4 Layer casehub-work.
-- The five specific DESIGN.md review findings (e.g. `Path.of()` zero-arg throws → `Path.root()` needed) — these are now captured in the Layer casehub-work Gotchas section (devtown#63).
+**Genuinely missing from ARC42STORIES.MD at initial generation — status:**
+- ~~The four-phase trust maturity model (DT-006)~~ — ✅ now in §9.4 Layer Trust Routing "What it adds" (devtown#63)
+- ~~HITL wiring details as proper Gotcha~~ — ✅ now a Symptom → Cause → Fix gotcha under Layer 5 (devtown#63)
+- ~~`EscalateTo.deadline` COMPLETION vs CLAIM distinction~~ — ✅ now in §9.4 Layer casehub-work Gotchas (devtown#63)
+- ~~DESIGN.md review findings~~ — ✅ captured in Layer casehub-work Gotchas (devtown#63)
 
 ### 2. Navigability — easier or harder than the old documents?
 
@@ -1339,7 +1339,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 ### 3. C4 Diagrams — do they add genuine value?
 
-**Layer Architecture View (C4Container):** Yes. The horizontal stack in one diagram makes the `@DefaultBean` displacement pattern immediately visible — the reader can see `PrReviewService @DefaultBean` (L1) and `PrReviewCaseService @ApplicationScoped` (L5) in the same diagram, which makes the displacement obvious before reading the prose. The three `Container_Boundary` groups (L1, L2, L5) also make "which components belong to which layer" unambiguous.
+**Layer Architecture View (C4Container):** Yes. The horizontal stack makes the CDI displacement chain visible across five `Container_Boundary` groups (L1, L2, L3, L5, L6). The three-level priority chain (`PrReviewService @DefaultBean` ← `QhorusPrReviewService @Priority(1)` ← `PrReviewCaseService @Priority(2) ACTIVE`) is visible in a way that prose alone cannot convey. The L6 boundaries (trust provider + gate) show trust routing as a separate architectural concern, not a detail buried in the engine.
 
 **Accuracy concern:** The C4Container diagram omits some L1 vocabulary classes (`PrPayload`, `PrReviewOutcome`, `DevtownTrustDimension`) to keep it readable. These appear in the Layer entry's Key files instead. This is the right tradeoff for the diagram but a reader who looks for them in the diagram won't find them.
 
@@ -1355,30 +1355,35 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 **Layer 1 — yes, with high confidence.** The 12-step Pattern to replicate is domain-agnostic and complete. The Gotchas section covers the three failures that would otherwise take hours to diagnose. The Key wiring section explains the non-obvious decisions (why `@DefaultBean`, why port in `review/` not `app/`, why `isKnown()` is a default method). An LLM building a healthcare or AML equivalent from §9.4 Layer — Domain Baseline alone should succeed.
 
-**Layer 5 — yes, with one gap.** The 9-step Pattern to replicate covers the key steps. The two main Gotchas (`InMemoryLedgerEntryRepository` stub, merge binding short-circuit) are explicit enough to avoid. The gap: the full YAML structure isn't shown — an LLM would need to look at `pr-review.yaml` to understand the binding/goal syntax. The Pattern step "Declare goals, not steps" is the right principle but the YAML example from `orchestration-advantages.md §1` would make it actionable without referencing the file. This could be added.
+**Layer 5 — yes, with high confidence.** The 9-step Pattern to replicate covers the key steps. The three main Gotchas (CDI ledger stub, merge binding short-circuit, HITL bridge) are explicit enough to avoid. A YAML snippet in step 2 shows goal declaration, content-driven binding, and the merge short-circuit guard — an LLM can replicate the binding structure without reading `pr-review.yaml` (devtown#63).
 
-**Layer 2 — yes, with high confidence.** The layer entry is complete (devtown#63). Key wiring, gotchas (4), and a 9-step Pattern to replicate are present. An LLM building the SLA breach layer from ARC42STORIES.MD has the why (design decisions), the what (key files), and the how (replication steps).
+**Layer 2 — yes, with high confidence.** Complete entry (devtown#63): key files, key wiring, gotchas (4), and a 9-step Pattern to replicate are present.
 
-**Layers 3, 4, 6 — no content yet.** Expected — these layers haven't been built.
+**Layer 3 — yes, with high confidence.** Complete entry (devtown#63): CDI displacement chain with ordered priorities, channel creation pattern, commitment lifecycle, gotchas (3), 8-step Pattern to replicate.
+
+**Layer 6 — yes, for the routing infrastructure wired so far.** Trust gate and routing provider are documented with gotchas (3) and 10-step Pattern to replicate. The trust attestation accumulation path (Layer 4 dependency) is noted as pending — an LLM replicating Layer 6 understands it is wiring the infrastructure and will remain in Phase 0 until Layer 4 ships.
+
+**Layer 4 — no content yet.** Expected — Layer 4 (casehub-ledger) has not been built.
 
 ### 5. Gaps — what's still missing for a complete ARC42STORIES.MD?
 
-**Gaps to fill when Layer 2 closes (engine#326):**
-- Full Key files list for casehub-work layer
-- Gotchas section for Layer 2 (breach event `Chained` wrapper fix; `BreachExecutionFailed` escape; `EscalateTo.deadline` COMPLETION_EXPIRED vs CLAIM_EXPIRED distinction)
-- Pattern to replicate for Layer 2 (7–10 domain-agnostic steps)
-- Blog entry link for C2
+**Previously identified gaps — resolved in devtown#63:**
+- ✅ Layer 2 key files, gotchas (4), pattern to replicate — complete; engine#326 closed
+- ✅ Blog entry for C2 — no dedicated blog session; noted as such
+- ✅ DT-006 four-phase trust maturity model — now in §9.4 Layer Trust Routing
+- ✅ HITL gotcha under Layer 5 — proper Symptom → Cause → Fix format
+- ✅ YAML snippet in Layer 5 — added to Pattern to replicate step 2
+- ✅ Layer 3 (qhorus) and Layer 6 (trust routing) full §9.4 entries
+- ✅ Chapter entries C3 (complete) and C5 (partial, 🚧)
+- ✅ §12 Technical debt updated (failure goal pending, devtown#62, L4 dependency)
 
-**Gaps to fill now (don't require engine#326):**
-- DT-006 four-phase trust maturity model summarised in §11 Quality Requirements or in §9.4 Layer — Domain Baseline (currently just referenced)
-- HITL wiring resolution (devtown#30) promoted to a proper Gotcha entry under Layer 5
-- A YAML snippet in §9.4 Layer — casehub-engine showing the core binding structure (security routing + merge short-circuit) so an LLM replicating Layer 5 doesn't need to read `pr-review.yaml`
-- §3 C4Context diagram could reference the Gastown comparison more explicitly — the reader should understand that devtown is the CaseHub answer to Gastown before reading the layer entries
+**Remaining open gaps:**
+- §3 C4Context diagram — Gastown comparison reference evaluated; current framing (refs `docs/gastown-casehub-analysis-v2.md` in §3 boundary rules) is adequate; inline narrative would duplicate content already in those docs
+- Layer 4 (casehub-ledger) — pending build of C4; full §9.4 entry, §9.3 Chapter 4, §10 cross-cutting decisions (causedByEntryId chain, trust attestation schema), §12 updates
+- Layer 7 (Gastown comparison) — future work
 
-**Gaps to fill as Chapters 3–5 close:**
-- Full Chapter and Layer entries for C3/L3 (qhorus), C4/L4 (ledger), C5/L6 (trust routing)
-- §10 expanded with cross-cutting decisions from those layers (e.g., `causedByEntryId` chain design, trust attestation schema)
-- §12 Technical debt section updated as items close
+**Structural gap in the spec itself (observed during this generation):**
+- The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending*. Layer 2 was in this state pending engine#326; the resolved approach (skeleton with 🔲 markers + blocker note, then full entry written when unblocked) worked in practice. A future spec version could address this state explicitly.
 
 **Structural gap in the spec itself (observed during this generation):**
 - The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending*. Layer 2 was in this state pending engine#326; the resolved approach (skeleton with 🔲 markers + blocker note, then full entry written when unblocked) worked in practice. A future spec version could address this state explicitly.
