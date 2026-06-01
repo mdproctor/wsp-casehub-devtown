@@ -325,7 +325,7 @@ GitHub Packages:
   CI authentication: server-id: github + GITHUB_TOKEN
 ```
 
-**Known gap:** `quarkus:build` (production packaging) fails without claudony + persistence modules present — foundation CDI SPIs are unsatisfied standalone. All 100+ tests pass. Tracked: devtown#31.
+**Note:** `quarkus:build` standalone failure (foundation CDI SPIs unsatisfied without claudony + persistence modules) was tracked as devtown#31 — resolved.
 
 ---
 
@@ -1011,7 +1011,7 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
 
 **`@DefaultBean` displacement.** `PrReviewCaseService @ApplicationScoped` (no `@DefaultBean`) displaces `PrReviewService @DefaultBean`. Both remain in the build; Layer 1 is never deleted.
 
-**Initial CaseContext.** `PrReviewCaseService.review(PrPayload)` builds `{ pr: {...}, policy: {...} }` from the payload and `@ConfigProperty`-injected policy values. The `policy` subtree will be replaced by `PreferenceProvider.resolve(scope).asMap()` when casehub-platform-api ships (parent#26).
+**Initial CaseContext.** `PrReviewCaseService.review(PrPayload)` builds `{ pr: {...}, policy: {...} }` from the payload and `@ConfigProperty`-injected policy values. `PreferenceProvider.resolve(scope).asMap()` is now available via `casehub-platform-config` (parent#26 closed) — Layer 5 migration to `PreferenceProvider` is tracked as technical debt.
 
 **`casehub-engine` runtime in `app/pom.xml`.** Required for `YamlCaseHub` CDI injection of `CaseHubRuntime`. Without it, Quarkus fails to satisfy the injection point at startup.
 
@@ -1045,10 +1045,10 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
   - Cause: merge binding initially only checked `securityReview` approval without a guard for the non-security-sensitive case
   - Fix: add `when: (.securitySensitive == false) or (.securityReview.outcome == "APPROVED")` in both YAML and fluent DSL factory; test `fires_whenNotSecuritySensitiveAndNoSecurityReview` added
 
-- **`quarkus:build` fails — foundation CDI SPIs unsatisfied**
-  - Symptom: `mvn install` fails during `quarkus:build`; all 108+ tests pass
-  - Cause: engine CDI SPIs are unsatisfied without claudony + persistence modules; known foundation gap
-  - Status: tracked in devtown#31. Does not affect test coverage or local development.
+- **`quarkus:build` fails — foundation CDI SPIs unsatisfied (resolved devtown#31)**
+  - Symptom: `mvn install` fails during `quarkus:build`; all tests pass
+  - Cause: engine CDI SPIs are unsatisfied without claudony + persistence modules
+  - Fix: resolved in devtown#31. `quarkus:build` now succeeds.
 
 - **`HumanTaskTarget` binding fires but WorkItem completion does not signal the PlanItem**
   - Symptom: the `human-approval` binding fires and a WorkItem is created (visible in `WorkItemStore`), but completing the WorkItem via `WorkItemService` has no effect on the case — the PlanItem stays ACTIVE and the case hangs indefinitely
@@ -1090,7 +1090,7 @@ bindings:
 
 3. Extend `YamlCaseHub` in `{domain}-app/` with `@ApplicationScoped` — pass the classpath resource path to `super()`
 4. Create `@ApplicationScoped` (no `@DefaultBean`) service implementing the port interface in `{domain}-app/` — inject the CaseHub bean, build initial CaseContext from the domain payload + policy config, call `caseHub.startCase(initialContext)`
-5. Define scoped policy values via `@ConfigProperty` for now — replace with `PreferenceProvider.resolve(scope).asMap()` when casehub-platform-api ships (parent#26)
+5. Use `@ConfigProperty` for policy values initially; `PreferenceProvider.resolve(scope).asMap()` is now available via `casehub-platform-config` (parent#26 closed) — prefer this for production use
 6. Add `casehub-engine` (runtime) and `casehub-engine-testing` (test scope) to `{domain}-app/pom.xml`
 7. Add `InMemoryLedgerEntryRepository` stub to `{domain}-app/src/test/` if `casehub-ledger` runtime is on the classpath (see GE-20260519-e13b01)
 8. Write binding condition unit tests using a fluent DSL factory (+ `MapCaseContext` helper) in `{domain}-review/src/test/` — no Quarkus required; tests are fast and cover every binding predicate including short-circuit paths (especially: conditions that reference a key only present when a prior binding fires)
@@ -1243,8 +1243,6 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 | Risk | Mitigation | Tracked |
 |---|---|---|
-| `quarkus:build` fails standalone without full dependency stack | Test suite passes; production packaging deferred until claudony + persistence modules present | devtown#31 |
-| `Path.root()` not yet on platform main | `buildBreachContext()` uses `Path.root()` as null fallback; blocks `work#212` until platform publishes it | platform#24 |
 | Failure goal not yet declared in `pr-review.yaml` | SLA breach signals case context correctly but case stalls rather than terminating as FAILED — merge condition never satisfied, no formal FAILED outcome | ✅ engine#326 closed; YAML update still pending |
 | Bootstrap routing is identical to Gastown | By design — Phase 0. Routing quality improves as attestations accumulate. DT-006 documents the four-phase maturity model. | DT-006 |
 
@@ -1252,10 +1250,8 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 | Item | Description | Layer | Tracked |
 |---|---|---|---|
-| SLA breach from engine scope propagation | `HumanTaskTarget.scope` not propagated to WorkItem until engine#330 ships; `SlaBreachPolicy` enriches scope from `callerRef` independently | L2 | engine#330 |
-| `BreachDecision.Extend` not wired | `WorkItemService.extend()` needed | L2 | work#211 |
 | `kind: failure` goal missing from `pr-review.yaml` | Case stalls on SLA breach rather than terminating as FAILED — engine#326 closed but YAML not yet updated | L2 | — |
-| Policy config via `@ConfigProperty` | Temporary until `PreferenceProvider.resolve(scope).asMap()` ships | L5 | parent#26 |
+| Layer 5 policy config via `@ConfigProperty` | `PreferenceProvider` now available (parent#26 closed); Layer 5 `PrReviewCaseService` still uses `@ConfigProperty` — migrate to `PreferenceProvider.resolve(scope).asMap()` | L5 | ✅ parent#26 closed |
 | Concurrency throttling not yet built | `SpawnThrottle` in `ClaudonyConfig` (P1.1) — significant gap at scale vs Gastown | L5+ | — |
 | Recovery on stuck reviewer not yet built | `RecoveryPolicy` SPI (P1.2) — detection only, no automated recovery | L5+ | — |
 | Merge queue (batch-then-bisect) not yet built | Gastown parity feature; CasePlanModel approach designed, not started | L5+ | devtown#20 |
