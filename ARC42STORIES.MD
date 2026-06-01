@@ -135,10 +135,10 @@ CaseHub harness applications integrate foundation modules in a defined progressi
 |---|---|---|---|
 | Domain Baseline | *(none — pure Java)* | L1 | ✅ complete |
 | casehub-work | `casehub-work` | L2 | ✅ code complete |
-| casehub-qhorus | `casehub-qhorus` | L3 | 🔲 pending |
+| casehub-qhorus | `casehub-qhorus` | L3 | ✅ complete |
 | casehub-ledger | `casehub-ledger` | L4 | 🔲 pending |
 | casehub-engine | `casehub-engine` | L5 | ✅ complete |
-| Trust routing | `casehub-ledger` (trust APIs) | L6 | 🔲 pending |
+| Trust routing | `casehub-ledger` (trust APIs) | L6 | 🚧 in progress |
 
 **Note on teaching order vs build order:** Layer 5 (casehub-engine) was built before Layers 2–4 because the CasePlanModel adaptive routing was the architectural priority. The layer ordering above is the *reading* order — the sequence a developer follows to understand how the system was assembled. LAYER-LOG.md entries follow reading order; build order is reflected in the blog entries.
 
@@ -621,7 +621,7 @@ None closed by L1 — this layer *establishes* the gaps that subsequent layers c
 - `domain/src/main/java/io/casehub/devtown/domain/AgentQualification.java` — 2 execution capability constants
 - `domain/src/main/java/io/casehub/devtown/domain/HumanDecision.java` — formal PR accountability event constant
 - `domain/src/main/java/io/casehub/devtown/domain/HumanOversight.java` — routing uncertainty constant
-- `domain/src/main/java/io/casehub/devtown/domain/DevtownTrustDimension.java` — 3 quality dimension constants (`review-thoroughness`, `false-positive-rate`, `scope-calibration`)
+- `domain/src/main/java/io/casehub/devtown/domain/DevtownTrustDimension.java` — 3 quality dimension constants (`review-thoroughness`, `precision`, `scope-calibration`); `false-positive-rate` renamed to `precision` in devtown#57
 - `domain/src/main/java/io/casehub/devtown/domain/RoutingPolicy.java` — configurable routing policy record with `isBootstrap()` and `isBorderline()`
 - `domain/src/main/java/io/casehub/devtown/domain/DevtownCapabilityRegistry.java` — populated default implementation; 10 capabilities, 4 routing policies
 - `domain/src/main/java/io/casehub/devtown/domain/spi/CapabilityRegistry.java` — SPI: `capabilities()`, `policy()`, `isKnown()` default method
@@ -1280,7 +1280,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 - The four-phase trust maturity model (DT-006 in `docs/PROGRESS.md`) — referenced but not described. A reader cannot understand *why* bootstrap mode routing is correct without this.
 - The HITL wiring test details (devtown#30, `HumanApprovalLifecycleTest`) — mentioned as "resolved" but not shown as a specific gotcha entry under Layer 5. It should be a Gotcha with Symptom → Cause → Fix.
 - The Layer 2 `EscalateTo.deadline` distinction (controls COMPLETION_EXPIRED only, not CLAIM_EXPIRED) — in DESIGN.md review findings but not in §9.4 Layer casehub-work.
-- The five specific DESIGN.md review findings (six bullet items, e.g. `Path.of()` zero-arg throws → `Path.root()` needed) — these are at the right level of detail for a Gotchas section in Layer casehub-work, but Layer 2 is a skeleton pending engine#326.
+- The five specific DESIGN.md review findings (e.g. `Path.of()` zero-arg throws → `Path.root()` needed) — these are now captured in the Layer casehub-work Gotchas section (devtown#63).
 
 ### 2. Navigability — easier or harder than the old documents?
 
@@ -1315,7 +1315,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 **Layer 5 — yes, with one gap.** The 9-step Pattern to replicate covers the key steps. The two main Gotchas (`InMemoryLedgerEntryRepository` stub, merge binding short-circuit) are explicit enough to avoid. The gap: the full YAML structure isn't shown — an LLM would need to look at `pr-review.yaml` to understand the binding/goal syntax. The Pattern step "Declare goals, not steps" is the right principle but the YAML example from `orchestration-advantages.md §1` would make it actionable without referencing the file. This could be added.
 
-**Layer 2 — no, not yet.** The layer entry is a skeleton. The Key wiring section captures the design decisions from DESIGN.md (which is the most important content) but the Pattern to replicate is 🔲. An LLM building the SLA breach layer from ARC42STORIES.MD currently has the *why* (design decisions) but not the *how* (step-by-step replication guide).
+**Layer 2 — yes, with high confidence.** The layer entry is complete (devtown#63). Key wiring, gotchas (4), and a 9-step Pattern to replicate are present. An LLM building the SLA breach layer from ARC42STORIES.MD has the why (design decisions), the what (key files), and the how (replication steps).
 
 **Layers 3, 4, 6 — no content yet.** Expected — these layers haven't been built.
 
@@ -1339,4 +1339,4 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 - §12 Technical debt section updated as items close
 
 **Structural gap in the spec itself (observed during this generation):**
-- The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending* (Layer 2 here). The current approach (skeleton with 🔲 markers and a note about the blocker) is reasonable but not specified. A future spec version should address this state explicitly.
+- The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending*. Layer 2 was in this state pending engine#326; the resolved approach (skeleton with 🔲 markers + blocker note, then full entry written when unblocked) worked in practice. A future spec version could address this state explicitly.
