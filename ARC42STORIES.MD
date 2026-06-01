@@ -555,13 +555,23 @@ Known scope: `CaseLedgerEntry` per case state transition; production incident tr
 
 #### Chapter 5 — Trust-weighted Selection
 
-**Journey:** PR Review Coordination
-**Sequence:** 5 of 5
-**Status:** 🔲 pending (Layer 6 not yet started)
+**Journey:** PR Review Coordination | **Sequence:** 5 of 5 | **Status:** 🚧 in progress
+**Issues:** casehubio/devtown#57, casehubio/devtown#58, casehubio/devtown#62 | **Blog:** `blog/2026-05-31-mdp01-layer6-trust-routing.md`
 
-🔲 Full Chapter entry at C5 close. Blocked on Layer 6 (Trust routing) implementation. Requires C4 first — trust scoring reads `LedgerAttestation` records written by the ledger layer.
+**What this delivers (partial — routing infrastructure wired; attestation accumulation pending Layer 4)**
+Trust-weighted reviewer assignment is now active infrastructure: `TrustWeightedAgentStrategy` activates by classpath presence and displaces `LeastLoadedAgentStrategy`; `DevtownTrustRoutingPolicyProvider` supplies per-capability thresholds, blend factors, and quality floors from registry + YAML. A global trust floor of 0.30 with bootstrap exemption (`DevtownObligorTrustPolicy`) prevents unqualified agents from taking assignments once trust history exists. All agents remain in Phase 0 (BOOTSTRAP) — routing is availability-based until Layer 4 wires the attestation trail.
 
-Known scope: `TrustWeightedSelectionStrategy` replaces availability routing; post-merge outcome attestations feed trust model; routing quality improves automatically as attestations accumulate.
+**Accountability gaps closed (partial)**
+- No trust weighting (Layer 1 gap) → L6 `TrustWeightedAgentStrategy` wired; Phase 1+ trust routing activates automatically as `WorkerDecisionEntry` attestations accumulate (L4 dependency for the write path)
+
+**Open**
+- casehubio/devtown#62 — merge-executor bootstrap path to `HumanOversight` when no agent meets `minimumObservations`; trust gate cannot address this structurally (BOOTSTRAP agents are exempt by design)
+
+**Layer Impact**
+| Layer | Delta |
+|---|---|
+| L6 Trust Routing | Medium — `DevtownTrustRoutingPolicyProvider`, `trust-routing.yaml`, `DevtownObligorTrustPolicy`, 35 tests |
+| L1 Domain Baseline | Low — `TrustRoutingPolicyKeys` added; `DevtownTrustDimension.PRECISION` rename |
 
 ---
 
@@ -1004,9 +1014,103 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
 ### Layer — Trust Routing
 
 **Participates in chapters:** C5
-**Completed:** 🔲 pending
+**Architectural patterns:** Strategy (`@DefaultBean` displacement of `TrustRoutingPolicyProvider`); Registry (per-capability policy sourced from `DevtownCapabilityRegistry`); Hexagonal (YAML as configuration port; registry as domain policy source)
+**Key protocols:** `alternative-extension-patterns.md` (`@DefaultBean` displacement)
+**Design refs:** `docs/specs/2026-05-30-layer6-trust-routing-design.md`; `docs/specs/2026-05-31-trust-gate-design.md`
+**Issues:** casehubio/devtown#57, casehubio/devtown#58
+**Navigation:** `git log --grep="#57\|#58" --oneline`
+**Blog:** `blog/2026-05-31-mdp01-layer6-trust-routing.md`
+**Improvement refs:** 🔲
+**Completed:** devtown#57 2026-05-30 `33bca7d`; devtown#58 (trust gate) 2026-05-31 `a5f4dda`
 
-🔲 Full entry at C5 close. Will capture: `TrustWeightedSelectionStrategy` replacing availability routing; `LedgerAttestation` reading from Layer 4 outcomes; `RoutingPolicy` thresholds (defined at Layer 1, activated at this layer); four-phase trust maturity model (DT-006). Requires Layer 4 — trust scoring reads attestation data written by the ledger.
+#### What it adds
+
+Layer 6 activates trust-weighted reviewer selection. Before Layer 6, the engine dispatches reviewer agents by load alone — a first-time reviewer and a seasoned expert are indistinguishable. Layer 6 closes this by wiring `TrustWeightedAgentStrategy` from `casehub-engine-ledger` and supplying per-capability routing policies that reflect the risk profile of each review domain.
+
+`casehub-engine-ledger` activates by classpath presence — adding the dep to `app/pom.xml` is sufficient. The module ships `TrustWeightedAgentStrategy @Alternative @Priority(1)` (beats `LeastLoadedAgentStrategy @Priority(0)`) and `WorkerDecisionEventCapture` (writes `WorkerDecisionEntry` to the ledger on each worker completion — the input to `TrustScoreJob`).
+
+`DevtownObligorTrustPolicy @ApplicationScoped` (devtown#58) applies a global trust floor of 0.30 with bootstrap exemption: agents with no observations (`Optional.empty()` trust score) are always permitted — the platform rule is "never block on missing trust data." Agents with a trust score below 0.30 are refused. This prevents degraded routing once history exists without blocking new agents during Phase 0.
+
+Trust maturity is four-phase: Phase 0 (BOOTSTRAP, < `minimumObservations`) → Phase 1 (scoring active, above threshold) → Phase 2a (BORDERLINE, within `borderlineMargin` of threshold → `HumanOversight` triggered) → Phase 2b (EXCLUDED, below threshold). Routing quality improves automatically as `WorkerDecisionEntry` attestations accumulate. See DT-006 in `docs/PROGRESS.md`.
+
+#### Accountability gaps closed
+
+| Gap | What breaks without it | Closed by |
+|---|---|---|
+| No trust weighting | A novice and an expert receive identical routing priority | `TrustWeightedAgentStrategy` activates by classpath; per-capability thresholds apply as history accumulates |
+
+**Not closed in Layer 6:** trust attestation accumulation (requires Layer 4 ledger audit trail to write `WorkerDecisionEntry`); merge-executor bootstrap path to `HumanOversight` (devtown#62).
+
+#### Key files
+
+- `domain/src/main/java/io/casehub/devtown/domain/trust/TrustRoutingPolicyKeys.java` — preference keys for `blendFactor` and quality floors; `allFloorKeys()` returns a static `Map<dimension, PreferenceKey>` constant — adding a fourth trust dimension requires one change here, not two
+- `app/src/main/java/io/casehub/devtown/app/routing/DevtownTrustRoutingPolicyProvider.java` — `@ApplicationScoped` (no `@DefaultBean`); reads threshold/minObs/borderlineMargin from `DevtownCapabilityRegistry`; blendFactor and quality floors from YAML via `PreferenceProvider`; displaces `DefaultTrustRoutingPolicyProvider @DefaultBean`
+- `app/src/main/resources/casehub/devtown/trust-routing.yaml` — blendFactor and quality floors per capability scope (`casehub/devtown/trust-routing/{capability}`); threshold/minObs/borderlineMargin are in the registry — not duplicated here
+- `app/src/main/java/io/casehub/devtown/app/routing/DevtownObligorTrustPolicy.java` — `@ApplicationScoped`; 0.30 global floor; `Optional.empty()` (no observations) → bootstrap exemption; capability scope matching for per-capability floors (devtown#58)
+- `app/src/test/java/io/casehub/devtown/app/TrustRoutingActivationTest.java` — `@QuarkusTest`; verifies `TrustWeightedAgentStrategy` is active and at least one capability has a non-DEFAULT threshold
+- `app/src/test/java/io/casehub/devtown/app/TrustGateWiringTest.java` — `@QuarkusTest`; verifies `DevtownObligorTrustPolicy` wiring and floor/bootstrap behaviour (devtown#58)
+- `app/src/test/java/io/casehub/devtown/app/routing/DevtownTrustRoutingPolicyProviderTest.java` — unit tests; verifies per-capability policy values and `allFloorKeys()` map
+- `app/src/test/java/io/casehub/devtown/app/routing/DevtownObligorTrustPolicyTest.java` — unit tests; verifies 0.30 floor, bootstrap exemption, and refusal below threshold
+
+#### Key wiring
+
+**Single source of truth for base policy fields.** threshold, minimumObservations, and borderlineMargin come from `DevtownCapabilityRegistry.POLICIES` — only blendFactor and quality floors are in YAML. Prevents the three base fields from existing in two places and diverging.
+
+**`allFloorKeys()` pattern.** `TrustRoutingPolicyKeys.allFloorKeys()` returns a static constant `Map<dimension, PreferenceKey>`. `DevtownTrustRoutingPolicyProvider` iterates it to build quality floors. Adding a fourth trust dimension requires one change (add to `TrustRoutingPolicyKeys`) — not two (add key + add `addFloor` call).
+
+**Floor sentinel — `DoublePreference.of(0.0)` as non-null constructor value.** `MapPreferences.get()` returns `null` when a key is absent (does NOT fall back to `PreferenceKey.defaultValue`). Floor keys use `DoublePreference.of(0.0)` as the sentinel; `addFloor()` skips where `value == null || value.value() <= 0.0`.
+
+**`casehub-engine-ledger` is not a Quarkus extension.** It does not auto-register Flyway migrations. `quarkus.flyway.qhorus.locations` must include `classpath:db/engine-ledger/migration` explicitly. Engine-ledger ships V2000 (`case_ledger_entry`) and V2001 (`worker_decision_entry`) at that path.
+
+**Jandex split for test vs prod CDI discovery.** The prod `application.properties` uses `%prod.quarkus.index-dependency.engine-ledger.*`; the test properties use the unprefixed form. Without this split, `TrustWeightedAgentStrategy` is not discovered during `@QuarkusTest` augmentation.
+
+#### Architectural decisions
+
+**Why threshold/minObs/borderlineMargin stay in the registry, not YAML:** These three fields encode domain knowledge — `security-review` at 0.70 reflects a judgment that security mistakes reach production. Recording them at domain definition time (Layer 1 `DevtownCapabilityRegistry`) keeps them visible and reviewable independent of the trust infrastructure. blendFactor and quality floors are infrastructure tuning — they belong in YAML.
+
+**Why `PRECISION` not `FALSE_POSITIVE_RATE`:** Industry convention normalises all trust dimensions to higher = better. `false-positive-rate` as a raw rate inverts quality floor semantics silently — higher is worse. Stored as `precision = TP/(TP+FP)`, higher is fewer false positives. The rename was free: no production trust score data existed against the old name. All three devtown dimensions are now consistently higher = better.
+
+**Why `style-review` borderlineMargin = 0.0:** With `Math.abs(score - 0.50) <= 0.0`, the borderline zone is zero-width. Bayesian Beta trust scores are continuous floats — realising exactly 0.50 is not achievable in practice. This is documented rather than worked around; forcing a minimum margin would widen the borderline zone for style-review (the lowest-stakes capability) and increase escalation risk unnecessarily.
+
+**Why `RoutingPolicy.isBorderline()` is deprecated:** The domain method is one-sided (`score >= threshold && score < threshold + margin`). The engine's `TrustRoutingPolicy.isBorderline()` is symmetric (`Math.abs(score - threshold) <= margin`). The routing path uses `TrustRoutingPolicy` exclusively — the domain method is never called. Marked `@Deprecated` to avoid confusion.
+
+#### Pattern introduced
+
+**Registry-YAML split** — base policy fields (threshold, minimumObservations, borderlineMargin) live in the domain registry as typed constants; infrastructure tuning fields (blendFactor, quality floors) live in YAML and are loaded at startup via `PreferenceProvider`. The registry is the single source of truth for domain policy; YAML is the operational configuration surface.
+
+#### Pattern anchor
+
+`app/DevtownTrustRoutingPolicyProvider.java` (reads registry + YAML and builds the composite policy) + `app/resources/casehub/devtown/trust-routing.yaml` (the YAML configuration surface).
+
+#### Gotchas
+
+- **`casehub-engine-ledger` is not a Quarkus extension — Flyway migrations are not auto-registered**
+  - Symptom: startup warning or runtime failure — `WorkerDecisionEntry` table missing; `TrustScoreJob` fails to compute scores
+  - Cause: engine-ledger is a plain JAR, not a Quarkus extension. It ships migrations at `classpath:db/engine-ledger/migration` but does not register them automatically.
+  - Fix: add `classpath:db/engine-ledger/migration` to `quarkus.flyway.{datasource}.locations` in `application.properties`
+
+- **`%prod.` prefix on Jandex entry blocks test CDI discovery of `TrustWeightedAgentStrategy`**
+  - Symptom: `@QuarkusTest` uses `LeastLoadedAgentStrategy`; `TrustRoutingActivationTest` fails
+  - Cause: `%prod.quarkus.index-dependency.engine-ledger.*` is ignored during test augmentation; the strategy bean is not indexed and not discovered
+  - Fix: add unprefixed `quarkus.index-dependency.engine-ledger.*` to test `application.properties`
+
+- **`style-review` borderlineMargin = 0.0 creates a zero-width borderline zone — not a bug**
+  - Symptom: concern that `Math.abs(score - 0.50) <= 0.0` never fires and borderline detection is broken
+  - Cause: `OptionalDouble.empty()` is the correct sentinel for no-margin; the symmetric check is correct
+  - Fix: no fix — Bayesian Beta scores are continuous floats, exactly 0.50 is unrealisable. Document; do not add an artificial minimum margin.
+
+#### Pattern to replicate
+
+1. Check `DevtownCapabilityRegistry` — does your domain have a `CapabilityRegistry` with `RoutingPolicy` entries? If not, create one (Layer 1 step)
+2. Add `casehub-engine-ledger` compile dep to `{domain}-app/pom.xml` — activates `TrustWeightedAgentStrategy` by classpath presence
+3. Add `casehub-platform-config` compile dep to `{domain}-app/pom.xml` — provides `PreferenceProvider` for YAML loading
+4. Create `src/main/resources/{org}/{domain}/trust-routing.yaml` with `blendFactor` and quality floor entries per capability scope
+5. Implement `{Domain}TrustRoutingPolicyProvider @ApplicationScoped` in `{domain}-app/`: read threshold/minObs/borderlineMargin from registry; blendFactor and floors from YAML via `PreferenceProvider`; use `allFloorKeys()` pattern in `TrustRoutingPolicyKeys`
+6. Create `DoublePreference` in `{domain}-domain/preferences/` if not already available; create `TrustRoutingPolicyKeys` in `{domain}-domain/trust/`
+7. Implement `{Domain}ObligorTrustPolicy @ApplicationScoped` for trust gate: `Optional.empty()` → bootstrap exempt; score below floor → refuse; consider per-capability floor logic
+8. Add `quarkus.flyway.{datasource}.locations` to include `classpath:db/engine-ledger/migration` (both prod and test properties)
+9. Add Jandex entries for `casehub-engine-ledger` in test properties (unprefixed) and prod properties (with `%prod.` prefix)
+10. Write `{Domain}TrustRoutingActivationTest @QuarkusTest` — verify `TrustWeightedAgentStrategy` is active and at least one non-DEFAULT threshold confirms the provider is wired
 
 ---
 
@@ -1089,7 +1193,7 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 | CaseContext | The shared blackboard for a case instance. Binding conditions read it; agent outputs write to it. |
 | Chapter | A vertical cut through the architectural layers delivering one user-visible capability end-to-end. Chapters are the planning and delivery unit (vs layers, which are the implementation unit). |
 | `DefaultSlaBreachPolicy` | devtown's SPI implementation of `SlaBreachPolicy`. Lives in `devtown-domain` (pure Java). Implements multi-tier escalation via `candidateGroups`. |
-| `DevtownTrustDimension` | Three quality dimensions for trust scoring in devtown: `review-thoroughness`, `false-positive-rate`, `scope-calibration`. |
+| `DevtownTrustDimension` | Three quality dimensions for trust scoring in devtown (all higher = better): `review-thoroughness` (recall — finds more real issues), `precision` (TP/(TP+FP) — fewer false positives; renamed from `false-positive-rate` in devtown#57), `scope-calibration` (correct DECLINE rate). |
 | `HumanDecision` | Formal PR accountability event constant (`human-decision:pr-approval`). WorkItem lifecycle type. |
 | `HumanOversight` | System-level routing review constant (`human-oversight:routing-review`). Triggered when routing confidence is low. |
 | Layer | A horizontal architectural concern — a technical tier or foundation module. Layers are the implementation unit; Chapters are the delivery unit. |
