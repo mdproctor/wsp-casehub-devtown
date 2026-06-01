@@ -120,7 +120,10 @@
       "Bash(javap io/casehub/model/Metadata.class)",
       "Bash(gh pr *)",
       "Skill(project-init)",
-      "Skill(git-squash)"
+      "Skill(git-squash)",
+      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/squash-todo.txt\" GIT_EDITOR=\"true\" git rebase *)",
+      "Bash(chmod +x /tmp/reword-editor.sh)",
+      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i 33bca7de2f17c39dc9761a6c358fa3aad5a9dcc0)"
     ]
   }
 }
