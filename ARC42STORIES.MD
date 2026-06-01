@@ -1384,6 +1384,3 @@ Per the Arc42Stories spec: only decisions not captured inline elsewhere. Layer-s
 
 **Structural gap in the spec itself (observed during this generation):**
 - The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending*. Layer 2 was in this state pending engine#326; the resolved approach (skeleton with 🔲 markers + blocker note, then full entry written when unblocked) worked in practice. A future spec version could address this state explicitly.
-
-**Structural gap in the spec itself (observed during this generation):**
-- The Arc42Stories spec does not define how to represent a layer that is *code-complete but documentation-pending*. Layer 2 was in this state pending engine#326; the resolved approach (skeleton with 🔲 markers + blocker note, then full entry written when unblocked) worked in practice. A future spec version could address this state explicitly.
