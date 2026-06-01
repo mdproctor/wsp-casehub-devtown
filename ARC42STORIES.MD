@@ -1050,13 +1050,44 @@ Not closed by Layer 5: no response SLA (Layer 2), no trust weighting (Layer 6).
   - Cause: engine CDI SPIs are unsatisfied without claudony + persistence modules; known foundation gap
   - Status: tracked in devtown#31. Does not affect test coverage or local development.
 
-- **HITL wiring gap (resolved devtown#30, 2026-05-21)**
-  - `HumanTaskTarget` bindings were initially unit-tested only. Full `WorkItemLifecycleEvent → PlanItem` bridge completed in devtown#30: `HumanApprovalLifecycleTest` verifies the end-to-end lifecycle including `@ObservesAsync` delivery and `outputMapping` → case context update.
+- **`HumanTaskTarget` binding fires but WorkItem completion does not signal the PlanItem**
+  - Symptom: the `human-approval` binding fires and a WorkItem is created (visible in `WorkItemStore`), but completing the WorkItem via `WorkItemService` has no effect on the case — the PlanItem stays ACTIVE and the case hangs indefinitely
+  - Cause: `HumanTaskTarget` bindings require two `casehub-work-adapter` handlers to chain correctly: `HumanTaskScheduleHandler` (creates the WorkItem from the binding event) and `WorkItemLifecycleAdapter` (bridges WorkItem COMPLETED/REJECTED events back to PlanItem completion and fires `CONTEXT_CHANGED`). Binding condition unit tests bypass both handlers; `@QuarkusTest` tests that don't exercise the full event chain miss the bridge. The bridge is in `casehub-work-adapter` (foundation) — no devtown class owns this wiring.
+  - Fix: write a dedicated `@QuarkusTest` lifecycle test (`HumanApprovalLifecycleTest`) that: (1) starts the full case with a PR exceeding `humanApprovalThreshold`; (2) obtains the created WorkItem from `WorkItemStore`; (3) completes it via `WorkItemService`; (4) asserts the PlanItem transitioned and `outputMapping` updated the case context. Requires `MemoryPlanItemStore` in `quarkus.arc.selected-alternatives` (PP-20260521-a36692). Resolved devtown#30, 2026-05-21.
 
 #### Pattern to replicate
 
 1. Create the YAML CasePlanModel in `{domain}-review/src/main/resources/{domain}/` — not in `{domain}-app/`; Quarkus classloader picks it up from the review module JAR at test time
-2. Declare goals (what the system must achieve), not steps (how). Use JQ conditions over the accumulated CaseContext.
+2. Declare goals (what the system must achieve), not steps (how). Use JQ conditions over the accumulated CaseContext. Core structure from `pr-review.yaml`:
+
+```yaml
+goals:
+  - name: security-verified   # goal: condition on the accumulated blackboard
+    kind: success
+    condition: >-
+      .codeAnalysis.securitySensitive == false or
+      .securityReview.outcome == "APPROVED"
+
+bindings:
+  - name: security-review     # content-driven: fires only when analysis found security-sensitive code
+    on: { contextChange: {} }
+    when: >-
+      .codeAnalysis.complete == true and
+      .codeAnalysis.securitySensitive == true and
+      .securityReview == null
+    capability: security-review
+
+  - name: merge               # short-circuit guard: non-security PRs never write .securityReview;
+    on: { contextChange: {} } # guard with (.securitySensitive == false or ...) prevents stall
+    when: >-
+      (.codeAnalysis.securitySensitive == false or .securityReview.outcome == "APPROVED") and
+      .styleCheck.outcome == "APPROVED"
+      # ... (add all required conditions)
+    capability: merge-executor
+```
+
+   Critical rule: every condition referencing a key that only appears when a prior binding fires (e.g. `.securityReview`) must guard against the case where that binding never fires. Without the `(.securitySensitive == false or ...)` short-circuit, non-security PRs never satisfy the merge condition.
+
 3. Extend `YamlCaseHub` in `{domain}-app/` with `@ApplicationScoped` — pass the classpath resource path to `super()`
 4. Create `@ApplicationScoped` (no `@DefaultBean`) service implementing the port interface in `{domain}-app/` — inject the CaseHub bean, build initial CaseContext from the domain payload + policy config, call `caseHub.startCase(initialContext)`
 5. Define scoped policy values via `@ConfigProperty` for now — replace with `PreferenceProvider.resolve(scope).asMap()` when casehub-platform-api ships (parent#26)
