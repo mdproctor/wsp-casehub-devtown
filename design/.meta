@@ -1,0 +1,8 @@
+branch: issue-62-merge-executor-human-oversight
+project-sha: 8b66657db9d6c9222b66ce0f23884714fe4cc9d7
+date: 2026-06-02
+issue: 62
+issue-repo: casehubio/devtown
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
