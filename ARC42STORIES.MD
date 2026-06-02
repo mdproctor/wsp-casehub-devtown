@@ -1,20 +1,9 @@
 # casehub-devtown — ARC42STORIES.MD
 
-**Version:** 0.1 (initial generation)
-**Date:** 2026-05-28
-**Profile:** [Arc42Stories CaseHub Profile](../parent/docs/arc42stories-casehub-profile.md)
-**Spec:** [Arc42Stories Specification](../parent/docs/arc42stories-spec.md)
-**Status:** Layers 1, 2 (partial), 5 complete. Layers 3, 4, 6 and Chapters 3–5 pending.
-
----
-
-<!-- arc42stories-preamble
-spec-version: 0.1 (draft)
-profile-local: ../parent/docs/arc42stories-casehub-profile.md
-profile-https: https://raw.githubusercontent.com/casehubio/parent/main/docs/arc42stories-casehub-profile.md
-tier: Application
-prefix: DT
--->
+**Spec:** Arc42Stories v0.1
+**Profile:** CaseHub — Application tier
+**Profile ref:** `../parent/docs/arc42stories-casehub-profile.md` · fallback: `https://raw.githubusercontent.com/casehubio/parent/main/docs/arc42stories-casehub-profile.md`
+**Prefix:** DT
 
 ## §1 Introduction and Goals
 
@@ -52,15 +41,7 @@ The foundation has **no domain knowledge**. It knows about cases, bindings, work
 
 ### Artifact Schema
 
-| Artifact type | Format | Example | Where it lives |
-|---|---|---|---|
-| Improvement log entry | `DT-NNN` | `DT-042` | `docs/PROGRESS.md` |
-| Issue | `#NNN` or `casehubio/devtown#NNN` | `#52`, `casehubio/devtown#52` | GitHub Issues |
-| Garden entry | `GE-YYYYMMDD-XXXXXX` | `GE-20260521-e39ad1` | `~/.hortora/garden/` |
-| Protocol | `PP-YYYYMMDD-XXXXXX` | `PP-20260522-f08b62` | `casehub-parent/docs/protocols/` |
-| ADR | `ADR-NNNN` | `ADR-0007` | `docs/adr/` (project repo) |
-| Blog entry | `YYYY-MM-DD-[initials]NN-title` | `2026-05-19-mdp01-layer-5-lands` | workspace `blog/` |
-| Design spec | `YYYY-MM-DD-topic-design` | `2026-05-15-epic3-design` | `docs/specs/` (project repo) |
+Inherits defaults from the [CasHub Profile](../parent/docs/arc42stories-casehub-profile.md). **Prefix: `DT`** — improvement log entries use `DT-NNN` in `docs/PROGRESS.md`.
 
 ---
 
