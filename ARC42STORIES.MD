@@ -8,6 +8,14 @@
 
 ---
 
+<!-- arc42stories-preamble
+spec-version: 0.1 (draft)
+profile-local: ../parent/docs/arc42stories-casehub-profile.md
+profile-https: https://raw.githubusercontent.com/casehubio/parent/main/docs/arc42stories-casehub-profile.md
+tier: Application
+prefix: DT
+-->
+
 ## §1 Introduction and Goals
 
 ### Description
