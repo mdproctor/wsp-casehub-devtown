@@ -123,7 +123,14 @@
       "Skill(git-squash)",
       "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/squash-todo.txt\" GIT_EDITOR=\"true\" git rebase *)",
       "Bash(chmod +x /tmp/reword-editor.sh)",
-      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i 33bca7de2f17c39dc9761a6c358fa3aad5a9dcc0)"
+      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i 33bca7de2f17c39dc9761a6c358fa3aad5a9dcc0)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/casehubio/parent/main/docs/arc42stories-spec.md\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/casehubio/parent/main/docs/arc42stories-casehub-profile.md\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/casehubio/parent/main/docs/repos/quarkmind.md\")",
+      "Bash(gh repo *)",
+      "mcp__intellij__read_file",
+      "Bash(awk '/^```mermaid$/,/^```$/')",
+      "Skill(write-content)"
     ]
   }
 }
