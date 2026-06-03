@@ -1,28 +1,22 @@
-# HANDOFF — 2026-06-01
+# HANDOFF — 2026-06-03
 
 ## Last Session
 
-S/XS cleanup branch (`issue-59-s-xs-cleanup`) closed. Moved `DoublePreference`/`IntPreference`
-to `domain.preferences` (#59). Closed superseded issues #2, #4, #6 (all addressed by Layer 6),
-closed #34 (Hibernate Reactive incompatible with H2 — not an XS fix), deferred #18.
-Implemented Qhorus trust gate (#58): `DevtownObligorTrustPolicy @ApplicationScoped`, global
-floor 0.30 via `trust-gate.yaml`, bootstrap exemption via `Optional.empty()`, 46 tests pass.
-Fixed pre-existing CDI build failure (`DefaultTestPrincipal` + `MockGroupMembershipProvider`
-ambiguity in production augmentation). Filed devtown#62 (merge-executor bootstrap → HumanOversight
-— the trust gate structurally cannot address this; `ObligorTrustContext` carries no capability tag).
+Opened `issue-62-merge-executor-human-oversight`. Designed the bootstrap-fallback fix: chose Option A (add `bootstrapFallbackType` to `TrustRoutingPolicy` in the foundation) over a devtown `@Priority(3)` strategy — foundation fix means every domain app benefits, devtown just passes the value through `DevtownTrustRoutingPolicyProvider`. Filed casehubio/engine#415 covering both the engine-api record change and the engine-ledger strategy check. Corrected `CLAUDE.md` routing: `ARC42STORIES.MD → project` (was missing; "workspace root" note fixed to "project repo root"). Synced devtown to casehubio upstream (was 7 commits behind).
 
 ## Immediate Next Step
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+Wait for engine#415 to merge, then: add `routingPolicy.fallbackType()` → `bootstrapFallbackType` in `DevtownTrustRoutingPolicyProvider.forCapability()`. Single method call, no new classes. Then implement, test, commit, close devtown#62.
 
-(Create Layer 4 issue — casehub-ledger tamper-evident audit trail — then brainstorm.
-Design jointly with devtown#43; both use the `/observe` channel. Wait for platform#48
-response before devtown#43 brainstorm.)
+## Cross-Module
+
+**Blocked by:**
+- `casehub-engine` — engine#415 (`TrustRoutingPolicy.bootstrapFallbackType` + strategy check) · S · Low
 
 ## What's Left
 
-- **devtown#62** — merge-executor bootstrap path to HumanOversight when no agent meets minimumObservations · S · Med
-- **parent#115** — Replace AML hardcoded trust policy with per-field `PreferenceKey` (devtown#57 reference impl) · S · Low
+- **devtown#62** — blocked on engine#415; devtown side is XS once foundation merges · XS · Low
+- **parent#115** — Replace AML hardcoded trust policy with per-field `PreferenceKey` · S · Low
 - **parent#120** — Add `trust-maturity-model.md` to protocols INDEX files · XS · Low
 - **parent#121** — Sync casehub-devtown.md Layer 6 status and two new deps · XS · Low
 - **parent#122** — Add engine-ledger + platform-config dep rows to PLATFORM.MD · XS · Low
@@ -31,14 +25,14 @@ response before devtown#43 brainstorm.)
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Layer 4 — casehub-ledger tamper-evident audit trail (new issue needed) | L | Med | Design with devtown#43 jointly — both use /observe |
+| #62 | devtown side of engine#415 — wire `fallbackType` through provider | XS | Low | Blocked on engine#415 |
+| — | Layer 4 — casehub-ledger tamper-evident audit trail | L | Med | Design with devtown#43 — both use `/observe` |
 | #43 | CaseMemoryStore — contributor + reviewer context | M | Med | Wait for platform#48 response before brainstorm |
-| #62 | merge-executor bootstrap → HumanOversight (TrustWeightedSelectionStrategy) | S | Med | Gate cannot fix this — routing layer change needed |
 | — | Layer 7 — Gastown comparison | M | Med | After Layer 4 |
 
 ## References
 
-- `blog/2026-05-31-mdp02-xs-s-cleanup-trust-gate.md` — this session's diary
-- `specs/2026-05-31-trust-gate-design.md` — trust gate design spec (promoted to project docs/specs/)
-- Garden: GE-20260531-769f9c (updateGlobalTrustScore silent no-op — use upsert with ScoreType.GLOBAL)
-- Protocols: PP-20260531-ef4da8 (domain.preferences placement), PP-20260531-ea9945 (one YAML per concern)
+- `blog/2026-06-03-mdp01-trust-gate-and-routing-gap.md` — this session's diary
+- `design/JOURNAL.md` — design decision: Option A, bootstrap fallback in foundation
+- Protocol: PP-20260603-33c84c — ARC42STORIES.MD belongs in project repo
+- engine#415 — the foundation work devtown is blocked on
