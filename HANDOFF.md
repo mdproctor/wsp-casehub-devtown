@@ -20,7 +20,6 @@ Wait for engine#415 to merge, then: add `routingPolicy.fallbackType()` → `boot
 - **parent#120** — Add `trust-maturity-model.md` to protocols INDEX files · XS · Low
 - **parent#121** — Sync casehub-devtown.md Layer 6 status and two new deps · XS · Low
 - **parent#122** — Add engine-ledger + platform-config dep rows to PLATFORM.MD · XS · Low
-- **ARC42STORIES.MD migration** — ledger, eidos, platform, work, engine all have it in workspace; should be in project repo (PP-20260603-33c84c) · S · Low (each repo's own session)
 
 ## What's Next
 
