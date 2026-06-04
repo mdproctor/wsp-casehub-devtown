@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-04-mdp01-the-phantom-spi.md](2026-06-04-mdp01-the-phantom-spi.md) | 2026-06-04 | allowedTypes enforcement: NormativeChannelLayout was fiction; the 9-arg ChannelService.create() overload already existed; channel type contracts; 3 qhorus gaps filed |
 | [2026-05-31-mdp02-xs-s-cleanup-trust-gate.md](2026-05-31-mdp02-xs-s-cleanup-trust-gate.md) | 2026-05-31 | Seven issues closed (3 superseded, 1 dead-end, 1 deferred); DoublePreference moved to domain.preferences; trust gate wired (devtown#58) |
 | [2026-05-31-mdp01-layer6-trust-routing.md](2026-05-31-mdp01-layer6-trust-routing.md) | 2026-05-31 | Layer 6 ships: trust-weighted reviewer routing, FALSE_POSITIVE_RATE → PRECISION, casehub-memory consumer requirements filed |
 | [2026-05-30-mdp01-from-tutorial-to-architecture.md](2026-05-30-mdp01-from-tutorial-to-architecture.md) | 2026-05-30 | LAYER-LOG Layer 3 entry written; ARC42STORIES.MD Chapter 3 complete; tutorial/showcase framing stripped per Arc42Stories direction |
@@ -19,3 +20,4 @@
 | [2026-05-26-mdp01-after-the-squash.md](2026-05-26-mdp01-after-the-squash.md) | 2026-05-26 | Squash debris: missing tests, CONFLICTING PR, symmetry restored |
 | [2026-05-29-mdp01-arc42stories-meets-reality.md](2026-05-29-mdp01-arc42stories-meets-reality.md) | 2026-05-29 | ARC42STORIES.MD generated for devtown; spec gaps fixed: lighter chapters, matrix, definition of done, migration guide; tutorial-strategy.md archived |
 | [2026-06-02-mdp01-the-class-that-doesnt-exist.md](2026-06-02-mdp01-the-class-that-doesnt-exist.md) | 2026-06-02 | ARC42STORIES.MD quality sweep — class names, stale §12 issues, CDI annotations, cross-repo migration issues |
+| [2026-06-03-mdp01-trust-gate-and-routing-gap.md](2026-06-03-mdp01-trust-gate-and-routing-gap.md) | 2026-06-03 | The trust gate and the routing gap — why the bootstrap exemption is correct but insufficient for irreversible operations; fix filed to foundation (engine#415) |
