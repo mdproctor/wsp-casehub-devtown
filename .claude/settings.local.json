@@ -130,7 +130,9 @@
       "Bash(gh repo *)",
       "mcp__intellij__read_file",
       "Bash(awk '/^```mermaid$/,/^```$/')",
-      "Skill(write-content)"
+      "Skill(write-content)",
+      "Skill(publish-blog)",
+      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i upstream/main)"
     ]
   }
 }
