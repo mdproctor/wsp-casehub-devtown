@@ -20,6 +20,8 @@ Integrate `CaseMemoryStore` (platform SPI) into devtown PR review cases. Two int
 
 ## Scope
 
+**MVP scope (this issue):** COMPLETED outcomes only. DECLINED and FAILED require engine/qhorus CDI events that may not exist yet — see Follow-up Issues.
+
 Three entity types, all in the `software-review` domain:
 
 | Entity type | Entity ID format | Example |
@@ -28,7 +30,23 @@ Three entity types, all in the `software-review` domain:
 | Reviewer | `reviewer:<actor-id>` | `reviewer:security-agent-1` |
 | Code area | `module:<repo>/<module-path>` | `module:casehubio/devtown/app` |
 
-**Code area granularity:** Module-level (Maven module or top-level package directory), not file-level. File-level is too fine for pattern detection — two PRs touching different files in `app/` would create different entities with no shared history. Normalization: strip file names, keep directory path up to the first `src/` boundary (e.g., `app/src/main/java/io/casehub/devtown/app/Foo.java` → `app`). Multiple changed files in the same module produce one entity, not N. Tradeoff: coarser granularity may merge unrelated risk signals within a large module — acceptable for initial implementation; refine if recall quality suffers.
+**Code area granularity:** Module-level, not file-level. File-level is too fine for pattern detection — two PRs touching different files in `app/` would create different entities with no shared history.
+
+**Module normalization** (shared utility in `devtown-domain`, class `ModulePathNormalizer`):
+
+| Input path | Normalised module |
+|---|---|
+| `app/src/main/java/io/casehub/.../Foo.java` | `app` |
+| `app/src/test/java/io/casehub/.../FooTest.java` | `app` |
+| `domain/src/main/java/.../Bar.java` | `domain` |
+| `pom.xml` | _(root)_ |
+| `config/application.yaml` | _(root)_ |
+| `.github/workflows/ci.yml` | _(root)_ |
+| `README.md` | _(root)_ |
+
+Rule: find the first path segment that contains a `src/` child; the segment before `src/` is the module. If no `src/` boundary exists, use `(root)` as the module name. `src/test/` and `src/main/` map to the same module entity. Multiple changed files in the same module produce one entity, not N.
+
+Tradeoff: coarser granularity may merge unrelated risk signals within a large module — acceptable for initial implementation; refine if recall quality suffers.
 
 ## Domain Model
 
@@ -42,13 +60,24 @@ public final class DevtownMemoryDomain {
 }
 ```
 
+### ReviewOutcome enum
+
+```java
+// devtown-domain
+public enum ReviewOutcome {
+    COMPLETED, DECLINED, FAILED
+}
+```
+
+Eliminates string literal comparisons throughout the emission and recall code.
+
 ### Attribute keys
 
 **Platform reserved keys (use as-is from `MemoryAttributeKeys`):**
-- `actor-id` — reviewer identity (agent ID or human ID)
-- `actor-role` — `reviewer` or `contributor`
-- `outcome` — `COMPLETED`, `DECLINED`, `FAILED`
-- `confidence` — formatted via `MemoryAttributeKeys.formatConfidence()`
+- `MemoryAttributeKeys.ACTOR_ID` — reviewer identity (agent ID or human ID)
+- `MemoryAttributeKeys.ACTOR_ROLE` — `reviewer` or `contributor`
+- `MemoryAttributeKeys.OUTCOME` — `COMPLETED`, `DECLINED`, `FAILED` (via `ReviewOutcome.name()`)
+- `MemoryAttributeKeys.CONFIDENCE` — formatted via `MemoryAttributeKeys.formatConfidence()`
 
 **Devtown-specific keys (kebab-case, defined in `DevtownMemoryKeys`):**
 
@@ -89,6 +118,8 @@ Engine events (multiple) → ReviewOutcomeObserver (extraction, one place touchi
 
 **Why the intermediate event is not YAGNI:** Layer 6 (trust routing) is the next layer on the roadmap and needs the same structured review outcome data. Building extraction inside the emitter means Layer 6 either duplicates it or couples to the emitter. `ReviewCompletedEvent` isolates the extraction in one place and gives both consumers a clean typed event.
 
+**Latency profile:** Two async hops — `PlanItemCompletedEvent` (fireAsync) → observer → `ReviewCompletedEvent` (fireAsync) → emitter — with a blocking `Uni.await()` in between. For append-only memory this is acceptable: ordering is not critical, and the managed executor pool handles concurrent binding completions. If many bindings complete simultaneously on a small executor pool, memory emission queues behind other async work. This is fine — memory is enrichment, not latency-sensitive.
+
 ### ReviewCompletedEvent
 
 Defined in `devtown-review` (integration module):
@@ -99,36 +130,66 @@ public record ReviewCompletedEvent(
     String tenantId,
     String capability,         // "security-review", "style-review", etc.
     String reviewerId,         // agent ID or human ID
-    String outcome,            // "COMPLETED", "DECLINED", "FAILED"
-    String outcomeDetail,      // findings summary or decline reason
+    ReviewOutcome outcome,     // COMPLETED, DECLINED, FAILED
+    String outcomeDetail,      // findings summary or decline reason (nullable)
     PrPayload pr               // full PR context including contributor and changedPaths
 ) {}
 ```
 
 Carries `tenantId` explicitly — solves the `CurrentPrincipal` unavailability in async observers (request scope is not propagated to `@ObservesAsync` threads). The extraction observer extracts `tenantId` from the `CaseInstance` after lookup.
 
-### ReviewOutcomeObserver
+### ReviewOutcomeObserver — the extraction component
 
-Defined in `devtown-app`. The single component that touches engine internals. Observes multiple engine events to capture all outcome types:
+Defined in `devtown-app`. The single component that touches engine internals. This is the hardest component to implement and the most detailed section of the spec.
 
-| Engine event | Outcome | How tenantId is obtained |
+**Engine events observed:**
+
+| Engine event | Outcome | Status |
 |---|---|---|
-| `PlanItemCompletedEvent` | COMPLETED | `caseInstance.getTenancyId()` after lookup |
-| Engine PlanItem fault/rejection event (TBD — investigate engine event model) | FAILED | Same |
-| Qhorus commitment DECLINED event (TBD — investigate qhorus event model) | DECLINED | Same |
+| `PlanItemCompletedEvent` | COMPLETED | **MVP — this issue** |
+| Engine PlanItem fault/rejection event | FAILED | **Follow-up** — file engine issue |
+| Qhorus commitment DECLINED event | DECLINED | **Follow-up** — file qhorus issue |
 
-**For each observed event:**
-1. Look up CaseInstance via repository — use `CrossTenantCaseInstanceRepository.findByUuid()` with explicit acknowledgement that this is a cross-tenant lookup in an async context (no request-scoped tenant available). The `findByUuid()` call returns `Uni<CaseInstance>` — block with `.await().atMost(Duration.ofSeconds(5))` on the managed executor thread (Quarkus virtual threads support this).
-2. Extract `tenantId` from `CaseInstance.getTenancyId()`.
-3. Extract PR metadata and contributor from case context (`pr.*` keys).
-4. Map `planItemId` to capability name via case context key convention (the outcome key in case context matches the binding name, e.g., `securityReview.outcome`).
-5. Extract outcome value from case context — the specific key depends on the capability (e.g., `securityReview.outcome`, `styleCheck.outcome`, `humanApproval.status`). The observer maintains a mapping of `planItemId → context key` derived from the case definition's outputMappings.
-6. Skip if capability is not review-relevant (infrastructure bindings: `initial-analysis`, `run-ci`, `merge`). Filter via a private constant set on the observer — not in the capability registry.
-7. Fire `ReviewCompletedEvent` via CDI `Event.fireAsync()`.
+#### Outcome extraction: the planItemId → context key mapping
 
-**Failure handling:** If CaseInstance lookup fails or case context extraction fails, log the error and do not fire the event. The memory emitter never sees the failure.
+This is the single hardest piece of implementation logic. `PlanItemCompletedEvent` carries `caseId`, `planItemId`, and `trackingKey`. None of these is the outcome — the outcome lives in the case context after the binding's `outputMapping` was applied.
 
-**PlanItem fault/rejection and qhorus DECLINED events:** These require investigation of the engine and qhorus event models to identify the correct CDI events to observe. If no suitable CDI event exists for DECLINED/FAILED, file engine/qhorus issues to add them. The extraction observer registers additional `@ObservesAsync` methods as events become available. The initial implementation may ship with COMPLETED-only and tracked issues for the remaining outcomes.
+**Mapping approach:** Hard-coded static map from `planItemId` to context key path. The PR review case definition is static YAML — the set of bindings and their output mappings are known at compile time. When a new capability is added, it requires a YAML change AND a map entry. This coupling is acceptable and documented.
+
+```java
+private static final Map<String, String> PLAN_ITEM_TO_CONTEXT_KEY = Map.of(
+    "security-review",       "securityReview.outcome",
+    "architecture-review",   "architectureReview.outcome",
+    "style-check",           "styleCheck.outcome",
+    "test-coverage",         "testCoverage.outcome",
+    "performance-analysis",  "performanceAnalysis.outcome",
+    "human-approval",        "humanApproval.status"
+);
+```
+
+**Key naming rationale:** The context keys are camelCase because that's what the JQ outputMappings produce (e.g., `"{ securityReview: { outcome: . } }"`). The `humanApproval` binding uses `.status` instead of `.outcome` because it was established in Layer 2 before the outcome convention was set. This inconsistency is real and documented — not a placeholder.
+
+**Extraction steps (for each PlanItemCompletedEvent):**
+
+1. **Filter:** If `event.planItemId()` is not in `PLAN_ITEM_TO_CONTEXT_KEY`, skip silently. This filters infrastructure bindings (`initial-analysis`, `run-ci`, `merge`) and any unknown planItemIds. No logging for expected skips.
+
+2. **Lookup CaseInstance:** `caseRepo.findByUuid(event.caseId()).await().atMost(Duration.ofSeconds(5))`. Returns `Uni<CaseInstance>` — block on the managed executor thread. If lookup fails or times out, log at WARN and return (do not fire event).
+
+3. **Extract tenantId:** `caseInstance.getTenancyId()`.
+
+4. **Extract PR metadata:** Navigate case context: `caseInstance.getCaseContext().getPath("pr.repo")`, `getPath("pr.id")`, `getPath("pr.linesChanged")`, `getPath("pr.baseRef")`, `getPath("pr.headSha")`, `getPath("pr.contributor")`, `getPath("pr.changedPaths")`. Reconstruct `PrPayload` from these values. If any required field is missing, log at WARN and return.
+
+5. **Extract outcome:** Navigate case context using the mapped key path: `caseInstance.getCaseContext().getPath(contextKeyPath)`. The value is a string (e.g., `"APPROVED"`, `"FINDINGS_PRESENT"`, `"approved"`, `"sla-breach"`). This is the raw outcome from the binding's outputMapping. Map to `ReviewOutcome.COMPLETED` (since this observer only handles PlanItemCompletedEvent).
+
+6. **Extract reviewerId:** `event.trackingKey()` — this is the workerName or equivalent identifier for the actor that completed the PlanItem. If null, use `"unknown"`.
+
+7. **Extract outcomeDetail:** For COMPLETED outcomes, the detail is the raw outcome value from the context (e.g., `"FINDINGS_PRESENT"` carries more meaning than `ReviewOutcome.COMPLETED` alone). For future FAILED/DECLINED observers, the detail is the failure reason or decline reason.
+
+8. **Fire event:** `reviewCompletedEvents.fireAsync(new ReviewCompletedEvent(...))`.
+
+**When the mapping can't resolve a planItemId:** Silent skip. This is the expected path for infrastructure bindings — not an error condition. An unknown planItemId that IS a review binding (i.e., a new capability was added to the YAML but not the map) is a maintenance oversight. It fails silently (no memory emitted), which is safe — memory is enrichment. A follow-up improvement could log at DEBUG for unknown planItemIds that aren't in a known-infrastructure set.
+
+**CrossTenantCaseInstanceRepository:** Used because no request-scoped tenant is available in the async observer. This is a contract violation (the repository's Javadoc says "for startup recovery services only"). Documented as accepted technical debt — see Follow-up Issues for the resolution path.
 
 ### CaseMemoryEmitter
 
@@ -162,14 +223,14 @@ public class CaseMemoryEmitter {
 - `caseId` populated on every `MemoryInput` — free provenance linking memory to the specific case.
 - Failure: logged at WARN and swallowed. Memory is enrichment, not critical path.
 
-**Text construction** — natural language for semantic embedding quality (not structured log lines):
+**Text construction** — natural language for semantic embedding quality (not structured log lines). Code area text does NOT include contributor login (avoids GDPR cross-entity scrubbing — see GDPR section):
 - Contributor: `"Security review of a 342-line pull request by mdproctor in casehubio/devtown found issues requiring attention."`
 - Reviewer: `"security-agent-1 completed a security review of pull request #45 in casehubio/devtown. Outcome: approved with no findings."`
 - Code area: `"The app module in casehubio/devtown received a security review on pull request #45. No issues found."`
 
 Structured metadata goes in `attributes` (platform reserved keys + devtown-specific keys). The `text` field is specifically for vector embedding — it must be a readable sentence, not a template-filled log line.
 
-**Module normalization for code area entities:** `changedPaths` are deduplicated to module-level before constructing code area `MemoryInput` entries. E.g., if a PR touches `app/src/main/.../Foo.java` and `app/src/main/.../Bar.java`, only one code area entity (`module:casehubio/devtown/app`) is created.
+**Module normalization for code area entities:** `changedPaths` are deduplicated to module-level via `ModulePathNormalizer` (shared utility in `devtown-domain`) before constructing code area `MemoryInput` entries. E.g., if a PR touches `app/src/main/.../Foo.java` and `app/src/main/.../Bar.java`, only one code area entity (`module:casehubio/devtown/app`) is created.
 
 ## Recall Architecture
 
@@ -198,7 +259,7 @@ public class CaseMemoryRecaller {
                     .withSince(Instant.now().minus(Duration.ofDays(90)))
                     .withOrder(MemoryOrder.CHRONOLOGICAL));
 
-            List<String> moduleIds = normalizeToModules(pr.changedPaths()).stream()
+            List<String> moduleIds = ModulePathNormalizer.normalize(pr.changedPaths()).stream()
                 .map(m -> "module:" + pr.repo() + "/" + m)
                 .limit(MemoryQuery.MAX_ENTITY_IDS)
                 .toList();
@@ -250,10 +311,12 @@ public record MemoryContext(
 ```
 
 `toContextMap()` produces a map with two keys:
-- `contributorHistory` — list of maps, each with `text`, `outcome`, `capability`, `createdAt` (extracted from `Memory` attributes)
+- `contributorHistory` — list of maps, each with `text` (from `Memory.text()`), `outcome` (from `Memory.attributes().get(MemoryAttributeKeys.OUTCOME)`), `capability` (from attributes), `createdAt` (from `Memory.createdAt()`)
 - `codeAreaHistory` — list of maps, same structure
 
-Injected as the `memory` key in the initial case context. Binding conditions can reference `memory.contributorHistory` and `memory.codeAreaHistory`. `hasRiskSignals()` returns true if any recalled fact has `outcome` != `COMPLETED` — used to flag elevated-risk PRs.
+Injected as the `memory` key in the initial case context. Binding conditions can reference `memory.contributorHistory` and `memory.codeAreaHistory`.
+
+`hasRiskSignals()` returns true if any recalled fact has `outcome == ReviewOutcome.FAILED.name()` or has a non-null, non-blank `outcomeDetail` while `outcome == ReviewOutcome.COMPLETED.name()`. A COMPLETED review with findings is a risk signal; a FAILED review is a risk signal. A DECLINED review is a routing signal (scope boundary), not a risk signal — it does not indicate contributor risk.
 
 ### Integration into PrReviewCaseService
 
@@ -290,7 +353,7 @@ Contributor facts are keyed by `contributor:<github-login>`. Under GDPR Art.17, 
 
 **Deletion mechanism:** `CaseMemoryStore.eraseEntity("contributor:mdproctor", tenantId)` — hard-deletes all contributor facts across the `software-review` domain.
 
-**Cross-entity scrubbing:** Code area facts include the contributor login in the natural-language `text` field (e.g., "...pull request by mdproctor..."). On contributor erasure, code area facts referencing the contributor must also be scrubbed. Implementation: query code area facts in the domain, filter by attribute `pr-contributor` (new devtown-specific key added for this purpose), erase matching code area facts. Reviewer facts reference the reviewer identity, not the contributor — no scrubbing needed.
+**Cross-entity impact:** Code area facts do NOT include the contributor login in the `text` field (see text construction examples — code area text omits contributor identity by design). Reviewer facts reference the reviewer identity, not the contributor. Therefore, `eraseEntity()` on the contributor entity is sufficient — no cross-entity scrubbing required.
 
 **Not in scope for this issue:** Building a GDPR erasure endpoint. The `eraseEntity()` mechanism exists in the SPI; this spec documents how to use it. An admin endpoint or scheduled erasure job is a separate concern.
 
@@ -298,7 +361,7 @@ Contributor facts are keyed by `contributor:<github-login>`. Under GDPR Art.17, 
 
 | Module | New classes | Rationale |
 |---|---|---|
-| `devtown-domain` | `DevtownMemoryDomain`, `DevtownMemoryKeys` | Pure Java, zero framework deps |
+| `devtown-domain` | `DevtownMemoryDomain`, `DevtownMemoryKeys`, `ReviewOutcome`, `ModulePathNormalizer` | Pure Java, zero framework deps |
 | `devtown-review` | `PrPayload` enhanced, `MemoryContext`, `ReviewCompletedEvent` | Integration logic; `casehub-platform-api` on classpath for `Memory` type |
 | `devtown-app` | `ReviewOutcomeObserver`, `CaseMemoryEmitter`, `CaseMemoryRecaller` | CDI wiring — observe engine events, inject `CaseMemoryStore` |
 
@@ -310,11 +373,12 @@ Contributor facts are keyed by `contributor:<github-login>`. Under GDPR Art.17, 
 
 | Test | Type | Verifies |
 |---|---|---|
-| `DevtownMemoryDomainTest` | Unit (domain) | Domain constant, entity ID formatting, module normalization, attribute key conventions |
-| `MemoryContextTest` | Unit (review) | `toContextMap()` serialisation, `hasRiskSignals()` logic, `EMPTY` constant, empty-list handling |
-| `CaseMemoryEmitterTest` | Unit (app) | Mock `ReviewCompletedEvent` → verify `storeAll()` called with correct `MemoryInput` list; verify batch includes contributor + reviewer + deduplicated modules; verify `Instance.isResolvable()` guard; verify failure swallowed |
-| `ReviewOutcomeObserverTest` | `@QuarkusTest` (app) | Fire `PlanItemCompletedEvent` → verify `ReviewCompletedEvent` fired with correct fields extracted from case context; verify infrastructure bindings skipped; verify CaseInstance lookup failure swallowed |
-| `CaseMemoryRecallerTest` | `@QuarkusTest` (app) | Pre-populate store → `recall()` → verify `MemoryContext` populated with correct entity IDs, domain, time window; verify empty store → `MemoryContext.EMPTY`; verify query failure → `MemoryContext.EMPTY` |
+| `ModulePathNormalizerTest` | Unit (domain) | All normalization cases from the table above; deduplication; edge cases (empty list, root-only files) |
+| `DevtownMemoryDomainTest` | Unit (domain) | Domain constant, entity ID formatting, `ReviewOutcome` enum values, attribute key conventions |
+| `MemoryContextTest` | Unit (review) | `toContextMap()` serialisation (text from `Memory.text()`, outcome/capability from attributes, createdAt from `Memory.createdAt()`), `hasRiskSignals()` logic (FAILED = risk, COMPLETED-with-detail = risk, DECLINED = not risk), `EMPTY` constant, empty-list handling |
+| `CaseMemoryEmitterTest` | Unit (app) | Mock `ReviewCompletedEvent` → verify `storeAll()` called with correct `MemoryInput` list; verify batch includes contributor + reviewer + deduplicated modules; verify `caseId` set on each `MemoryInput`; verify platform reserved keys used (`MemoryAttributeKeys.OUTCOME`, `.ACTOR_ID`); verify `Instance.isResolvable()` guard; verify failure swallowed |
+| `ReviewOutcomeObserverTest` | `@QuarkusTest` (app) | Fire `PlanItemCompletedEvent` → verify `ReviewCompletedEvent` fired with correct fields extracted from case context; verify `PLAN_ITEM_TO_CONTEXT_KEY` mapping resolves correctly; verify infrastructure bindings (unknown planItemId) skipped silently; verify CaseInstance lookup failure swallowed; verify timeout on `Uni.await()` |
+| `CaseMemoryRecallerTest` | `@QuarkusTest` (app) | Pre-populate store → `recall()` → verify `MemoryContext` populated with correct entity IDs, domain, time window (90 days), ordering; verify empty store → `MemoryContext.EMPTY`; verify query failure → `MemoryContext.EMPTY` (fail-open) |
 | `CaseMemoryIntegrationTest` | `@QuarkusTest` (app) | Round-trip: start case → binding completes → observer fires → emitter stores → start second case for same contributor → recall returns prior facts in initial context |
 
 Pre-seeding note: tests that start cases must pre-seed parallel check keys with non-null values (PP-20260521-134c38).
@@ -324,6 +388,7 @@ Pre-seeding note: tests that start cases must pre-seed parallel check keys with 
 ## Follow-up Issues
 
 - **Engine:** promote `PlanItemCompletedEvent` to `engine-common-spi` as a stable extension point
+- **Engine:** add `tenantId` to `PlanItemCompletedEvent` — eliminates the need for `CrossTenantCaseInstanceRepository` in the observer (resolves the contract violation)
 - **Engine:** add CDI event for PlanItem fault/rejection (needed for FAILED outcome emission)
 - **Qhorus:** add CDI event for commitment DECLINED (needed for DECLINED outcome emission)
 - **Enriched outputMappings:** if compressed outcomes prove insufficient for `ReviewCompletedEvent.outcomeDetail`, enrich the YAML outputMappings to preserve more agent output in case context (declarative change, no code)
