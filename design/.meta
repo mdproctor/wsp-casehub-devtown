@@ -1,0 +1,9 @@
+branch: issue-43-case-memory-store
+project-sha: d3c1f8183670fec4c28525b3a9ada562071dfb18
+date: 2026-06-05
+issue: 43
+issue-repo: casehubio/devtown
+covers: 43
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
