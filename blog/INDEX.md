@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-05-mdp01-the-extraction-problem.md](2026-06-05-mdp01-the-extraction-problem.md) | 2026-06-05 | The extraction problem — CaseMemoryStore integration; ReviewCompletedEvent isolates untyped case context extraction; PlanItemCompletedEvent only fires for worker completions; async tenancy silent failure |
 | [2026-06-04-mdp01-the-phantom-spi.md](2026-06-04-mdp01-the-phantom-spi.md) | 2026-06-04 | allowedTypes enforcement: NormativeChannelLayout was fiction; the 9-arg ChannelService.create() overload already existed; channel type contracts; 3 qhorus gaps filed |
 | [2026-05-31-mdp02-xs-s-cleanup-trust-gate.md](2026-05-31-mdp02-xs-s-cleanup-trust-gate.md) | 2026-05-31 | Seven issues closed (3 superseded, 1 dead-end, 1 deferred); DoublePreference moved to domain.preferences; trust gate wired (devtown#58) |
 | [2026-05-31-mdp01-layer6-trust-routing.md](2026-05-31-mdp01-layer6-trust-routing.md) | 2026-05-31 | Layer 6 ships: trust-weighted reviewer routing, FALSE_POSITIVE_RATE → PRECISION, casehub-memory consumer requirements filed |
