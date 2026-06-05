@@ -44,7 +44,7 @@ Three entity types, all in the `software-review` domain:
 | `.github/workflows/ci.yml` | _(root)_ |
 | `README.md` | _(root)_ |
 
-Rule: find the first path segment that contains a `src/` child; the segment before `src/` is the module. If no `src/` boundary exists, use `(root)` as the module name. `src/test/` and `src/main/` map to the same module entity. Multiple changed files in the same module produce one entity, not N.
+Rule: find the first `/src/` in the path. Everything before it is the module name (e.g., `app/src/main/...` → `app`). If the path has no `/src/`, use `(root)`. `src/test/` and `src/main/` map to the same module entity. Multiple changed files in the same module produce one entity, not N.
 
 Tradeoff: coarser granularity may merge unrelated risk signals within a large module — acceptable for initial implementation; refine if recall quality suffers.
 
@@ -88,6 +88,7 @@ Eliminates string literal comparisons throughout the emission and recall code.
 | `pr-repo` | The repository |
 | `lines-changed` | PR size context |
 | `entity-type` | `contributor`, `reviewer`, or `code-area` — for filtering on recall |
+| `outcome-detail` | Raw outcome value from case context (e.g., `APPROVED`, `FINDINGS_PRESENT`, `sla-breach`). Used by `hasRiskSignals()` to distinguish clean completions from findings. |
 
 ### PrPayload enhancement
 
@@ -271,7 +272,7 @@ public class CaseMemoryRecaller {
                         .withLimit(15)
                         .withSince(Instant.now().minus(Duration.ofDays(90)))
                         .withOrder(MemoryOrder.RELEVANCE)
-                        .withQuestion("security findings and review issues in " + pr.repo()));
+                        .withQuestion("review history for " + String.join(", ", ModulePathNormalizer.normalize(pr.changedPaths())) + " in " + pr.repo()));
 
             return new MemoryContext(contributorHistory, codeAreaHistory);
         } catch (Exception e) {
@@ -316,7 +317,7 @@ public record MemoryContext(
 
 Injected as the `memory` key in the initial case context. Binding conditions can reference `memory.contributorHistory` and `memory.codeAreaHistory`.
 
-`hasRiskSignals()` returns true if any recalled fact has `outcome == ReviewOutcome.FAILED.name()` or has a non-null, non-blank `outcomeDetail` while `outcome == ReviewOutcome.COMPLETED.name()`. A COMPLETED review with findings is a risk signal; a FAILED review is a risk signal. A DECLINED review is a routing signal (scope boundary), not a risk signal — it does not indicate contributor risk.
+`hasRiskSignals()` returns true if any recalled fact has `outcome == ReviewOutcome.FAILED.name()`, or has `outcome == ReviewOutcome.COMPLETED.name()` with an `outcome-detail` attribute value NOT in the known-safe set. Known-safe values: `APPROVED`, `passed`, `approved`. Everything else (e.g., `FINDINGS_PRESENT`, `sla-breach`, any new findings-type value) is treated as a risk signal — fail-closed, so unrecognised outcome details default to risk rather than slipping through. A DECLINED review is a routing signal (scope boundary), not a risk signal — it does not indicate contributor risk.
 
 ### Integration into PrReviewCaseService
 
@@ -375,7 +376,7 @@ Contributor facts are keyed by `contributor:<github-login>`. Under GDPR Art.17, 
 |---|---|---|
 | `ModulePathNormalizerTest` | Unit (domain) | All normalization cases from the table above; deduplication; edge cases (empty list, root-only files) |
 | `DevtownMemoryDomainTest` | Unit (domain) | Domain constant, entity ID formatting, `ReviewOutcome` enum values, attribute key conventions |
-| `MemoryContextTest` | Unit (review) | `toContextMap()` serialisation (text from `Memory.text()`, outcome/capability from attributes, createdAt from `Memory.createdAt()`), `hasRiskSignals()` logic (FAILED = risk, COMPLETED-with-detail = risk, DECLINED = not risk), `EMPTY` constant, empty-list handling |
+| `MemoryContextTest` | Unit (review) | `toContextMap()` serialisation (text from `Memory.text()`, outcome/capability from attributes, createdAt from `Memory.createdAt()`), `hasRiskSignals()` logic (FAILED = risk, COMPLETED + unknown detail = risk, COMPLETED + APPROVED = safe, DECLINED = not risk), `EMPTY` constant, empty-list handling |
 | `CaseMemoryEmitterTest` | Unit (app) | Mock `ReviewCompletedEvent` → verify `storeAll()` called with correct `MemoryInput` list; verify batch includes contributor + reviewer + deduplicated modules; verify `caseId` set on each `MemoryInput`; verify platform reserved keys used (`MemoryAttributeKeys.OUTCOME`, `.ACTOR_ID`); verify `Instance.isResolvable()` guard; verify failure swallowed |
 | `ReviewOutcomeObserverTest` | `@QuarkusTest` (app) | Fire `PlanItemCompletedEvent` → verify `ReviewCompletedEvent` fired with correct fields extracted from case context; verify `PLAN_ITEM_TO_CONTEXT_KEY` mapping resolves correctly; verify infrastructure bindings (unknown planItemId) skipped silently; verify CaseInstance lookup failure swallowed; verify timeout on `Uni.await()` |
 | `CaseMemoryRecallerTest` | `@QuarkusTest` (app) | Pre-populate store → `recall()` → verify `MemoryContext` populated with correct entity IDs, domain, time window (90 days), ordering; verify empty store → `MemoryContext.EMPTY`; verify query failure → `MemoryContext.EMPTY` (fail-open) |
