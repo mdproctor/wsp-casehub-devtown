@@ -22,10 +22,12 @@ After each issue: `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` 
 
 ## Issue #62 — Wire bootstrapEscalationRequired through DevtownTrustRoutingPolicyProvider
 
-**Scale:** XS (wiring change). The issue title describes the full behavioral fix (routing
-to HumanOversight), but engine#415 shipped both the `bootstrapEscalationRequired` field AND
-the enforcement logic in `TrustCandidateClassifier`. The devtown-side wiring IS the complete
-fix — setting the flag correctly is all that remains. The engine already consumes it.
+**Scale:** XS (wiring change only — one line in the provider, three test methods). The
+GitHub issue labels say S/Med because the issue describes the full behavioral fix (routing
+to HumanOversight when no agent meets minimumObservations). But engine#415 shipped both the
+`bootstrapEscalationRequired` field AND the enforcement logic in `TrustCandidateClassifier`.
+The devtown-side wiring IS the remaining work — setting the flag correctly is all that's
+left. The engine already consumes it.
 
 **Closure plan:** This change closes devtown#62. The end-to-end behavior (bootstrap agents
 escalate to HumanOversight for merge-executor) is delivered by engine#415 enforcement +
