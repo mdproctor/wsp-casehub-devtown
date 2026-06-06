@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-06-mdp01-five-small-fixes.md](2026-06-06-mdp01-five-small-fixes.md) | 2026-06-06 | Five small fixes: bootstrapEscalationRequired one-liner, async tenancy red herring, InMemoryMemoryStore question filter gotcha, configurable recall limits, GDPR erasure endpoint |
 | [2026-06-05-mdp01-the-extraction-problem.md](2026-06-05-mdp01-the-extraction-problem.md) | 2026-06-05 | The extraction problem — CaseMemoryStore integration; ReviewCompletedEvent isolates untyped case context extraction; PlanItemCompletedEvent only fires for worker completions; async tenancy silent failure |
 | [2026-06-04-mdp01-the-phantom-spi.md](2026-06-04-mdp01-the-phantom-spi.md) | 2026-06-04 | allowedTypes enforcement: NormativeChannelLayout was fiction; the 9-arg ChannelService.create() overload already existed; channel type contracts; 3 qhorus gaps filed |
 | [2026-05-31-mdp02-xs-s-cleanup-trust-gate.md](2026-05-31-mdp02-xs-s-cleanup-trust-gate.md) | 2026-05-31 | Seven issues closed (3 superseded, 1 dead-end, 1 deferred); DoublePreference moved to domain.preferences; trust gate wired (devtown#58) |
