@@ -4,23 +4,50 @@
 **Branch:** issue-69-xs-s-batch
 **Covers:** devtown#69, devtown#70, devtown#71, casehubio/parent#179
 
+**Implementation order:** #69 → #70 → #71 → parent#179
+
+#70 and #71 both modify `MemoryAdminResource.java`. #70 (logging) is committed first so that #71 (auth annotation) is a clean single-line addition. This avoids the test needing `@TestSecurity` awareness for the logging assertions.
+
 ---
 
 ## #69 — Fix LEDGER_SUBJECT_SEQUENCE H2 test failure
 
 **Problem:** `CaseMemoryIntegrationTest.fullRoundTrip_emitThenRecall()` is `@Disabled` because a casehub-ledger SNAPSHOT introduced `LedgerSequenceAllocator`, which uses a native SQL `MERGE INTO ledger_subject_sequence` table. This table is created by a Flyway migration in `classpath:db/ledger/migration`, but devtown's `@QuarkusTest` uses `drop-and-create` with Flyway disabled — Hibernate never creates the table because it's not a JPA `@Entity`.
 
-**Fix:** Switch from `JpaLedgerEntryRepository` to `InMemoryLedgerEntryRepository` in the test configuration. The in-memory implementation uses a `ConcurrentHashMap` — no SQL table required.
+**Root cause analysis:** The error trace is:
+
+```
+CaseLedgerEventCapture.onCaseLifecycleEvent()
+  → @Inject CaseLedgerEntryRepository ledgerRepo
+    → CaseLedgerEntryRepository extends JpaLedgerEntryRepository
+      → JpaLedgerEntryRepository.save() calls LedgerSequenceAllocator.nextSequenceNumber()
+        → MERGE INTO ledger_subject_sequence  ← table not found
+```
+
+`CaseLedgerEventCapture` (casehub-engine-ledger) injects `CaseLedgerEntryRepository` — a **concrete class** that extends `JpaLedgerEntryRepository`, not the `LedgerEntryRepository` interface. The ledger-memory module's `InMemoryLedgerEntryRepository` implements `LedgerEntryRepository` — a different type. CDI will not substitute it for `CaseLedgerEntryRepository` injection points. `@DefaultBean` on `CaseLedgerEntryRepository` only yields when another bean of the **same type** exists.
+
+GE-20260607-ad3d62 describes the general pattern for downstream consumers using `JpaLedgerEntryRepository` directly. The devtown case is structurally different because casehub-engine-ledger interposes `CaseLedgerEntryRepository` between the consumer and the base repo.
+
+**Existing devtown code:** `app/src/test/java/.../InMemoryLedgerEntryRepository.java` already exists — implements `ReactiveLedgerEntryRepository` (Uni-based reactive interface). This satisfies reactive injection points. It is unrelated to the `CaseLedgerEntryRepository` (blocking JPA) that `CaseLedgerEventCapture` injects.
+
+**Fix: Approach (A) — disable the ledger in tests.**
+
+Set `casehub.ledger.enabled=false` in test `application.properties`. Both `CaseLedgerEventCapture` and `WorkerDecisionEventCapture` already check `ledgerConfig.enabled()` and return early (lines 53 and 64 respectively). `save()` is never called, `LedgerSequenceAllocator` is never invoked, the missing table is never touched.
+
+This is the simplest correct fix. No devtown tests currently assert on ledger entries (verified: no references to `CaseLedgerEntry`, `WorkerDecisionEntry`, `findByCaseId`, or `ledgerRepo` in `app/src/test/`). Disabling the ledger in tests breaks nothing.
+
+**Why not the other approaches:**
+- **(B) Exclude captures from CDI:** More targeted but fragile — `quarkus.arc.exclude-types` is a string list that can fall out of sync with class renames. `casehub.ledger.enabled=false` is the supported config knob that the captures already respect.
+- **(C) In-memory `CaseLedgerEntryRepository` alternative:** Most work, and unnecessary — no devtown test currently needs ledger entry assertions. If that changes, this approach can be revisited.
+
+**Architectural follow-up:** The root cause is that `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (a concrete JPA class) rather than depending on `LedgerEntryRepository` via composition. If it injected `LedgerEntryRepository`, swapping in the in-memory alternative would work naturally. This is a casehub-engine-ledger design issue, not a devtown issue — file as a follow-up on casehubio/engine if it doesn't already exist.
 
 **Changes:**
 
-1. `app/pom.xml` — add `casehub-ledger-memory` test dependency
-2. `app/src/test/resources/application.properties`:
-   - Add Jandex `index-dependency` for `casehub-ledger-memory`
-   - Add `io.casehub.ledger.memory.InMemoryLedgerEntryRepository` to `quarkus.arc.selected-alternatives`
-3. `CaseMemoryIntegrationTest.java` — remove `@Disabled` annotation from `fullRoundTrip_emitThenRecall()`
+1. `app/src/test/resources/application.properties` — add `casehub.ledger.enabled=false`
+2. `CaseMemoryIntegrationTest.java` — remove `@Disabled` annotation from `fullRoundTrip_emitThenRecall()`
 
-**Reference:** GE-20260607-ad3d62 — documents this exact failure and fix pattern.
+**Verification:** Run `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` and confirm `CaseMemoryIntegrationTest.fullRoundTrip_emitThenRecall` passes.
 
 ---
 
@@ -28,16 +55,26 @@
 
 **Problem:** `MemoryAdminResource.eraseContributor()` performs erasure silently — no audit record of who requested it or what was erased.
 
-**Fix:** Add SLF4J structured logging to the erasure endpoint.
+**Requirement (from issue body):** GDPR Art.5(2) requires demonstrating compliance. Log: who requested, when, what was erased, outcome. The issue explicitly calls for logging **before and after** the `eraseEntity()` call.
+
+**Fix:** Add SLF4J structured logging to the erasure endpoint — before the attempt, after success, and on failure.
 
 **Changes:**
 
 1. `MemoryAdminResource.java`:
-   - Add `Logger` field
-   - On successful erasure: `LOG.info("GDPR erasure completed — entityId={}, requestedBy={}, tenantId={}", ...)` using `CurrentPrincipal.actorId()` for the requester
-   - On `UnsupportedOperationException`: `LOG.warn("GDPR erasure not supported — entityId={}, adapter={}", ...)`
+   - Add `Logger` field (`org.jboss.logging.Logger` — Quarkus standard)
+   - **Before erasure:** `LOG.infof("GDPR erasure requested — entityId=%s, requestedBy=%s, tenantId=%s", entityId, principal.actorId(), principal.tenancyId())` — ensures the request is recorded even if the operation crashes mid-execution
+   - **After successful erasure:** `LOG.infof("GDPR erasure completed — entityId=%s, requestedBy=%s, tenantId=%s", ...)`
+   - **On `UnsupportedOperationException`:** `LOG.warnf("GDPR erasure not supported by active adapter — entityId=%s, requestedBy=%s", ...)`
 
-**Rationale:** Application-level audit logging, not a ledger entry. The ledger is for tamper-evident records of case decisions. Admin operations belong in structured logs, queryable via the observability stack.
+**Known limitation:** `eraseEntity()` returns `void` — there is no way to log how many records were actually deleted. This is a `CaseMemoryStore` API limitation. The log records what was requested and that the operation completed without exception. If a count is needed, `eraseEntity()` must be changed to return an `int` or similar — that is a platform-level API change, out of scope for this issue.
+
+**Test:** Add a test that captures log output using a `java.util.logging.Handler` (or Quarkus `InMemoryLogHandler`) and asserts:
+- Erasure request log appears before completion log
+- Both logs contain the entityId and actorId
+- Format matches expected structured fields
+
+**Rationale:** Application-level audit logging, not a ledger entry. The ledger is for tamper-evident records of case decisions. Admin operations belong in structured logs, queryable via the observability stack. But because this is GDPR compliance logging, test coverage for the log format matters more than usual — a silent regression could break demonstrable compliance.
 
 ---
 
@@ -50,10 +87,13 @@
 **Changes:**
 
 1. `MemoryAdminResource.java` — add `@RolesAllowed("admin")` at the class level
+2. Import: `jakarta.annotation.security.RolesAllowed` (the standard JAX-RS annotation, not any Quarkus-specific variant)
 
-**Rationale:** The platform's RBAC infrastructure is implemented: `CurrentPrincipal.roles()` delegates to `groups()`, and `casehub-platform-oidc` reads roles from `SecurityIdentity.getRoles()`. `@RolesAllowed` is the prescribed mechanism per the auth-retrofit-readiness protocol. The annotation is architecturally correct now and enforces automatically when `casehub-platform-oidc` is added to the classpath.
+**Rationale:** The platform's RBAC infrastructure is implemented: `CurrentPrincipal.roles()` is a default method that delegates to `groups()`, and `casehub-platform-oidc` ships `OidcCurrentPrincipal @RequestScoped` which reads roles from `SecurityIdentity.getRoles()`. `@RolesAllowed` is the prescribed mechanism per the auth-retrofit-readiness protocol. The annotation is architecturally correct now and enforces automatically when `casehub-platform-oidc` is added to the classpath.
 
 **Test impact:** No security extension is active in devtown's test classpath, so `@RolesAllowed` is inert in tests — existing tests pass unchanged. When OIDC is adopted, tests will need `@TestSecurity` annotations (that's the OIDC adoption issue, not this one).
+
+**Role name convention:** The role name `"admin"` is not documented as a platform convention. This is the first use of a named role in any CaseHub harness. File a follow-up issue on casehubio/parent to document the role name convention (which role names exist, what they mean, how they map to OIDC groups) before production deployment.
 
 **Filed:** parent#187 — docs: update PLATFORM.md to reflect RBAC infrastructure is implemented.
 
@@ -70,4 +110,11 @@
 1. `docs/PLATFORM.md` — add dependency row: `casehub-platform-memory-inmem` | `devtown` | `app` | In-memory CaseMemoryStore for test isolation
 2. `docs/repos/casehub-devtown.md` — add CaseMemoryStore section documenting: memory-inmem for tests, emission chain (ReviewOutcomeObserver → CaseMemoryEmitter), recall chain (CaseMemoryRecaller), domain (`SOFTWARE_REVIEW`), entity patterns (`contributor:{login}`, `module:{repo}/{module}`)
 
-**Cross-repo:** This is a docs-only change in `casehubio/parent`. Will be committed to the parent repo directly.
+**Cross-repo mechanics:** This is a docs-only change in `casehubio/parent`. Per CLAUDE.md: "Never commit or push to peer repo directories." This will be committed in a separate parent session or via GitHub PR from a parent branch — not from this devtown session. The parent workspace HANDOFF.md will be updated per the cross-repo HANDOFF convention.
+
+---
+
+## Follow-up issues to file before leaving brainstorming
+
+1. **casehubio/engine** — `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (concrete class) instead of injecting `LedgerEntryRepository` (interface) via composition. Every downstream consumer hits the same `LEDGER_SUBJECT_SEQUENCE` problem because the in-memory alternative can't substitute for the concrete class. (Check if this already exists before filing.)
+2. **casehubio/parent** — document role name convention for `@RolesAllowed` — which roles exist, what they mean, how they map to OIDC groups.
