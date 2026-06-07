@@ -48,6 +48,7 @@ No devtown tests currently assert on ledger entries (verified: no references to 
 
 1. `app/src/test/resources/application.properties` — add `casehub.ledger.enabled=false` (no `%test.` prefix needed — this file is already test-only). Place it near the existing datasource section. The main `application.properties` has `casehub.ledger.datasource=qhorus` but no `enabled` override, so the ledger defaults to `enabled=true` in dev/prod — this split is intentional.
 2. `CaseMemoryIntegrationTest.java` — remove `@Disabled` annotation from `fullRoundTrip_emitThenRecall()`
+3. `ARC42STORIES.MD` §9.4 Layer — casehub-engine — add to Pattern to replicate step 8: "Set `casehub.ledger.enabled=false` in test `application.properties` if `casehub-engine-ledger` is on the classpath. Without this, `CaseLedgerEventCapture` calls `JpaLedgerEntryRepository.save()` → `LedgerSequenceAllocator.nextSequenceNumber()` → `MERGE INTO ledger_subject_sequence`, which fails in H2 `drop-and-create` mode (the table is created by Flyway, not Hibernate)." Also update the existing Gotcha to clarify that the `InMemoryLedgerEntryRepository` stub (step 7) solves reactive CDI resolution, while `casehub.ledger.enabled=false` solves the blocking write chain — both are needed.
 
 **Verification:** Run `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` and confirm `CaseMemoryIntegrationTest.fullRoundTrip_emitThenRecall` passes.
 
@@ -69,13 +70,17 @@ No devtown tests currently assert on ledger entries (verified: no references to 
    - **After successful erasure:** `LOG.infof("GDPR erasure completed — entityId=%s, requestedBy=%s, tenantId=%s", ...)`
    - **On `UnsupportedOperationException`:** `LOG.warnf("GDPR erasure not supported by active adapter — entityId=%s, requestedBy=%s", ...)`
 
-**Known limitation:** `eraseEntity()` returns `void` — there is no way to log how many records were actually deleted. This is a `CaseMemoryStore` API limitation. The log records what was requested and that the operation completed without exception. If a count is needed, `eraseEntity()` must be changed to return an `int` or similar — that is a platform-level API change, out of scope for this issue.
+**Known limitation (platform#72):** `eraseEntity()` returns `void` — there is no way to log how many records were actually deleted. This is a `CaseMemoryStore` API limitation. The log records what was requested and that the operation completed without exception. Filed platform#72 to change the return type to `int` — the migration is mechanical (three implementations).
 
-**Test:** Add a test that captures log output via `java.util.logging.Handler` registered on the `MemoryAdminResource` logger name. In the Quarkus test environment, JBoss Logging delegates to `java.util.logging`, so a JUL handler on `"io.casehub.devtown.app.MemoryAdminResource"` captures all log output. Assert:
+**Test:** Add a test that captures log output via `java.util.logging.Handler` registered on the `MemoryAdminResource` logger name. In the Quarkus test environment, JBoss Logging delegates to `java.util.logging`, so a JUL handler on `"io.casehub.devtown.app.MemoryAdminResource"` captures all log output.
+
+Test invocation: use `@Inject MemoryAdminResource` and call `eraseContributor()` directly — avoids HTTP layer noise for a log-capture test. The existing REST-assured tests in `MemoryAdminResourceTest` already cover the HTTP stack.
+
+Assert:
 - Erasure request log appears before completion log (success path)
 - Both logs contain the entityId and actorId
 - Format matches expected structured fields
-- The `UnsupportedOperationException` path emits a WARN-level log with the entityId (proves even failed erasure attempts are recorded)
+- The `UnsupportedOperationException` path emits a WARN-level log with the entityId (proves even failed erasure attempts are recorded). To trigger this path: use `@InjectMock CaseMemoryStore` configured to throw `UnsupportedOperationException` on `eraseEntity()` — the active `InMemoryMemoryStore` supports erasure, so it won't throw naturally.
 
 **Rationale:** Application-level audit logging, not a ledger entry. The ledger is for tamper-evident records of case decisions. Admin operations belong in structured logs, queryable via the observability stack. But because this is GDPR compliance logging, test coverage for the log format matters more than usual — a silent regression could break demonstrable compliance.
 
@@ -100,6 +105,8 @@ No devtown tests currently assert on ledger entries (verified: no references to 
 
 **Related:** parent#187 (docs: update PLATFORM.md to reflect RBAC infrastructure is implemented) — already closed.
 
+**Pre-existing note:** `MemoryAdminResource` has `@Consumes(APPLICATION_JSON)` but no `@Produces`. The 501 error path returns a plain string entity, not JSON. Deliberately not adding `@Produces(APPLICATION_JSON)` — the 204 success path has no body, and the 501 body is a plain error string. If the 501 response is ever structured as JSON, add `@Produces` at that time.
+
 ---
 
 ## parent#179 — Doc sync: devtown as CaseMemoryStore consumer
@@ -121,3 +128,4 @@ No devtown tests currently assert on ledger entries (verified: no references to 
 
 1. **engine#436** — `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (concrete class) instead of injecting `LedgerEntryRepository` (interface) via composition. Every downstream consumer hits the same `LEDGER_SUBJECT_SEQUENCE` problem because the in-memory alternative can't substitute for the concrete class.
 2. **parent#189** — document `@RolesAllowed` role name convention — which roles exist, what they mean, how they map to OIDC groups.
+3. **platform#72** — `CaseMemoryStore.eraseEntity()` should return `int` (count of records deleted) for GDPR Art.5(2) compliance logging.
