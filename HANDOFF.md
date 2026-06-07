@@ -1,40 +1,31 @@
-# HANDOFF — 2026-06-05
+# HANDOFF — 2026-06-06
 
 ## Last Session
 
-Shipped CaseMemoryStore integration (devtown#43, closed). Two-layer emission architecture: `ReviewOutcomeObserver` extracts structured data from `PlanItemCompletedEvent` + case context, fires typed `ReviewCompletedEvent`; `CaseMemoryEmitter` converts to `MemoryInput` and calls `storeAll()`. Recall via `CaseMemoryRecaller` before case open. Also wrote Layer 2 narrative in ARC42STORIES.MD §9.4.
+Closed five XS/S issues on one branch (`issue-62-xs-s-batch`): trust routing wiring (#62), async tenancy fix (#67), recall test coverage (#68), configurable recall limits (#65), GDPR erasure endpoint (#66). Branch rebased onto main, squashed (7→6), pushed to fork and blessed. Three follow-up issues filed (#69, #70, #71).
 
 ## Immediate Next Step
 
-Pick from What's Next — `devtown#62` is still blocked on engine#415. Layer 4 (casehub-ledger) or parent housekeeping issues are available.
-
-## Cross-Module
-
-**Blocked by:**
-- `casehub-engine` — engine#415 (`TrustRoutingPolicy.bootstrapFallbackType`) blocks devtown#62 · XS · Low
+Pick from What's Next — Layer 4 (casehub-ledger tamper-evident audit trail) is the next foundation layer. Or pick off smaller items (#69, #70, #71).
 
 ## What's Left
 
-- **devtown#62** — blocked on engine#415; devtown side is XS once foundation merges · XS · Low
-- **devtown#65** — configurable recall limits via PreferenceKey · S · Low
-- **devtown#66** — GDPR erasure endpoint for contributor memory · S · Med
-- **devtown#67** — integration test async tenancy fix · S · Med
-- **devtown#68** — code-area recall test + empty changedPaths edge case · XS · Low
-- **parent#115** — Replace AML hardcoded trust policy with per-field PreferenceKey · S · Low
-- **parent#120 / #121 / #122** — Three parent doc housekeeping issues · XS · Low each
+- **devtown#69** — CaseMemoryIntegrationTest: LEDGER_SUBJECT_SEQUENCE table missing in H2 · S · Med
+- **devtown#70** — GDPR erasure audit trail logging · XS · Low
+- **devtown#71** — Add authorization to MemoryAdminResource before production · XS · Low
 - **parent#179** — doc sync: devtown as CaseMemoryStore consumer in PLATFORM.md · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #62 | Wire `fallbackType` through DevtownTrustRoutingPolicyProvider | XS | Low | Blocked on engine#415 |
+| #69 | Fix LEDGER_SUBJECT_SEQUENCE table in H2 test DB | S | Med | Enables full integration test |
+| #70 | GDPR erasure audit trail logging | XS | Low | |
+| #71 | Authorization on MemoryAdminResource | XS | Low | Blocked on RBAC implementation |
 | — | Layer 4 — casehub-ledger tamper-evident audit trail | L | Med | Next foundation layer |
-| #67 | Fix async tenancy for CaseMemoryIntegrationTest | S | Med | Platform-level concern |
 
 ## References
 
-- `blog/2026-06-05-mdp01-the-extraction-problem.md` — this session's diary
-- `docs/specs/2026-06-05-case-memory-store-integration-design.md` — CaseMemoryStore spec (promoted to project)
-- engine#428-430 — PlanItemCompletedEvent SPI promotion, tenantId, fault event
-- qhorus#251 — commitment DECLINED CDI event
+- `blog/2026-06-06-mdp01-five-small-fixes.md` — this session's diary
+- `docs/specs/2026-06-06-xs-s-batch-design.md` — batch spec (promoted to project)
+- GE-20260606-dc4293 — InMemoryMemoryStore question filter gotcha
