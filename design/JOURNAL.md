@@ -1,1 +1,1 @@
-# Design Journal — issue-41-layer2-sla-breach-policy
+# Design Journal — issue-19-xs-s-m-batch

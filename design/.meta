@@ -1,0 +1,9 @@
+branch: issue-19-xs-s-m-batch
+project-sha: 698cf9d737a0059cfb506b3dbf688dcb89c6d598
+date: 2026-06-07
+issue: 19
+issue-repo: casehubio/devtown
+covers: 19,61,72,64,18,60
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes:
