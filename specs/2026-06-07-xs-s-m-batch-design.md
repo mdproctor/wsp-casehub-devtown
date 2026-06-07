@@ -54,7 +54,7 @@ The current `DevtownCapabilityRegistry` is the correct "populated default" per t
 
 `CaseMemoryIntegrationTest.fullRoundTrip_emitThenRecall()` is `@Disabled` with error: "CaseDefinition not found during startCase — async case definition registration race."
 
-#### Root Cause Analysis
+#### What We Know
 
 `DefaultCaseDefinitionRegistry` registers case definitions at startup:
 
@@ -65,18 +65,34 @@ void onStart(@Observes @Priority(10) StartupEvent ev) {
 }
 ```
 
-`registerKnownDefinitions()` iterates all `CaseHub` beans via `Instance<CaseHub>` and calls `registerCaseDefinition()` for each. This reactive chain calls `caseMetaModelRepository.findByKey(namespace, name, version, currentPrincipal.tenancyId())` followed by `.save()`, then does `registry.put()` in an `.invoke()` callback.
+Registration iterates all `CaseHub` beans via `Instance<CaseHub>` and for each calls `registerCaseDefinition()`. This reactive chain calls `caseMetaModelRepository.findByKey(namespace, name, version, currentPrincipal.tenancyId())`, then `.save()`, then `registry.put()` via `.invoke()`.
 
-The `getCaseMetaModel()` method (called from `startCase`) does a synchronous lookup in the `registry` ConcurrentHashMap. If the entry isn't present, it throws `RuntimeException("CaseMetaModel not found...")`.
+`getCaseMetaModel()` (called by `startCase`) does a synchronous lookup in the `registry` ConcurrentHashMap. If the entry is absent, it throws `RuntimeException("CaseMetaModel not found...")`.
 
-Probable cause: the reactive registration chain runs on a Vert.x context thread. The `await()` on the calling thread may return before the `registry.put()` in the reactive chain's `.invoke()` callback has executed — a happens-before gap between the Vert.x context completing the Uni and the ConcurrentHashMap write being visible.
+**Key facts:**
+
+1. **`await()` guarantees visibility.** Mutiny's `await()` uses a `CountDownLatch` internally, which establishes a happens-before relationship per JMM. By the time `await().atMost(30s)` returns, all `.invoke()` callbacks in the reactive pipeline have completed and their side effects (the `ConcurrentHashMap.put()`) are visible to the calling thread. A timing/visibility race between the Vert.x context and the startup thread is not the cause.
+
+2. **`CaseKey` is tenancy-agnostic.** `CaseKey(namespace, name, version)` — no tenancyId component. Both `CaseKey.of(CaseDefinition)` and `CaseKey.of(CaseMetaModel)` extract the same three fields. A key mismatch between registration and lookup is not the cause.
+
+3. **Startup-only registration (GE-20260414-f4f539).** Since engine PR #28, `startCase()` no longer registers definitions at runtime — it only looks up pre-registered definitions. If registration fails during startup for any reason, `startCase()` will always fail.
+
+4. **tenancyId at startup vs test.** During startup, `currentPrincipal.tenancyId()` returns the `FixedCurrentPrincipal` default (before `@BeforeEach` sets it to `DEFAULT_TENANT_ID`). The tenancyId is used in `caseMetaModelRepository.findByKey()` and `.save()` — these store the `CaseMetaModel` in the in-memory map keyed by `tenancyId:namespace:name:version`. While this doesn't affect the registry ConcurrentHashMap (tenancy-agnostic), a startup failure in the repository path (e.g., null tenancyId causing an NPE) could abort registration silently.
+
+5. **`registerKnownDefinitions()` concatenates, doesn't fail-fast.** It uses `transformToUniAndConcatenate` — if the first `CaseHub` registration fails, the exception propagates to `await()` and the startup handler throws. But if the Uni completes successfully with a null result (e.g., `findByKey` returns null, `save` swallows an error), the `registry.put()` would be skipped.
 
 #### Fix Approach
 
-1. Remove `@Disabled` from `fullRoundTrip_emitThenRecall()`.
-2. Run the test to capture the exact exception and stack trace.
-3. If the failure is the registration race: add an `awaitility` guard at the start of the test that waits for `caseHub.getDefinition()` to be registered in the `CaseDefinitionRegistry` before calling `startCase()`. This is a test-side fix — the engine's startup registration is correct for production (where no test thread races against it).
-4. If the failure has a different root cause (e.g., tenancyId mismatch between startup principal and test principal), fix accordingly.
+The root cause is not established — the analysis above narrows the search space but does not identify the failure. The fix is diagnostic-first:
+
+1. **Remove `@Disabled`** from `fullRoundTrip_emitThenRecall()`.
+2. **Run the test** and capture the exact exception, stack trace, and any startup warnings/errors in the Quarkus log.
+3. **Let the actual failure drive the fix.** Candidate root causes to investigate in order:
+   - Startup registration failure (exception swallowed or Uni completing empty) — check Quarkus startup logs for `CaseDefinitionRegistry` registration messages.
+   - tenancyId null/mismatch during startup causing `InMemoryCaseMetaModelRepository` to store under a different key than expected.
+   - `FixedCurrentPrincipal` state at startup vs `@BeforeEach` — does `reset()` undo a successful registration?
+4. **If the root cause is in the engine's startup path**, the fix belongs in the engine (or in the devtown SPI configuration), not in a test-side workaround. A startup registration bug affects production, not just tests.
+5. **If the root cause is test configuration** (e.g., principal state, CDI ordering), fix the test configuration.
 
 #### Verification
 
@@ -109,7 +125,7 @@ The work channel writer list is intentionally restrictive. In the current Layer 
    - `findOrCreateObserveChannel()` — pass `ORCHESTRATOR` as `allowedWriters`.
    - `findOrCreateOversightChannel()` — pass `ORCHESTRATOR` as `allowedWriters`.
    - Add `requireAllowedWriters()` validation method, parallel to existing `requireAllowedTypes()`.
-   - Introduce `ORCHESTRATOR_WRITERS` constant alongside existing type constants.
+   - Use the existing `ORCHESTRATOR` constant directly — no separate `ORCHESTRATOR_WRITERS` constant. All three channels have the same writer set right now; when Layer 6 differentiates them, the constant structure will be revisited.
 
 2. **`PrReviewQhorusLifecycleTest`:**
    - Add assertions for `allowedWriters` on all three channels.
@@ -125,82 +141,110 @@ Existing channels (created before this change) will have `allowedWriters = null`
 
 #### Requirement
 
-Protocol `case-definition-layers` mandates every YAML case definition has a companion fluent Java DSL builder. Currently `pr-review.yaml` (147 lines, 8 capabilities, 3 goals, 11 bindings) is the only case definition and has no DSL companion.
+Protocol `case-definition-layers` mandates every YAML case definition has a companion fluent Java DSL builder. PLATFORM.md specifies: "Fluent DSL builders target the same canonical model and additionally support `LambdaExpressionEvaluator` (not expressible in YAML). All YAML definitions ⊂ fluent DSL; reverse is not true. Tests: build `CaseDefinition` directly via builders."
 
-#### Design
+#### Existing Code
 
-Create `PrReviewCaseDefinitions` in the `review/` module — a utility class with a single static factory method that builds the same `CaseDefinition` as `pr-review.yaml`.
+There is already a fluent DSL factory at `review/src/test/java/io/casehub/devtown/review/PrReviewCaseDefinition.java` — 177 lines, package-private, builds a complete `CaseDefinition` with 9 capabilities, 3 goals, 10 bindings, and uses `LambdaExpressionEvaluator` for binding conditions. It is used by `PrReviewBindingConditionTest` (28 unit tests covering all binding condition logic).
 
-**Module placement:** `review/src/main/java/io/casehub/devtown/review/PrReviewCaseDefinitions.java`
+This existing class is already 90% of the protocol-mandated companion. Creating a second parallel class would produce naming confusion (`PrReviewCaseDefinition` vs `PrReviewCaseDefinitions`), duplicated structure, and drift risk. The right move is to promote and fix the existing class.
 
-The `review/` module is correct because:
-- The DSL builder is domain logic (defines what a PR review case is), not application wiring.
-- It sits alongside `PrReviewApplicationService` and other domain contracts.
-- The `app/` module's `PrReviewCaseHub` continues to load from YAML — the DSL companion exists for programmatic construction and testing, not as a replacement.
+#### Design: Promote and Fix
 
-**Structure:**
+**Promote** `PrReviewCaseDefinition` from `review/src/test/` to `review/src/main/`:
+
+- Move to `review/src/main/java/io/casehub/devtown/review/PrReviewCaseDefinition.java`
+- Change visibility from package-private to `public`
+- Change `build(int humanApprovalThreshold)` to `public`
+
+**Fix three divergences from the YAML:**
+
+1. **`human-approval` binding uses wrong target type.** The existing class uses `.capability(humanDecisionCap)` but the YAML uses `humanTask:` with `title`, `candidateGroups`, `expiresIn`, and `outputMapping`. Fix to use `HumanTaskTarget.inline()`:
+
+   ```java
+   def.getBindings().add(Binding.builder().name("human-approval").on(trigger)
+       .when(new LambdaExpressionEvaluator(ctx -> { ... }))
+       .humanTask(HumanTaskTarget.inline()
+           .title("PR approval required")
+           .candidateGroups(StaticListEvaluator.of("pr-reviewers"))
+           .expiresIn(Duration.ofHours(24))
+           .outputMapping(new JQExpressionEvaluator("{ humanApproval: . }"))
+           .build())
+       .build());
+   ```
+
+2. **Capability `inputSchema`/`outputSchema` are all `"{}"`**. The YAML defines specific schemas (e.g., code-analysis has `inputSchema: "{ pr: .pr }"`, `outputSchema: "{ codeAnalysis: . }"`). Fix each capability to match the YAML schemas exactly.
+
+3. **Capability count mismatch.** The existing class includes 9 capabilities (including `human-decision:pr-approval`). The YAML lists 8 (no `human-decision:pr-approval` since it's a `humanTask` binding, not a `capability` binding). After fixing the `human-approval` binding to use `HumanTaskTarget`, remove `humanDecisionCap` from the capabilities list to match the YAML.
+
+**Why lambdas, not JQ:** The protocol explicitly says "Fluent DSL builders additionally support `LambdaExpressionEvaluator` (not expressible in YAML)." The DSL companion's architectural value is precisely that it uses lambdas — enabling pure unit tests of binding conditions without a JQ runtime or Quarkus context. `PrReviewBindingConditionTest` (28 tests) depends on this. JQ conditions would make the DSL a string-for-string duplicate of the YAML with no additional value.
+
+**No `dsl` field on the builder.** `CaseDefinition.Builder` has no `dsl()` method. The `dsl` field is set via `setDsl()` post-build. The DSL companion should call `def.setDsl("0.1")` after `build()` if the field is needed, or omit it — the `dsl` field is YAML metadata that has no runtime effect in the canonical model.
+
+#### Test: Deep Structural Equivalence
+
+Rename existing `PrReviewBindingConditionTest` references to use the new production path (import changes only — the class is the same, just moved).
+
+Create `PrReviewCaseDefinitionEquivalenceTest` in `review/src/test/` — a plain JUnit test (no `@QuarkusTest`) verifying structural parity between the DSL companion and the YAML:
 
 ```java
-public final class PrReviewCaseDefinitions {
-
-    public static CaseDefinition prReview() {
-        return CaseDefinition.builder()
-            .name("pr-review")
-            .namespace("devtown")
-            .version("1.0.0")
-            .dsl("0.1")
-            // ... capabilities, goals, completion, bindings
-            .build();
-    }
-
-    private PrReviewCaseDefinitions() {}
-}
-```
-
-The method mirrors the YAML structure exactly:
-- 8 capabilities with inputSchema/outputSchema
-- 3 goals with JQ conditions
-- Completion criteria (allOf: pr-approved, security-verified, ci-passing)
-- 11 bindings organized in 4 groups (entry, content-driven, human gate, merge)
-
-**Dependencies:** The `review/` module already depends on `casehub-engine-api` (which provides `CaseDefinition`, `CaseDefinition.builder()`, and all model types). No new dependencies needed.
-
-#### Test
-
-Create `PrReviewCaseDefinitionTest` in `review/src/test/`:
-
-```java
-class PrReviewCaseDefinitionTest {
+class PrReviewCaseDefinitionEquivalenceTest {
 
     @Test
     void dslMatchesYaml() {
         CaseDefinition fromYaml = CaseDefinitionYamlMapper.load(
             getClass().getClassLoader().getResourceAsStream("devtown/pr-review.yaml"));
-        CaseDefinition fromDsl = PrReviewCaseDefinitions.prReview();
+        CaseDefinition fromDsl = PrReviewCaseDefinition.build(500);
 
-        // Structural equivalence checks
+        // Identity
         assertThat(fromDsl.getName()).isEqualTo(fromYaml.getName());
         assertThat(fromDsl.getNamespace()).isEqualTo(fromYaml.getNamespace());
+        assertThat(fromDsl.getVersion()).isEqualTo(fromYaml.getVersion());
+
+        // Capabilities — count, names, schemas
         assertThat(fromDsl.getCapabilities()).hasSameSizeAs(fromYaml.getCapabilities());
-        assertThat(fromDsl.getGoals()).hasSameSizeAs(fromYaml.getGoals());
-        assertThat(fromDsl.getBindings()).hasSameSizeAs(fromYaml.getBindings());
-
-        // Per-capability checks
         for (int i = 0; i < fromYaml.getCapabilities().size(); i++) {
-            assertThat(fromDsl.getCapabilities().get(i).getName())
-                .isEqualTo(fromYaml.getCapabilities().get(i).getName());
+            var yamlCap = fromYaml.getCapabilities().get(i);
+            var dslCap = fromDsl.getCapabilities().get(i);
+            assertThat(dslCap.getName()).isEqualTo(yamlCap.getName());
+            assertThat(dslCap.getInputSchema()).isEqualTo(yamlCap.getInputSchema());
+            assertThat(dslCap.getOutputSchema()).isEqualTo(yamlCap.getOutputSchema());
         }
 
-        // Per-binding checks (name, capability, when condition)
-        for (int i = 0; i < fromYaml.getBindings().size(); i++) {
-            assertThat(fromDsl.getBindings().get(i).getName())
-                .isEqualTo(fromYaml.getBindings().get(i).getName());
+        // Goals — count, names, kinds
+        assertThat(fromDsl.getGoals()).hasSameSizeAs(fromYaml.getGoals());
+        for (int i = 0; i < fromYaml.getGoals().size(); i++) {
+            assertThat(fromDsl.getGoals().get(i).getName())
+                .isEqualTo(fromYaml.getGoals().get(i).getName());
+            assertThat(fromDsl.getGoals().get(i).getKind())
+                .isEqualTo(fromYaml.getGoals().get(i).getKind());
         }
+
+        // Bindings — count, names, target types, non-null conditions
+        assertThat(fromDsl.getBindings()).hasSameSizeAs(fromYaml.getBindings());
+        for (int i = 0; i < fromYaml.getBindings().size(); i++) {
+            var yamlBinding = fromYaml.getBindings().get(i);
+            var dslBinding = fromDsl.getBindings().get(i);
+            assertThat(dslBinding.getName()).isEqualTo(yamlBinding.getName());
+            assertThat(dslBinding.target().getClass())
+                .as("binding '%s' target type", yamlBinding.getName())
+                .isEqualTo(yamlBinding.target().getClass());
+            if (yamlBinding.getWhen() != null) {
+                assertThat(dslBinding.getWhen())
+                    .as("binding '%s' should have a when condition", yamlBinding.getName())
+                    .isNotNull();
+            }
+        }
+
+        // Completion structure — same goal references
+        assertThat(fromDsl.getCompletion()).isNotNull();
+        assertThat(fromDsl.getCompletion().getClass())
+            .isEqualTo(fromYaml.getCompletion().getClass());
     }
 }
 ```
 
-This is a plain JUnit test (no `@QuarkusTest` needed) — it compares two `CaseDefinition` objects structurally.
+This test verifies everything that CAN be compared across evaluator types: names, counts, schemas, goal kinds, binding target types (CapabilityTarget vs HumanTaskTarget), condition presence, and completion structure. It intentionally does not compare evaluator equality (JQ vs lambda are structurally different objects).
 
 #### Garden Gotcha
 
@@ -211,11 +255,11 @@ GE-20260531-d896bf: "SubCase M-of-N fields (groupId, totalInGroup, requiredCount
 ## Implementation Order
 
 1. **#19, #61, #18** — close issues on GitHub (no code)
-2. **#72** — fix CaseMemoryIntegrationTest
+2. **#72** — fix CaseMemoryIntegrationTest (diagnostic-first)
 3. **#64** — set allowedWriters on channels
-4. **#60** — create fluent DSL companion
+4. **#60** — promote and fix fluent DSL companion
 
-This order handles the smallest/diagnostic work first, then the structural channel change, then the larger additive DSL work.
+This order handles the smallest/diagnostic work first, then the structural channel change, then the larger DSL work.
 
 ---
 
