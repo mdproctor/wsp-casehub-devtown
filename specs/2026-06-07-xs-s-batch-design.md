@@ -34,17 +34,19 @@ GE-20260607-ad3d62 describes the general pattern for downstream consumers using 
 
 Set `casehub.ledger.enabled=false` in test `application.properties`. Both `CaseLedgerEventCapture` and `WorkerDecisionEventCapture` already check `ledgerConfig.enabled()` and return early (lines 53 and 64 respectively). `save()` is never called, `LedgerSequenceAllocator` is never invoked, the missing table is never touched.
 
-This is the simplest correct fix. No devtown tests currently assert on ledger entries (verified: no references to `CaseLedgerEntry`, `WorkerDecisionEntry`, `findByCaseId`, or `ledgerRepo` in `app/src/test/`). Disabling the ledger in tests breaks nothing.
+This is the simplest correct fix. `casehub.ledger.enabled` is a **write-side master switch** — it gates `CaseLedgerEventCapture` and `WorkerDecisionEventCapture` only. It does not affect `TrustGateService`, `TrustWeightedAgentStrategy`, or `ActorTrustScoreRepository`. The three existing trust-related `@QuarkusTest` classes (`TrustRoutingActivationTest`, `TrustGateWiringTest`, `DevtownObligorTrustPolicyTest`) inject ledger trust-scoring beans and are unaffected by this setting.
+
+No devtown tests currently assert on ledger entries (verified: no references to `CaseLedgerEntry`, `WorkerDecisionEntry`, `findByCaseId`, or `ledgerRepo` in `app/src/test/`). Disabling the ledger writes in tests breaks nothing.
 
 **Why not the other approaches:**
 - **(B) Exclude captures from CDI:** More targeted but fragile — `quarkus.arc.exclude-types` is a string list that can fall out of sync with class renames. `casehub.ledger.enabled=false` is the supported config knob that the captures already respect.
 - **(C) In-memory `CaseLedgerEntryRepository` alternative:** Most work, and unnecessary — no devtown test currently needs ledger entry assertions. If that changes, this approach can be revisited.
 
-**Architectural follow-up:** The root cause is that `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (a concrete JPA class) rather than depending on `LedgerEntryRepository` via composition. If it injected `LedgerEntryRepository`, swapping in the in-memory alternative would work naturally. This is a casehub-engine-ledger design issue, not a devtown issue — file as a follow-up on casehubio/engine if it doesn't already exist.
+**Architectural follow-up (engine#436):** The root cause is that `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (a concrete JPA class) rather than depending on `LedgerEntryRepository` via composition. If it injected `LedgerEntryRepository`, swapping in the in-memory alternative would work naturally. This is a casehub-engine-ledger design issue, not a devtown issue.
 
 **Changes:**
 
-1. `app/src/test/resources/application.properties` — add `casehub.ledger.enabled=false`
+1. `app/src/test/resources/application.properties` — add `casehub.ledger.enabled=false` (no `%test.` prefix needed — this file is already test-only). Place it near the existing datasource section. The main `application.properties` has `casehub.ledger.datasource=qhorus` but no `enabled` override, so the ledger defaults to `enabled=true` in dev/prod — this split is intentional.
 2. `CaseMemoryIntegrationTest.java` — remove `@Disabled` annotation from `fullRoundTrip_emitThenRecall()`
 
 **Verification:** Run `JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install` and confirm `CaseMemoryIntegrationTest.fullRoundTrip_emitThenRecall` passes.
@@ -69,10 +71,11 @@ This is the simplest correct fix. No devtown tests currently assert on ledger en
 
 **Known limitation:** `eraseEntity()` returns `void` — there is no way to log how many records were actually deleted. This is a `CaseMemoryStore` API limitation. The log records what was requested and that the operation completed without exception. If a count is needed, `eraseEntity()` must be changed to return an `int` or similar — that is a platform-level API change, out of scope for this issue.
 
-**Test:** Add a test that captures log output using a `java.util.logging.Handler` (or Quarkus `InMemoryLogHandler`) and asserts:
-- Erasure request log appears before completion log
+**Test:** Add a test that captures log output via `java.util.logging.Handler` registered on the `MemoryAdminResource` logger name. In the Quarkus test environment, JBoss Logging delegates to `java.util.logging`, so a JUL handler on `"io.casehub.devtown.app.MemoryAdminResource"` captures all log output. Assert:
+- Erasure request log appears before completion log (success path)
 - Both logs contain the entityId and actorId
 - Format matches expected structured fields
+- The `UnsupportedOperationException` path emits a WARN-level log with the entityId (proves even failed erasure attempts are recorded)
 
 **Rationale:** Application-level audit logging, not a ledger entry. The ledger is for tamper-evident records of case decisions. Admin operations belong in structured logs, queryable via the observability stack. But because this is GDPR compliance logging, test coverage for the log format matters more than usual — a silent regression could break demonstrable compliance.
 
@@ -93,9 +96,9 @@ This is the simplest correct fix. No devtown tests currently assert on ledger en
 
 **Test impact:** No security extension is active in devtown's test classpath, so `@RolesAllowed` is inert in tests — existing tests pass unchanged. When OIDC is adopted, tests will need `@TestSecurity` annotations (that's the OIDC adoption issue, not this one).
 
-**Role name convention:** The role name `"admin"` is not documented as a platform convention. This is the first use of a named role in any CaseHub harness. File a follow-up issue on casehubio/parent to document the role name convention (which role names exist, what they mean, how they map to OIDC groups) before production deployment.
+**Role name convention (parent#189):** The role name `"admin"` is not documented as a platform convention. This is the first use of a named role in any CaseHub harness. Filed parent#189 to document the role name convention (which role names exist, what they mean, how they map to OIDC groups) before production deployment.
 
-**Filed:** parent#187 — docs: update PLATFORM.md to reflect RBAC infrastructure is implemented.
+**Related:** parent#187 (docs: update PLATFORM.md to reflect RBAC infrastructure is implemented) — already closed.
 
 ---
 
@@ -114,7 +117,7 @@ This is the simplest correct fix. No devtown tests currently assert on ledger en
 
 ---
 
-## Follow-up issues to file before leaving brainstorming
+## Follow-up issues filed
 
-1. **casehubio/engine** — `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (concrete class) instead of injecting `LedgerEntryRepository` (interface) via composition. Every downstream consumer hits the same `LEDGER_SUBJECT_SEQUENCE` problem because the in-memory alternative can't substitute for the concrete class. (Check if this already exists before filing.)
-2. **casehubio/parent** — document role name convention for `@RolesAllowed` — which roles exist, what they mean, how they map to OIDC groups.
+1. **engine#436** — `CaseLedgerEntryRepository` extends `JpaLedgerEntryRepository` (concrete class) instead of injecting `LedgerEntryRepository` (interface) via composition. Every downstream consumer hits the same `LEDGER_SUBJECT_SEQUENCE` problem because the in-memory alternative can't substitute for the concrete class.
+2. **parent#189** — document `@RolesAllowed` role name convention — which roles exist, what they mean, how they map to OIDC groups.
