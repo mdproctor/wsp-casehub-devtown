@@ -1,0 +1,9 @@
+branch: issue-69-xs-s-batch
+project-sha: 
+date: 2026-06-07
+issue: 69
+issue-repo: casehubio/devtown
+covers: 69,70,71
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
