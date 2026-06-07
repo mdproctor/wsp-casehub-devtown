@@ -145,7 +145,7 @@ Protocol `case-definition-layers` mandates every YAML case definition has a comp
 
 #### Existing Code
 
-There is already a fluent DSL factory at `review/src/test/java/io/casehub/devtown/review/PrReviewCaseDefinition.java` — 177 lines, package-private, builds a complete `CaseDefinition` with 9 capabilities, 3 goals, 10 bindings, and uses `LambdaExpressionEvaluator` for binding conditions. It is used by `PrReviewBindingConditionTest` (28 unit tests covering all binding condition logic).
+There is already a fluent DSL factory at `review/src/test/java/io/casehub/devtown/review/PrReviewCaseDefinition.java` — 177 lines, package-private, builds a complete `CaseDefinition` with 9 capabilities, 3 goals, 9 bindings, and uses `LambdaExpressionEvaluator` for binding conditions. It is used by `PrReviewBindingConditionTest` (28 unit tests covering all binding condition logic).
 
 This existing class is already 90% of the protocol-mandated companion. Creating a second parallel class would produce naming confusion (`PrReviewCaseDefinition` vs `PrReviewCaseDefinitions`), duplicated structure, and drift risk. The right move is to promote and fix the existing class.
 
@@ -166,9 +166,9 @@ This existing class is already 90% of the protocol-mandated companion. Creating 
        .when(new LambdaExpressionEvaluator(ctx -> { ... }))
        .humanTask(HumanTaskTarget.inline()
            .title("PR approval required")
-           .candidateGroups(StaticListEvaluator.of("pr-reviewers"))
+           .candidateGroups(Set.of("pr-reviewers"))
            .expiresIn(Duration.ofHours(24))
-           .outputMapping(new JQExpressionEvaluator("{ humanApproval: . }"))
+           .outputMapping("{ humanApproval: . }")
            .build())
        .build());
    ```
