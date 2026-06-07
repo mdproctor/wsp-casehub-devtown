@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-07-mdp01-the-concrete-class-trap.md](2026-06-07-mdp01-the-concrete-class-trap.md) | 2026-06-07 | The concrete class trap — CaseLedgerEntryRepository extends a concrete JPA class, making CDI displacement impossible; GDPR erasure void return gap; first @RolesAllowed in any CaseHub harness |
 | [2026-06-06-mdp01-five-small-fixes.md](2026-06-06-mdp01-five-small-fixes.md) | 2026-06-06 | Five small fixes: bootstrapEscalationRequired one-liner, async tenancy red herring, InMemoryMemoryStore question filter gotcha, configurable recall limits, GDPR erasure endpoint |
 | [2026-06-05-mdp01-the-extraction-problem.md](2026-06-05-mdp01-the-extraction-problem.md) | 2026-06-05 | The extraction problem — CaseMemoryStore integration; ReviewCompletedEvent isolates untyped case context extraction; PlanItemCompletedEvent only fires for worker completions; async tenancy silent failure |
 | [2026-06-04-mdp01-the-phantom-spi.md](2026-06-04-mdp01-the-phantom-spi.md) | 2026-06-04 | allowedTypes enforcement: NormativeChannelLayout was fiction; the 9-arg ChannelService.create() overload already existed; channel type contracts; 3 qhorus gaps filed |
