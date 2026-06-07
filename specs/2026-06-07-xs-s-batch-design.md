@@ -65,22 +65,34 @@ No devtown tests currently assert on ledger entries (verified: no references to 
 **Changes:**
 
 1. `MemoryAdminResource.java`:
-   - Add `Logger` field (`org.jboss.logging.Logger` — Quarkus standard)
+   - Refactor from field injection to **constructor injection** — move `CaseMemoryStore` and `CurrentPrincipal` from `@Inject` fields to constructor parameters. This makes the class testable without CDI and explicit about its dependencies. Since #70 is already modifying this class, the change fits naturally.
+   - Add `Logger` field (`org.jboss.logging.Logger` — Quarkus standard, static final)
    - **Before erasure:** `LOG.infof("GDPR erasure requested — entityId=%s, requestedBy=%s, tenantId=%s", entityId, principal.actorId(), principal.tenancyId())` — ensures the request is recorded even if the operation crashes mid-execution
    - **After successful erasure:** `LOG.infof("GDPR erasure completed — entityId=%s, requestedBy=%s, tenantId=%s", ...)`
    - **On `UnsupportedOperationException`:** `LOG.warnf("GDPR erasure not supported by active adapter — entityId=%s, requestedBy=%s", ...)`
 
 **Known limitation (platform#72):** `eraseEntity()` returns `void` — there is no way to log how many records were actually deleted. This is a `CaseMemoryStore` API limitation. The log records what was requested and that the operation completed without exception. Filed platform#72 to change the return type to `int` — the migration is mechanical (three implementations).
 
-**Test:** Add a test that captures log output via `java.util.logging.Handler` registered on the `MemoryAdminResource` logger name. In the Quarkus test environment, JBoss Logging delegates to `java.util.logging`, so a JUL handler on `"io.casehub.devtown.app.MemoryAdminResource"` captures all log output.
+**Tests:** Two test classes cover the logging — split by technique.
 
-Test invocation: use `@Inject MemoryAdminResource` and call `eraseContributor()` directly — avoids HTTP layer noise for a log-capture test. The existing REST-assured tests in `MemoryAdminResourceTest` already cover the HTTP stack.
-
-Assert:
-- Erasure request log appears before completion log (success path)
+**Success-path log test** (`MemoryAdminResourceTest.java`, existing `@QuarkusTest`): Add a test that registers a `java.util.logging.Handler` on `"io.casehub.devtown.app.MemoryAdminResource"` before calling the endpoint via REST-assured (existing pattern). JBoss Logging delegates to JUL in the Quarkus test environment. Assert:
+- Erasure request log appears before completion log
 - Both logs contain the entityId and actorId
 - Format matches expected structured fields
-- The `UnsupportedOperationException` path emits a WARN-level log with the entityId (proves even failed erasure attempts are recorded). To trigger this path: use `@InjectMock CaseMemoryStore` configured to throw `UnsupportedOperationException` on `eraseEntity()` — the active `InMemoryMemoryStore` supports erasure, so it won't throw naturally.
+
+**UnsupportedOperationException log test** (new plain unit test, e.g. `MemoryAdminResourceUnitTest.java`): The active `InMemoryMemoryStore` supports `eraseEntity()` — it won't throw. With constructor injection, construct the resource directly with `Mockito.mock()`:
+
+```java
+var store = mock(CaseMemoryStore.class);
+doThrow(UnsupportedOperationException.class).when(store).eraseEntity(any(), any());
+var principal = mock(CurrentPrincipal.class);
+when(principal.actorId()).thenReturn("admin-user");
+when(principal.tenancyId()).thenReturn("default");
+var resource = new MemoryAdminResource(store, principal);
+// register JUL handler, call eraseContributor(), verify WARN log
+```
+
+This follows devtown's existing mock pattern (`CaseMemoryEmitterTest`, `CaseMemoryRecallerPreferenceTest`) and adds no new dependencies. `devtown` already has `mockito-core` in test scope.
 
 **Rationale:** Application-level audit logging, not a ledger entry. The ledger is for tamper-evident records of case decisions. Admin operations belong in structured logs, queryable via the observability stack. But because this is GDPR compliance logging, test coverage for the log format matters more than usual — a silent regression could break demonstrable compliance.
 
