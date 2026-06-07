@@ -1,31 +1,30 @@
-# HANDOFF — 2026-06-06
+# HANDOFF — 2026-06-07
 
 ## Last Session
 
-Closed five XS/S issues on one branch (`issue-62-xs-s-batch`): trust routing wiring (#62), async tenancy fix (#67), recall test coverage (#68), configurable recall limits (#65), GDPR erasure endpoint (#66). Branch rebased onto main, squashed (7→6), pushed to fork and blessed. Three follow-up issues filed (#69, #70, #71).
+Closed three XS/S issues on branch `issue-69-xs-s-batch` (#69, #70, #71). Key finding: `CaseLedgerEntryRepository` extends a concrete JPA class, making CDI displacement impossible — the garden's recommended fix doesn't work for casehub-engine-ledger consumers. Real fix: `casehub.ledger.enabled=false` (write-side only). Also refactored `MemoryAdminResource` to constructor injection, added GDPR audit trail logging, and `@RolesAllowed("admin")`.
 
 ## Immediate Next Step
 
-Pick from What's Next — Layer 4 (casehub-ledger tamper-evident audit trail) is the next foundation layer. Or pick off smaller items (#69, #70, #71).
+Pick from What's Next — Layer 4 (casehub-ledger tamper-evident audit trail) is the next foundation layer. Or pick off smaller items (devtown#72, parent#179).
 
 ## What's Left
 
-- **devtown#69** — CaseMemoryIntegrationTest: LEDGER_SUBJECT_SEQUENCE table missing in H2 · S · Med
-- **devtown#70** — GDPR erasure audit trail logging · XS · Low
-- **devtown#71** — Add authorization to MemoryAdminResource before production · XS · Low
-- **parent#179** — doc sync: devtown as CaseMemoryStore consumer in PLATFORM.md · XS · Low
+- **devtown#72** — CaseMemoryIntegrationTest: CaseDefinition not found during startCase (second failure uncovered after #69 fix) · S · Med
+- **parent#179** — doc sync: devtown as CaseMemoryStore consumer in PLATFORM.md/casehub-devtown.md (PLATFORM.md row exists; deep-dive update needed) · XS · Low
+- **parent#189** — document @RolesAllowed role name convention · XS · Low
+- **platform#72** — CaseMemoryStore.eraseEntity() should return int · XS · Low
+- **engine#436** — CaseLedgerEntryRepository should use composition over inheritance · M · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #69 | Fix LEDGER_SUBJECT_SEQUENCE table in H2 test DB | S | Med | Enables full integration test |
-| #70 | GDPR erasure audit trail logging | XS | Low | |
-| #71 | Authorization on MemoryAdminResource | XS | Low | Blocked on RBAC implementation |
+| #72 | Fix CaseDefinition not found race in CaseMemoryIntegrationTest | S | Med | Async case definition registration |
 | — | Layer 4 — casehub-ledger tamper-evident audit trail | L | Med | Next foundation layer |
 
 ## References
 
-- `blog/2026-06-06-mdp01-five-small-fixes.md` — this session's diary
-- `docs/specs/2026-06-06-xs-s-batch-design.md` — batch spec (promoted to project)
-- GE-20260606-dc4293 — InMemoryMemoryStore question filter gotcha
+- `blog/2026-06-07-mdp01-the-concrete-class-trap.md` — this session's diary
+- `specs/2026-06-07-xs-s-batch-design.md` — batch spec (promoted to project)
+- GE-20260607-876d7e — JBoss LogManager Level.WARN vs JUL Level.WARNING
