@@ -3,7 +3,7 @@
 **Issues:** devtown#73 (Layer 4), devtown#7 (compliance report)
 **Branch:** `issue-73-layer4-ledger-audit`
 **Date:** 2026-06-08
-**Revision:** 2 (addresses 10-point review)
+**Revision:** 3 (addresses 10-point review + 4-point follow-up)
 
 ---
 
@@ -127,6 +127,13 @@ public class MergeDecisionObserver {
         entry.actorRole = "ORCHESTRATOR";
         entry.occurredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
+        // Link to the CaseLedgerEntry that recorded the terminal state transition.
+        // Best-effort: if CaseLedgerEventCapture hasn't committed yet (observer
+        // ordering is undefined for @ObservesAsync), causedByEntryId stays null.
+        ledgerRepo.findLatestByCaseId(event.caseId())
+            .filter(latest -> event.caseStatus().equals(latest.caseStatus))
+            .ifPresent(latest -> entry.causedByEntryId = latest.id);
+
         ComplianceSupplement cs = new ComplianceSupplement();
         cs.algorithmRef = "casehub-devtown:pr-review-v1";
         cs.humanOverrideAvailable = true;
@@ -141,6 +148,12 @@ public class MergeDecisionObserver {
 **Why the observer writes directly:** `JpaLedgerEntryRepository.save()` handles sequence number allocation (via `LedgerSequenceAllocator.nextSequenceNumber()`), digest computation, Merkle frontier update, and supplement serialisation. The caller's only responsibility is populating domain fields and calling `save()`. Any `sequenceNumber` set by the caller is overwritten by the infrastructure.
 
 **Actor fields:** The observer sets `actorId = "system"` and `actorRole = "ORCHESTRATOR"` because the merge decision is a system-level derivation from accumulated case context, not a direct human or agent action. `CaseLifecycleEvent` carries `actorId = null` and `actorRole = "System"` for engine-triggered transitions — the observer translates to the ledger's identity model.
+
+**Observer race with `CaseLedgerEventCapture`:** Both this observer and `CaseLedgerEventCapture` (foundation) observe `@ObservesAsync CaseLifecycleEvent`. Both call `ledgerRepo.save()` with `subjectId = caseId`. CDI async observer ordering is undefined — the merge decision entry may receive a lower sequence number than the COMPLETED lifecycle entry. `LedgerSequenceAllocator` serialises allocation correctly (no data corruption), but logical ordering is unguaranteed.
+
+The `causedByEntryId` link makes the causal relationship explicit regardless of sequence numbers. The compliance report's audit chain walks both `sequenceNumber` order (for timeline) and `causedByEntryId` (for provenance). If the lifecycle entry is committed after the merge decision (race), `causedByEntryId` is null — the compliance report reports PARTIAL for the provenance dimension, which is accurate: the entries exist but the causal link was not captured.
+
+**`CrossTenantCaseInstanceRepository` tech debt:** `findByUuid()` returns `Uni<CaseInstance>`. The blocking `.await()` inside an `@ObservesAsync` observer works (the async observer runs on a worker thread, not the event loop), but `CrossTenantCaseInstanceRepository`'s contract says "for startup recovery services only." This is accepted tech debt, identical to `ReviewOutcomeObserver`. Resolution: when `CaseLifecycleEvent` carries the full case context (or at least PR metadata from the initial input data), the `CrossTenantCaseInstanceRepository` lookup becomes unnecessary.
 
 ### Flyway Migration
 
@@ -196,10 +209,11 @@ public record CodeReviewComplianceEvidence(
     AuditChainRequirement auditChain,
     ReviewSlaRequirement reviewSla,
     TrustRoutingRequirement trustRouting,
-    GdprRequirement gdpr,
-    String signature
+    GdprRequirement gdpr
 ) {}
 ```
+
+No `signature` field — the Merkle tree root for the case is already inside `AuditChainRequirement` (computed via `LedgerVerificationService.treeRoot()`). A top-level cryptographic signature of the report itself would require signing infrastructure that doesn't exist. Add it when that infrastructure ships — don't carry a dead field.
 
 **`AuditChainRequirement`** — Merkle chain integrity for EU AI Act Art.12:
 - Walks `CaseLedgerEntry` + `WorkerDecisionEntry` + `MergeDecisionLedgerEntry` for the case
@@ -228,9 +242,16 @@ Supporting records: `LedgerEventRecord`, `InclusionProofRecord`, `RoutingDecisio
 `CodeReviewComplianceService` in `app/src/main/java/io/casehub/devtown/app/ledger/`:
 
 - `@ApplicationScoped`
-- Injects: `LedgerEntryRepository`, `LedgerVerificationService`, `CaseLedgerEntryRepository`, `EntityManager`
+- Injects: `LedgerEntryRepository` (blocking), `LedgerVerificationService`, `EntityManager` (default PU — work entities only)
 - `findEvidence(UUID caseId) → Optional<CodeReviewComplianceEvidence>`
-- Queries ledger by `subjectId = caseId`, filters entries by type (`instanceof CaseLedgerEntry`, `WorkerDecisionEntry`, `MergeDecisionLedgerEntry`), assembles each requirement section
+- Queries all ledger entries via `LedgerEntryRepository.findBySubjectId(caseId)`, then filters by `instanceof` to separate `CaseLedgerEntry`, `WorkerDecisionEntry`, and `MergeDecisionLedgerEntry`
+- Assembles each requirement section from the filtered entries
+
+**Persistence unit discipline:** devtown has two persistence units — default (casehub-work) and qhorus (ledger + qhorus entities). `LedgerEntryRepository` (via `JpaLedgerEntryRepository`) injects `@LedgerPersistenceUnit EntityManager` — this resolves to the qhorus PU in devtown's configuration (`casehub.ledger.datasource=qhorus`). All ledger queries go through `LedgerEntryRepository`, never through a raw EntityManager.
+
+The unqualified `EntityManager` is injected **only** for WorkItem SLA lookup (`em.find(WorkItem.class, taskId)`) — `WorkItem` is on the default PU, so this is correct. An alternative is to use `WorkItemService` from casehub-work-api, but `em.find()` is simpler for a read-only lookup by ID and avoids pulling in the full service dependency graph.
+
+Note: `CaseLedgerEntryRepository` (engine-ledger) injects an unqualified `EntityManager caseEm` for its own `findByCaseId()` method — this resolves to the wrong PU in devtown's multi-PU setup. This is a pre-existing issue in `CaseLedgerEntryRepository`; the compliance service avoids it by using the parent `LedgerEntryRepository.findBySubjectId()` which uses the correctly qualified `@LedgerPersistenceUnit` EntityManager.
 
 The pattern follows the same shape as casehub-aml's compliance evidence service (`AmlComplianceEvidenceService` in `casehub-aml/app`): query all ledger entries for a subject, filter by subclass type, assemble structured requirement sections, verify the Merkle chain, look up WorkItem SLA data via EntityManager. That class is a peer-repo reference — not a dependency.
 
@@ -302,7 +323,7 @@ All existing tests continue with `casehub.ledger.enabled=false` and `database.ge
 | `MergeDecisionLedgerEntry` | `app/ledger/` | JPA entity extending `LedgerEntry` runtime class |
 | `MergeDecisionObserver` | `app/ledger/` | CDI bean — observes `CaseLifecycleEvent`, writes ledger entry |
 | `LedgerEnabledTestProfile` | `app/test/` | `@QuarkusTestProfile` for ledger-write tests |
-| `CodeReviewComplianceService` | `app/ledger/` | CDI bean — ledger + EntityManager queries |
+| `CodeReviewComplianceService` | `app/ledger/` | CDI bean — `LedgerEntryRepository` (qhorus PU) + default `EntityManager` (work PU for WorkItem) |
 | `CodeReviewComplianceResource` | `app/` | REST resource |
 | `V2002__merge_decision_ledger_entry.sql` | `app/resources/db/devtown/migration/` | Flyway migration |
 
@@ -350,3 +371,12 @@ All existing tests continue with `casehub.ledger.enabled=false` and `database.ge
 | 8 | Design | Decision semantics undefined | Defined: APPROVED (COMPLETED), REJECTED (CANCELLED). FAULTED is not a merge decision. BLOCKED removed — not a terminal state. |
 | 9 | Minor | GdprRequirement always-CLOSED | Documented as "static capability declaration, not runtime verification" |
 | 10 | Minor | Test profile underspecified | `LedgerEnabledTestProfile` class defined with explicit `getConfigOverrides()` |
+
+### Revision 3 — follow-up review (4 findings)
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| R2-1 | Moderate | `signature` field on `CodeReviewComplianceEvidence` undefined | Removed — Merkle root is inside `AuditChainRequirement`; no signing infrastructure exists. Add when it does. |
+| R2-2 | Low | Observer race with `CaseLedgerEventCapture` — unordered sequence numbers | `causedByEntryId` set to the latest `CaseLedgerEntry` matching the terminal status (best-effort — null if race). Compliance report uses both sequence order and `causedByEntryId` for audit chain. |
+| R2-3 | Low | `CrossTenantCaseInstanceRepository` blocking tech debt | Documented as accepted tech debt, same as `ReviewOutcomeObserver`. Resolution path: `CaseLifecycleEvent` carries case context directly. |
+| R2-4 | Moderate | Raw `EntityManager` resolves to wrong PU | All ledger queries via `LedgerEntryRepository` (correct PU via `@LedgerPersistenceUnit`). Unqualified `EntityManager` used only for `WorkItem` lookup (default PU, correct for work entities). Pre-existing bug in `CaseLedgerEntryRepository.findByCaseId()` documented. |
