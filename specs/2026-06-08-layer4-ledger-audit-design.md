@@ -3,12 +3,29 @@
 **Issues:** devtown#73 (Layer 4), devtown#7 (compliance report)
 **Branch:** `issue-73-layer4-ledger-audit`
 **Date:** 2026-06-08
+**Revision:** 2 (addresses 10-point review)
 
 ---
 
 ## Summary
 
-Layer 4 makes devtown's existing `casehub-engine-ledger` wiring real: a domain-specific `MergeDecisionLedgerEntry` captures structured PR merge decisions in the Merkle-chained audit trail, and a compliance report endpoint (#7) assembles per-case evidence across four regulatory requirement dimensions. The engine-level `CaseLedgerEntry` and `WorkerDecisionEntry` remain unchanged — they handle case lifecycle and worker dispatch events. Layer 4 adds the one domain event those generic entries cannot capture: the merge decision itself.
+Layer 4 makes devtown's existing `casehub-engine-ledger` wiring real: a domain-specific `MergeDecisionLedgerEntry` captures structured PR merge decisions in the ledger audit trail, a `MergeDecisionObserver` derives the decision from terminal case state, `ComplianceSupplement` records EU AI Act Art.12 metadata, and a compliance report endpoint (#7) assembles per-case evidence across four regulatory requirement dimensions.
+
+The engine-level `CaseLedgerEntry` and `WorkerDecisionEntry` remain unchanged — they handle case lifecycle and worker dispatch events. Layer 4 adds the one domain event those generic entries cannot capture: the merge decision itself, with structured PR metadata.
+
+### Tamper-evidence scope
+
+The Merkle chain proves entry **ordering and existence** — it does not prove content integrity of individual fields. `LedgerMerkleTree.canonicalBytes()` hashes `subjectId|sequenceNumber|entryType|actorId|actorRole|occurredAt` only. Neither join-table columns (`decision`, `pr_number`) nor `supplementJson` are in the hash. This is a platform-wide characteristic, not specific to devtown.
+
+**Consequence:** someone with database write access could alter `decision = REJECTED` to `APPROVED` without breaking the chain. The same exposure exists for `CaseLedgerEntry.caseStatus` and `WorkerDecisionEntry.trustScoreAtRouting`. Defence is DB-level access controls and audit logging.
+
+**Foundation issue filed:** ledger#128 proposes adding `supplementJson` to the canonical bytes, which would make all supplement data hash-protected. Until that ships, devtown's tamper-evidence claim covers ordering/existence, not field integrity.
+
+### Layer dependency: C3 → C4
+
+ARC42STORIES §9.2 states "C3 before C4: qhorus messaging generates the `MessageLedgerEntry` chain that makes C4's tamper-evident audit meaningful." Layer 3 (devtown#52) is already complete — this dependency is satisfied.
+
+The compliance report queries `CaseLedgerEntry`, `WorkerDecisionEntry`, and `MergeDecisionLedgerEntry` — it does not query `MessageLedgerEntry`. The qhorus commitment chain records per-agent COMMAND/RESPONSE/DECLINE interactions at the message level. The compliance report focuses on case-level events: lifecycle transitions, worker dispatch decisions, and the merge decision. The per-message audit trail enriches the overall audit record but is not required for the compliance report's four requirement dimensions.
 
 ## Prior State
 
@@ -19,7 +36,7 @@ Layer 4 makes devtown's existing `casehub-engine-ledger` wiring real: a domain-s
 - `casehub.ledger.enabled=false` in test properties (disables `CaseLedgerEventCapture` and `WorkerDecisionEventCapture` in tests)
 - `TrustWeightedAgentStrategy`, `WorkerDecisionEventCapture`, `CaseLedgerEventCapture` all discoverable via CDI
 
-What's missing: no domain-specific ledger entry for merge decisions, no `ComplianceSupplement` attachment, no compliance report endpoint, no tests exercising ledger writes.
+What's missing: no domain-specific ledger entry for merge decisions, no `ComplianceSupplement` attachment, no compliance report endpoint, no tests exercising ledger writes, no observer for terminal case state.
 
 ---
 
@@ -34,7 +51,7 @@ What's missing: no domain-specific ledger entry for merge decisions, no `Complia
 | `pr_number` | INTEGER | NOT NULL | PR number in the repository |
 | `repository` | VARCHAR(255) | NOT NULL | `owner/repo` identifier |
 | `commit_sha` | VARCHAR(40) | nullable | HEAD commit SHA at decision time |
-| `decision` | VARCHAR(20) | NOT NULL | APPROVED, REJECTED, or BLOCKED |
+| `decision` | VARCHAR(20) | NOT NULL | APPROVED or REJECTED (see Decision Semantics) |
 | `case_id` | UUID | NOT NULL | Convenience alias for `subjectId` (same value) |
 | `tenancy_id` | VARCHAR(64) | NOT NULL | Tenant isolation — index-only scans without base table join |
 
@@ -42,44 +59,94 @@ JPA annotations:
 - `@Entity`, `@Table(name = "merge_decision_ledger_entry")`, `@DiscriminatorValue("MERGE_DECISION")`
 - Indexes on `case_id` and `tenancy_id`
 
-### CDI Event
+### Decision Semantics
 
-`MergeDecisionEvent` record in `review/` (pure Java, no framework deps):
+Two terminal outcomes, derived from `CaseStatus`:
+
+| CaseStatus | Decision | Meaning |
+|------------|----------|---------|
+| `COMPLETED` | `APPROVED` | All goals met (`pr-approved` ∧ `security-verified` ∧ `ci-passing`). The merge binding fires. |
+| `CANCELLED` | `REJECTED` | Case explicitly aborted — a human reviewer or the orchestrator determined the PR should not merge. |
+
+`FAULTED` does **not** produce a merge decision. It is an infrastructure error (engine failure, CDI wiring error, unhandled exception), not a domain event. The compliance report surfaces FAULTED cases separately under the audit chain requirement as entries without a corresponding merge decision.
+
+**Why no BLOCKED:** A case in `WAITING` or `RUNNING` with unsatisfiable goals (e.g., security review returned REJECTED but the case hasn't been cancelled) is effectively blocked — but it is not terminal. The engine does not detect goal impossibility. The case remains open until explicitly cancelled or until a timeout fires. BLOCKED is a runtime observation, not a decision event. Surfacing stuck cases is an operational concern (devtown#17, Epic 10).
+
+### MergeDecisionObserver
+
+A new `@ApplicationScoped` bean in `app/src/main/java/io/casehub/devtown/app/ledger/` that observes `CaseLifecycleEvent`, derives the merge decision, and writes the ledger entry directly.
+
+No intermediate `MergeDecisionEvent` record. No separate writer bean. The observer is the single writer for `MergeDecisionLedgerEntry` — since only one code path produces merge decisions, the `harness-ledger-writer` protocol's dedicated-writer requirement does not apply (that protocol targets the multi-writer concurrent-sequence-number problem).
 
 ```java
-public record MergeDecisionEvent(
-    UUID caseId,
-    String tenancyId,
-    int prNumber,
-    String repository,
-    String commitSha,
-    String decision,
-    String actorId,
-    ActorType actorType,
-    String actorRole
-) {}
+@ApplicationScoped
+public class MergeDecisionObserver {
+
+    @Inject CrossTenantCaseInstanceRepository caseInstanceRepo;
+    @Inject CaseLedgerEntryRepository ledgerRepo;
+    @Inject LedgerConfig ledgerConfig;
+
+    @Transactional
+    void onCaseLifecycle(@ObservesAsync CaseLifecycleEvent event) {
+        if (!ledgerConfig.enabled()) return;
+
+        String decision = switch (event.caseStatus()) {
+            case "COMPLETED" -> "APPROVED";
+            case "CANCELLED" -> "REJECTED";
+            default -> null;
+        };
+        if (decision == null) return;
+
+        CaseInstance ci = caseInstanceRepo.findByUuid(event.caseId())
+            .await().atMost(Duration.ofSeconds(5));
+        if (ci == null) return;
+
+        CaseContext ctx = ci.getCaseContext();
+        if (ctx == null) return;
+
+        String repo = ctx.getPathAsString("pr.repo");
+        String prIdStr = ctx.getPathAsString("pr.id");
+        String headSha = ctx.getPathAsString("pr.headSha");
+        if (repo == null || prIdStr == null) return;
+
+        int prNumber;
+        try { prNumber = Integer.parseInt(prIdStr); }
+        catch (NumberFormatException e) { return; }
+
+        MergeDecisionLedgerEntry entry = new MergeDecisionLedgerEntry();
+        entry.subjectId = event.caseId();
+        entry.caseId = event.caseId();
+        entry.tenancyId = event.tenancyId();
+        entry.entryType = LedgerEntryType.EVENT;
+        entry.prNumber = prNumber;
+        entry.repository = repo;
+        entry.commitSha = headSha;
+        entry.decision = decision;
+        entry.actorId = "system";
+        entry.actorType = ActorType.SYSTEM;
+        entry.actorRole = "ORCHESTRATOR";
+        entry.occurredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+
+        ComplianceSupplement cs = new ComplianceSupplement();
+        cs.algorithmRef = "casehub-devtown:pr-review-v1";
+        cs.humanOverrideAvailable = true;
+        cs.contestationUri = "/api/reviews/" + prNumber + "/contest";
+        entry.attach(cs);
+
+        ledgerRepo.save(entry);
+    }
+}
 ```
 
-Fired via `Event<MergeDecisionEvent>.fireAsync()` from the existing service code (`ReviewOutcomeObserver` or `PrReviewCaseService`) when a PR review case reaches its terminal outcome.
+**Why the observer writes directly:** `JpaLedgerEntryRepository.save()` handles sequence number allocation (via `LedgerSequenceAllocator.nextSequenceNumber()`), digest computation, Merkle frontier update, and supplement serialisation. The caller's only responsibility is populating domain fields and calling `save()`. Any `sequenceNumber` set by the caller is overwritten by the infrastructure.
 
-### Writer Bean
-
-`MergeDecisionLedgerWriter` in `app/src/main/java/io/casehub/devtown/app/ledger/`:
-
-- `@ApplicationScoped`
-- Observes `MergeDecisionEvent` via `@ObservesAsync`
-- `@Transactional`
-- Guards on `ledgerConfig.enabled()`
-- Owns `sequenceNumber` computation via `CaseLedgerEntryRepository.findLatestBySubjectId()`
-- Attaches `ComplianceSupplement` with EU AI Act Art.12 fields:
-  - `algorithmRef = "casehub-devtown:pr-review-v1"`
-  - `humanOverrideAvailable = true`
-  - `contestationUri = "/api/reviews/{prNumber}/contest"`
-  - `confidenceScore` — null unless trust score is available from routing
+**Actor fields:** The observer sets `actorId = "system"` and `actorRole = "ORCHESTRATOR"` because the merge decision is a system-level derivation from accumulated case context, not a direct human or agent action. `CaseLifecycleEvent` carries `actorId = null` and `actorRole = "System"` for engine-triggered transitions — the observer translates to the ledger's identity model.
 
 ### Flyway Migration
 
-`V2000__merge_decision_ledger_entry.sql` in `app/src/main/resources/db/devtown/migration/`:
+`V2002__merge_decision_ledger_entry.sql` in `app/src/main/resources/db/devtown/migration/`:
+
+V2002 because `db/engine-ledger/migration/` already contains V2000 (`case_ledger_entry`) and V2001 (`worker_decision_entry`). Flyway merges all configured locations into a single ordered sequence — a second V2000 in `db/devtown/migration/` would produce a duplicate-version error at startup.
 
 ```sql
 CREATE TABLE merge_decision_ledger_entry (
@@ -147,11 +214,12 @@ public record CodeReviewComplianceEvidence(
 
 **`TrustRoutingRequirement`** — trust-weighted reviewer routing for EU AI Act Art.14:
 - Reports `WorkerDecisionEntry` records: which agent, trust score at routing, threshold applied
-- Status: CLOSED (all dispatched capabilities have routing attestations), PARTIAL (some missing), GAP (no dispatches)
+- Status: CLOSED (all dispatched capabilities have routing records), PARTIAL (some missing), GAP (no dispatches)
 
-**`GdprRequirement`** — GDPR capability declaration:
-- Static check: `LedgerErasureService` on classpath, pseudonymisation active
-- Always CLOSED if ledger runtime is wired (it is)
+**`GdprRequirement`** — static capability declaration (not runtime verification):
+- Declares that `LedgerErasureService` (Art.17) is on classpath and `ActorIdentityProvider` tokenisation (pseudonymisation) is active
+- This is a capability declaration for regulators — "the mechanism exists and is wired" — not evidence that erasure was invoked for this specific case
+- Status: always CLOSED when `casehub-ledger` runtime is wired
 
 Supporting records: `LedgerEventRecord`, `InclusionProofRecord`, `RoutingDecisionRecord` — value types carrying per-entry detail within each requirement.
 
@@ -162,47 +230,67 @@ Supporting records: `LedgerEventRecord`, `InclusionProofRecord`, `RoutingDecisio
 - `@ApplicationScoped`
 - Injects: `LedgerEntryRepository`, `LedgerVerificationService`, `CaseLedgerEntryRepository`, `EntityManager`
 - `findEvidence(UUID caseId) → Optional<CodeReviewComplianceEvidence>`
-- Queries ledger by `subjectId = caseId`, filters by entry type, assembles each requirement section
-- Follows `AmlComplianceEvidenceService` pattern
+- Queries ledger by `subjectId = caseId`, filters entries by type (`instanceof CaseLedgerEntry`, `WorkerDecisionEntry`, `MergeDecisionLedgerEntry`), assembles each requirement section
+
+The pattern follows the same shape as casehub-aml's compliance evidence service (`AmlComplianceEvidenceService` in `casehub-aml/app`): query all ledger entries for a subject, filter by subclass type, assemble structured requirement sections, verify the Merkle chain, look up WorkItem SLA data via EntityManager. That class is a peer-repo reference — not a dependency.
 
 ### REST Endpoint
 
 `CodeReviewComplianceResource` in `app/src/main/java/io/casehub/devtown/app/`:
 
 - `@Path("/api/compliance/code-review")`
+- `@ApplicationScoped`
 - `GET /{caseId}` — returns `CodeReviewComplianceEvidence` as JSON (200) or 404 if no evidence
 
 ---
 
 ## Part 3: Testing
 
-### Ledger write test
+### Test profile
 
-`MergeDecisionLedgerWriterTest` — `@QuarkusTest` with test profile overrides:
+A `@QuarkusTestProfile` implementation (`LedgerEnabledTestProfile`) provides the overrides needed for ledger-write tests. This is required because global test `application.properties` sets `casehub.ledger.enabled=false` and uses `database.generation=drop-and-create` — two build-time-equivalent properties that cannot both be true in the same augmentation.
 
-```properties
-casehub.ledger.enabled=true
-quarkus.flyway.qhorus.migrate-at-start=true
-quarkus.hibernate-orm.qhorus.database.generation=none
-quarkus.datasource.qhorus.jdbc.url=jdbc:h2:mem:devtown-ledger-test;MODE=PostgreSQL;DB_CLOSE_ON_EXIT=FALSE
+```java
+public class LedgerEnabledTestProfile implements QuarkusTestProfile {
+    @Override
+    public Map<String, String> getConfigOverrides() {
+        return Map.of(
+            "casehub.ledger.enabled", "true",
+            "quarkus.flyway.qhorus.migrate-at-start", "true",
+            "quarkus.hibernate-orm.qhorus.database.generation", "none",
+            "quarkus.datasource.qhorus.jdbc.url",
+                "jdbc:h2:mem:devtown-ledger-test;MODE=PostgreSQL;DB_CLOSE_ON_EXIT=FALSE"
+        );
+    }
+}
 ```
 
-Test cases:
-- Fire `MergeDecisionEvent` → assert `MergeDecisionLedgerEntry` persisted with correct fields
+Tests using this profile get Flyway-managed schema (including `ledger_entry`, `ledger_subject_sequence`, `case_ledger_entry`, `worker_decision_entry`, `merge_decision_ledger_entry`) instead of Hibernate `drop-and-create`.
+
+### Ledger write test
+
+`MergeDecisionObserverTest` — `@QuarkusTest` with `@TestProfile(LedgerEnabledTestProfile.class)`:
+
+- Fire a `CaseLifecycleEvent` with `caseStatus = "COMPLETED"` for a case with seeded PR context
+- Assert `MergeDecisionLedgerEntry` persisted with `decision = "APPROVED"`, correct PR fields
 - Assert `ComplianceSupplement` attached with `algorithmRef`, `humanOverrideAvailable`, `contestationUri`
-- Fire two events for same case → assert sequence numbers increment (1, 2)
+- Fire `CaseLifecycleEvent` with `caseStatus = "CANCELLED"` → assert `decision = "REJECTED"`
+- Fire `CaseLifecycleEvent` with `caseStatus = "FAULTED"` → assert no `MergeDecisionLedgerEntry` written
+- Sequence numbers: `LedgerSequenceAllocator` handles allocation via atomic `MERGE INTO` — the test verifies entries exist with monotonically increasing sequence numbers
 
 ### Compliance report test
 
-`CodeReviewComplianceServiceTest` — `@QuarkusTest` with same ledger-enabled profile:
+`CodeReviewComplianceServiceTest` — `@QuarkusTest` with `@TestProfile(LedgerEnabledTestProfile.class)`:
 
 - Seed ledger entries for a case (case lifecycle, worker decision, merge decision)
 - Call `findEvidence(caseId)`
 - Assert all four requirement sections populated with correct statuses
+- Assert audit chain CLOSED when Merkle chain verifies and merge decision is linked
+- Assert trust routing CLOSED when all dispatched capabilities have `WorkerDecisionEntry` records
 
 ### Existing tests unaffected
 
-All existing tests continue with `casehub.ledger.enabled=false` — no changes needed.
+All existing tests continue with `casehub.ledger.enabled=false` and `database.generation=drop-and-create` — no changes needed.
 
 ---
 
@@ -210,13 +298,13 @@ All existing tests continue with `casehub.ledger.enabled=false` — no changes n
 
 | File | Module | Rationale |
 |------|--------|-----------|
-| `MergeDecisionEvent` | `review/` | Domain event record, pure Java |
 | `RequirementStatus`, `CodeReviewComplianceEvidence`, requirement records | `review/` | Domain types, pure Java |
 | `MergeDecisionLedgerEntry` | `app/ledger/` | JPA entity extending `LedgerEntry` runtime class |
-| `MergeDecisionLedgerWriter` | `app/ledger/` | CDI bean, ledger runtime dependency |
-| `CodeReviewComplianceService` | `app/ledger/` | CDI bean, ledger + EntityManager |
+| `MergeDecisionObserver` | `app/ledger/` | CDI bean — observes `CaseLifecycleEvent`, writes ledger entry |
+| `LedgerEnabledTestProfile` | `app/test/` | `@QuarkusTestProfile` for ledger-write tests |
+| `CodeReviewComplianceService` | `app/ledger/` | CDI bean — ledger + EntityManager queries |
 | `CodeReviewComplianceResource` | `app/` | REST resource |
-| `V2000__merge_decision_ledger_entry.sql` | `app/resources/db/devtown/migration/` | Flyway migration |
+| `V2002__merge_decision_ledger_entry.sql` | `app/resources/db/devtown/migration/` | Flyway migration |
 
 ---
 
@@ -229,6 +317,8 @@ All existing tests continue with `casehub.ledger.enabled=false` — no changes n
 | Post-merge FLAGGED attestation on incident | Already tracked | devtown#5 |
 | Merkle verification REST endpoint | Covered by Epic 10 | devtown#17 |
 | Distributed ledger — app join tables vs foundation DB | Architectural question filed | parent#207 |
+| Content integrity in Merkle hash | Foundation enhancement filed | ledger#128 |
+| Stuck-case detection (unsatisfiable goals) | Operational tooling | devtown#17 |
 
 ---
 
@@ -236,10 +326,27 @@ All existing tests continue with `casehub.ledger.enabled=false` — no changes n
 
 | Protocol | Status |
 |----------|--------|
-| `ledger-subclass-extension` | ✅ JOINED, V2000, consumer-owned, domain-agnostic leaf hash |
-| `harness-ledger-writer` | ✅ Dedicated writer bean, single sequenceNumber owner |
+| `ledger-subclass-extension` | ✅ JOINED, V2002, consumer-owned, domain-agnostic leaf hash |
+| `harness-ledger-writer` | ✅ N/A — single writer; protocol applies only when multiple services write the same entry type |
 | `dual-trail-audit-pattern` | ✅ CDI event observed async, separate from operational trail |
-| `flyway-version-range-allocation` | ✅ V2000 in `db/devtown/migration/` |
+| `flyway-version-range-allocation` | ✅ V2002 in `db/devtown/migration/` — V2000-V2001 taken by engine-ledger |
 | `flyway-repo-scoped-migration-path` | ✅ `db/devtown/migration/` not `db/migration/devtown/` |
 | `module-tier-structure` | ✅ Pure Java in review/, CDI in app/ |
 | `harness-rest-resource-blocking-applicationscoped` | ✅ REST resource is `@ApplicationScoped` |
+
+---
+
+## Review Issue Resolution
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| 1 | Critical | V2000 conflicts with engine-ledger | V2002 — engine-ledger owns V2000-V2001 |
+| 2 | Critical | Event production side unspecified | `MergeDecisionObserver` bean defined — observes `CaseLifecycleEvent`, filters terminal states, looks up case context, derives decision, writes entry directly |
+| 3 | Significant | Decision value not in Merkle hash | Documented as platform-wide characteristic. Neither join-table columns nor supplements are hash-protected. Foundation issue ledger#128 filed. Defence is DB-level access controls. |
+| 4 | Significant | Sequence number ownership claim wrong | Removed. `LedgerSequenceAllocator` owns allocation via atomic `MERGE INTO`. Writer calls `save()`; infrastructure handles sequencing, hashing, and frontier updates. |
+| 5 | Moderate | Phantom `AmlComplianceEvidenceService` reference | Clarified as a peer-repo pattern reference, not a dependency. Pattern described inline. |
+| 6 | Moderate | C3→C4 dependency weaker than claimed | Documented: C3 is complete (devtown#52). Compliance report queries case-level entries, not `MessageLedgerEntry`. Dependency is satisfied; completeness is enhanced by Layer 3 but not blocked on it. |
+| 7 | Design | `MergeDecisionEvent` mixes domain and infrastructure | Eliminated the intermediate event entirely. Observer derives ledger fields from `CaseLifecycleEvent` + case context — no domain event carries infrastructure concerns. |
+| 8 | Design | Decision semantics undefined | Defined: APPROVED (COMPLETED), REJECTED (CANCELLED). FAULTED is not a merge decision. BLOCKED removed — not a terminal state. |
+| 9 | Minor | GdprRequirement always-CLOSED | Documented as "static capability declaration, not runtime verification" |
+| 10 | Minor | Test profile underspecified | `LedgerEnabledTestProfile` class defined with explicit `getConfigOverrides()` |
