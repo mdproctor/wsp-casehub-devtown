@@ -98,6 +98,16 @@ The root cause is not established — the analysis above narrows the search spac
 
 Test passes reliably without `@Disabled`. Run 3 times to confirm no flakiness.
 
+#### Outcome
+
+Neither candidate root cause from the spec's list was the actual failure. The diagnostic-first approach proved its value — the real bugs were discovered empirically:
+
+**Bug 1:** `SchedulerService.registerScheduledTriggers()` calls `getCaseDefinition(caseInstance.getCaseMetaModel())` which returns null in the `CaseStartedEventHandler` event bus handler, then throws `IllegalStateException`. This blocks `CONTEXT_CHANGED` publication and prevents binding evaluation. Filed as **engine#444**. The pr-review case has zero `ScheduleTrigger` bindings — the failure occurs before SchedulerService discovers there's nothing to schedule. This is an engine-side bug, not a devtown test issue.
+
+**Bug 2:** Even after bypassing Bug 1, `CaseMemoryEmitter` `@ObservesAsync ReviewCompletedEvent` handler doesn't store facts to `CaseMemoryStore` — despite `ReviewCompletedEventCapture` confirming the event IS fired (Phase 3.5 passes). No error or warning logged from the emitter's catch block. CDI async observer delivery issue requiring further investigation.
+
+Test remains `@Disabled` with updated tracking note. Fix belongs in the engine (Bug 1) and in the async observer chain (Bug 2).
+
 ---
 
 ### #64 — Set allowedWriters on pr-review oversight channel (S, Med)
@@ -124,12 +134,15 @@ The work channel writer list is intentionally restrictive. In the current Layer 
    - `findOrCreateWorkChannel()` — pass `ORCHESTRATOR` as `allowedWriters` (5th param).
    - `findOrCreateObserveChannel()` — pass `ORCHESTRATOR` as `allowedWriters`.
    - `findOrCreateOversightChannel()` — pass `ORCHESTRATOR` as `allowedWriters`.
-   - Add `requireAllowedWriters()` validation method, parallel to existing `requireAllowedTypes()`.
+   - Combine `requireAllowedTypes()` and `requireAllowedWriters()` into a single `requireContract()` method — validates both constraints in one call.
    - Use the existing `ORCHESTRATOR` constant directly — no separate `ORCHESTRATOR_WRITERS` constant. All three channels have the same writer set right now; when Layer 6 differentiates them, the constant structure will be revisited.
+   - DONE/DECLINE dispatches changed to use `ORCHESTRATOR` as sender and `ActorType.SYSTEM` — in Layer 3 the orchestrator acts on behalf of agents; when Layer 6 wires real agents with their own identity, they will be added to `allowedWriters` and dispatch with their own sender.
 
 2. **`PrReviewQhorusLifecycleTest`:**
    - Add assertions for `allowedWriters` on all three channels.
-   - Verify existing `allowedTypes` assertions still pass.
+   - Add migration guard test for existing channels with null `allowedWriters`.
+   - Update dispatch test senders to `ORCHESTRATOR` (consistent with Layer 3).
+   - Fix pre-existing EVENT content violations (qhorus API change: EVENT messages must not carry content).
 
 #### Migration
 
