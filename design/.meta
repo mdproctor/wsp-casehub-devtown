@@ -1,0 +1,9 @@
+branch: issue-73-layer4-ledger-audit
+project-sha: dae99f6
+date: 2026-06-08
+issue: 73
+issue-repo: casehubio/devtown
+covers: 73,7
+flyway-next-v: unknown
+design-repo: workspace
+design-section-hashes:
