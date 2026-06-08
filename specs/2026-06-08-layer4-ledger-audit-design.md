@@ -3,7 +3,7 @@
 **Issues:** devtown#73 (Layer 4), devtown#7 (compliance report)
 **Branch:** `issue-73-layer4-ledger-audit`
 **Date:** 2026-06-08
-**Revision:** 3 (addresses 10-point review + 4-point follow-up)
+**Revision:** 4 (addresses 10-point review + 4-point follow-up + 2-point final review)
 
 ---
 
@@ -83,7 +83,7 @@ No intermediate `MergeDecisionEvent` record. No separate writer bean. The observ
 public class MergeDecisionObserver {
 
     @Inject CrossTenantCaseInstanceRepository caseInstanceRepo;
-    @Inject CaseLedgerEntryRepository ledgerRepo;
+    @Inject LedgerEntryRepository ledgerRepo;
     @Inject LedgerConfig ledgerConfig;
 
     @Transactional
@@ -128,10 +128,14 @@ public class MergeDecisionObserver {
         entry.occurredAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
         // Link to the CaseLedgerEntry that recorded the terminal state transition.
+        // Uses findLatestBySubjectId() (inherited from JpaLedgerEntryRepository,
+        // correct @LedgerPersistenceUnit) — NOT findLatestByCaseId() which uses
+        // an unqualified EntityManager (engine#450).
         // Best-effort: if CaseLedgerEventCapture hasn't committed yet (observer
         // ordering is undefined for @ObservesAsync), causedByEntryId stays null.
-        ledgerRepo.findLatestByCaseId(event.caseId())
-            .filter(latest -> event.caseStatus().equals(latest.caseStatus))
+        ledgerRepo.findLatestBySubjectId(event.caseId())
+            .filter(latest -> latest instanceof CaseLedgerEntry cle
+                && event.caseStatus().equals(cle.caseStatus))
             .ifPresent(latest -> entry.causedByEntryId = latest.id);
 
         ComplianceSupplement cs = new ComplianceSupplement();
@@ -380,3 +384,10 @@ All existing tests continue with `casehub.ledger.enabled=false` and `database.ge
 | R2-2 | Low | Observer race with `CaseLedgerEventCapture` — unordered sequence numbers | `causedByEntryId` set to the latest `CaseLedgerEntry` matching the terminal status (best-effort — null if race). Compliance report uses both sequence order and `causedByEntryId` for audit chain. |
 | R2-3 | Low | `CrossTenantCaseInstanceRepository` blocking tech debt | Documented as accepted tech debt, same as `ReviewOutcomeObserver`. Resolution path: `CaseLifecycleEvent` carries case context directly. |
 | R2-4 | Moderate | Raw `EntityManager` resolves to wrong PU | All ledger queries via `LedgerEntryRepository` (correct PU via `@LedgerPersistenceUnit`). Unqualified `EntityManager` used only for `WorkItem` lookup (default PU, correct for work entities). Pre-existing bug in `CaseLedgerEntryRepository.findByCaseId()` documented. |
+
+### Revision 4 — final review (2 findings)
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| R3-1 | Bug | Observer's `findLatestByCaseId()` uses wrong PU via buggy `caseEm` — `causedByEntryId` always null | Replaced with `findLatestBySubjectId()` (inherited, `@LedgerPersistenceUnit`) + `instanceof CaseLedgerEntry` filter. |
+| R3-2 | Minor | Observer injects `CaseLedgerEntryRepository` but only needs `LedgerEntryRepository` | Changed to `LedgerEntryRepository` — narrower dependency, avoids buggy `caseEm`-backed methods, consistent with compliance service. |
