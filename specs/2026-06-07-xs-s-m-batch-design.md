@@ -191,7 +191,7 @@ Create `PrReviewCaseDefinitionEquivalenceTest` in `review/src/test/` — a plain
 class PrReviewCaseDefinitionEquivalenceTest {
 
     @Test
-    void dslMatchesYaml() {
+    void dslMatchesYaml() throws IOException {
         CaseDefinition fromYaml = CaseDefinitionYamlMapper.load(
             getClass().getClassLoader().getResourceAsStream("devtown/pr-review.yaml"));
         CaseDefinition fromDsl = PrReviewCaseDefinition.build(500);
@@ -233,6 +233,11 @@ class PrReviewCaseDefinitionEquivalenceTest {
                 assertThat(dslBinding.getWhen())
                     .as("binding '%s' should have a when condition", yamlBinding.getName())
                     .isNotNull();
+            }
+            if (yamlBinding.target() instanceof HumanTaskTarget yamlHT
+                    && dslBinding.target() instanceof HumanTaskTarget dslHT) {
+                assertThat(dslHT.title()).isEqualTo(yamlHT.title());
+                assertThat(dslHT.expiresIn()).isEqualTo(yamlHT.expiresIn());
             }
         }
 
