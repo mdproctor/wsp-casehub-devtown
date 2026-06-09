@@ -3,7 +3,7 @@
 **Issue:** casehubio/devtown#5
 **Branch:** issue-5-trust-feedback-flagged
 **Date:** 2026-06-09
-**Revision:** 2 (post-review)
+**Revision:** 3 (post-review)
 
 ---
 
@@ -32,7 +32,7 @@ The FLAGGED attestation targets the `WorkerDecisionEntry` (not the `MergeDecisio
    - 0 results → 404
    - 1 result → use its `caseId`
    - 2+ results → 409 Conflict with candidate caseIds
-3. Query `WorkerDecisionEntry` by caseId, filter by `capabilityTag = reviewCapability`
+3. Query `WorkerDecisionEntry` by caseId via `LedgerEntryRepository.findBySubjectId(caseId)` — returns all `LedgerEntry` subclasses for that subject. Filter by `instanceof WorkerDecisionEntry` and `capabilityTag == reviewCapability`. This is the established pattern from `CodeReviewComplianceService`.
    - 0 matching → 404
 4. Idempotency check: for each matching `WorkerDecisionEntry`, query existing attestations to check for a prior submission of the same incident (see Idempotency section)
 5. Write a `LedgerAttestation` per matching entry (skipping entries already attested for this incident)
@@ -105,6 +105,8 @@ The service is **idempotent**: before writing attestations, it queries `findAtte
 
 The evidence format `"Incident {incidentId}: {description}"` is a contract: the `incidentId` prefix is the deduplication key.
 
+**Response semantics for idempotent calls:** `attestationsWritten` counts only **newly persisted** attestations. In the fully idempotent case (all entries already attested for this incident), `attestationsWritten = 0`. `flaggedAgents` always includes **all** agents for the capability — both newly attested and previously attested — so the caller sees the complete picture regardless of whether this is a first or repeated submission.
+
 ### Ledger disabled check
 
 If `LedgerConfig.enabled()` returns false, the endpoint returns 503 Service Unavailable. This is a synchronous endpoint where the caller expects attestations to be written — silently skipping (as async observers do) is the wrong semantics.
@@ -143,7 +145,7 @@ Independent resource at its own path — not nested under `/api/reviews` to avoi
 | `reviewCapability` | String | Yes | Which capability missed the issue — must be in `ReviewDomain.REVIEW_CAPABILITIES` |
 | `caseId` | UUID | No | Disambiguates when multiple cases exist for the same PR |
 
-`caseId` uses `@JsonInclude(NON_NULL)` — absent in JSON when null, no Jackson deserialization friction.
+`caseId` is nullable — Jackson handles absent JSON fields as null in records without any annotation.
 
 ### Responses
 
@@ -193,7 +195,6 @@ public enum IncidentSeverity {
 ### IncidentFeedback
 
 ```java
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public record IncidentFeedback(
     String repository,
     int prNumber,
@@ -201,9 +202,11 @@ public record IncidentFeedback(
     IncidentSeverity severity,
     String description,
     String reviewCapability,
-    @Nullable UUID caseId
+    UUID caseId              // optional — null when absent from JSON
 ) {}
 ```
+
+Pure Java, no annotations — compiles in `domain/` which has no Jackson dependency. Jackson handles absent JSON fields as null in records by default.
 
 ### ReviewDomain addition
 
@@ -295,7 +298,9 @@ Each `LedgerAttestation` written by the service:
 | Tenancy propagation | Attestation tenancyId matches `MergeDecisionLedgerEntry.tenancyId` |
 | attestationId in response | `FlaggedAgent.attestationId` matches the persisted `LedgerAttestation.id` (read after persist) |
 
-Tests use `InMemoryLedgerEntryRepository` for attestation writes. Pre-seed `MergeDecisionLedgerEntry` and `WorkerDecisionEntry` via repository for lookup tests.
+Tests use `@TestProfile(LedgerEnabledTestProfile.class)` with H2 via JPA-backed `LedgerEntryRepository`. Pre-seed `MergeDecisionLedgerEntry` and `WorkerDecisionEntry` via `QuarkusTransaction.requiringNew().call(() -> ledgerRepo.save(entry))` — same pattern as `CodeReviewComplianceServiceTest`.
+
+**Test seeding correctness:** `WorkerDecisionEntry.actorId` must be set to the worker/agent ID (matching production's `WorkerDecisionEventCapture` which sets `actorId = workerId`), not to `"system"`. The downstream `TrustScoreJob` attribution depends on this field.
 
 ---
 
@@ -322,3 +327,5 @@ No changes needed in the foundation — the entire feedback loop is already wire
 ## Review History
 
 **Revision 1 → 2:** Nine findings from spec review. Accepted: query mechanism specified (@NamedQuery), V2003 migration added, capability validation restricted to ReviewDomain.REVIEW_CAPABILITIES, attestorRole/dimensionScore fields specified, idempotency via evidence prefix matching, REST path moved to /api/incident-feedback, tenancy from MergeDecisionLedgerEntry, LedgerConfig.enabled() → 503, Jackson @JsonInclude. Trust attribution chain verified correct from bytecode (WorkerDecisionEntry.actorId = workerId).
+
+**Revision 2 → 3:** Four findings. (1) Removed @JsonInclude/@Nullable from IncidentFeedback — domain/ has no Jackson dependency, and the annotation controls serialization not deserialization; Jackson handles absent fields as null by default. (2) Fixed test infrastructure — InMemoryLedgerEntryRepository is for the reactive path only; tests use @TestProfile(LedgerEnabledTestProfile.class) with JPA-backed H2, seeding via QuarkusTransaction.requiringNew(). (3) Clarified attestationsWritten semantics: counts newly persisted only; flaggedAgents includes all (new + existing). (4) Specified step 3 query mechanism: findBySubjectId(caseId) + instanceof WorkerDecisionEntry filter. Non-blocking: test seeding must use actorId = workerId (not "system"), named query tenancy note, LAZY init supplement access.
