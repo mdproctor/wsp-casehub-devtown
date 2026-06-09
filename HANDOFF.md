@@ -1,5 +1,7 @@
 # HANDOFF — 2026-06-09
 
+*Updated: #200 (parent) closed — removed from backlog.*
+
 ## Last Session
 
 Shipped Layer 4 (`issue-73-layer4-ledger-audit`) covering devtown#73 + devtown#7. `MergeDecisionLedgerEntry` (JOINED, V2002) captures APPROVED/REJECTED for terminal PR review cases. `MergeDecisionObserver` derives the decision from `CaseLifecycleEvent`. Compliance report endpoint (`GET /api/compliance/code-review/{caseId}`) assembles evidence across audit chain, trust routing, SLA, and GDPR dimensions. Spec went through 4 revisions (16 review findings) before implementation — discovered foundation hash gap (ledger#128), `CaseLedgerEntryRepository` PU bug (engine#450), and `LedgerVerificationService` rollback-only contamination.
@@ -11,7 +13,6 @@ Update ARC42STORIES.MD — Layer 4 shipped but the layer taxonomy (line 128), ch
 ## What's Left
 
 - **devtown#72** — CaseMemoryIntegrationTest: two engine bugs (engine#444 + async emitter), blocked on engine fix · S · Med
-- **parent#200** — doc sync: casehub-devtown.md needs DSL companion + allowedWriters + Layer 4 additions · XS · Low
 - **platform#72** — CaseMemoryStore.eraseEntity() should return int · XS · Low
 - **engine#436** — CaseLedgerEntryRepository should use composition over inheritance · M · Med
 - **engine#444** — SchedulerService null getCaseDefinition · S · Med
