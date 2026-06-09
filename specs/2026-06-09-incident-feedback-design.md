@@ -3,7 +3,7 @@
 **Issue:** casehubio/devtown#5
 **Branch:** issue-5-trust-feedback-flagged
 **Date:** 2026-06-09
-**Revision:** 3 (post-review)
+**Revision:** 4 (post-review)
 
 ---
 
@@ -101,9 +101,30 @@ The attestation's tenancy comes from `MergeDecisionLedgerEntry.tenancyId` — th
 
 An incident is a fact. Recording the same fact twice doubles the trust impact in the Bayesian model — `TrustScoreJob` processes all attestations, so two FLAGGED attestations for the same incident produce a stronger downward adjustment than one. This is incorrect: the signal strength should come from `IncidentSeverity`, not from submission count.
 
-The service is **idempotent**: before writing attestations, it queries `findAttestationsByEntryIdAndCapabilityTag(entryId, capabilityTag)` for each target `WorkerDecisionEntry`, filters by `attestorId == "devtown:incident-feedback"`, and checks if any existing attestation's evidence starts with `"Incident {incidentId}:"`. If the same incident was already recorded against that entry, the entry is skipped. If all entries already have the attestation, return 200 with the existing attestations — same input produces same result.
+The service is **idempotent** using `findAttestationsByAttestorIdAndCapabilityTag("devtown:incident-feedback", reviewCapability, tenancyId)` — the attestor-scoped query that calls `tokeniseForQuery()` internally (line 162 of `JpaLedgerEntryRepository`). This is tokenisation-proof by design: it handles both `PassThroughActorIdentityProvider` (development) and `InternalActorIdentityProvider` (GDPR production) without coupling to the tokenisation mechanism.
+
+The idempotency check flow:
+
+```
+allByAttestor = ledgerRepo.findAttestationsByAttestorIdAndCapabilityTag(
+    "devtown:incident-feedback", reviewCapability, tenancyId)
+
+for each WorkerDecisionEntry wde:
+    existing = allByAttestor.stream()
+        .filter(a -> wde.id.equals(a.ledgerEntryId))
+        .filter(a -> a.evidence.startsWith("Incident " + incidentId + ":"))
+        .findFirst()
+    if existing.isPresent():
+        skip — already recorded (include in flaggedAgents, don't persist again)
+```
+
+Single query, then client-side filtering by `ledgerEntryId` and evidence prefix. The query returns all incident-feedback attestations for the given capability across the tenant — in practice a small set (production incidents are rare events).
+
+**Why not `findAttestationsByEntryIdAndCapabilityTag`:** That method returns raw stored `attestorId` values without de-tokenisation. Under `InternalActorIdentityProvider`, `attestorId` is a UUID token in the database, so a client-side comparison against `"devtown:incident-feedback"` would always fail. The attestor-scoped query is the ledger's published API for "find attestations I wrote."
 
 The evidence format `"Incident {incidentId}: {description}"` is a contract: the `incidentId` prefix is the deduplication key.
+
+**Foundation improvement (non-blocking):** SYSTEM actors should not be tokenised — they are not natural persons and GDPR pseudonymisation serves no privacy purpose for them. A one-line guard in `JpaLedgerEntryRepository.saveAttestation()` — `if (attestorType != ActorType.SYSTEM)` before tokenising — would make the entry-scoped query work for system attestations and eliminate unnecessary `ActorIdentity` rows. Filed as [casehub-ledger#130](https://github.com/casehubio/ledger/issues/130). The spec's attestor-scoped query approach works correctly regardless of whether this foundation fix ships.
 
 **Response semantics for idempotent calls:** `attestationsWritten` counts only **newly persisted** attestations. In the fully idempotent case (all entries already attested for this incident), `attestationsWritten = 0`. `flaggedAgents` always includes **all** agents for the capability — both newly attested and previously attested — so the caller sees the complete picture regardless of whether this is a first or repeated submission.
 
@@ -329,3 +350,5 @@ No changes needed in the foundation — the entire feedback loop is already wire
 **Revision 1 → 2:** Nine findings from spec review. Accepted: query mechanism specified (@NamedQuery), V2003 migration added, capability validation restricted to ReviewDomain.REVIEW_CAPABILITIES, attestorRole/dimensionScore fields specified, idempotency via evidence prefix matching, REST path moved to /api/incident-feedback, tenancy from MergeDecisionLedgerEntry, LedgerConfig.enabled() → 503, Jackson @JsonInclude. Trust attribution chain verified correct from bytecode (WorkerDecisionEntry.actorId = workerId).
 
 **Revision 2 → 3:** Four findings. (1) Removed @JsonInclude/@Nullable from IncidentFeedback — domain/ has no Jackson dependency, and the annotation controls serialization not deserialization; Jackson handles absent fields as null by default. (2) Fixed test infrastructure — InMemoryLedgerEntryRepository is for the reactive path only; tests use @TestProfile(LedgerEnabledTestProfile.class) with JPA-backed H2, seeding via QuarkusTransaction.requiringNew(). (3) Clarified attestationsWritten semantics: counts newly persisted only; flaggedAgents includes all (new + existing). (4) Specified step 3 query mechanism: findBySubjectId(caseId) + instanceof WorkerDecisionEntry filter. Non-blocking: test seeding must use actorId = workerId (not "system"), named query tenancy note, LAZY init supplement access.
+
+**Revision 3 → 4:** Tokenisation architecture traced end-to-end. The idempotency check was broken: `saveAttestation()` tokenises `attestorId` unconditionally (JpaLedgerEntryRepository line 127-128), so client-side comparison against `"devtown:incident-feedback"` after using the entry-scoped query would always fail under `InternalActorIdentityProvider`. Switched to `findAttestationsByAttestorIdAndCapabilityTag` which calls `tokeniseForQuery()` internally (line 162) — tokenisation-proof by design. Foundation improvement filed: SYSTEM actors should be exempt from tokenisation (casehub-ledger issue — non-blocking, spec works either way).
