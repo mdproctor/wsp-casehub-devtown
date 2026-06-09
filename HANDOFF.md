@@ -1,30 +1,38 @@
-# HANDOFF — 2026-06-08
+# HANDOFF — 2026-06-09
 
 ## Last Session
 
-Closed branch `issue-19-xs-s-m-batch` covering six issues. Three closed with no code (#19 CAPABILITY_DIMENSION wiring already complete, #61 no CaseLifecycleEvent observers, #18 composite registry premature). #64: set `allowedWriters=ORCHESTRATOR` on all three channels — enforcement surfaced sender design gap, fixed DONE/DECLINE to use orchestrator identity in Layer 3. #60: promoted `PrReviewCaseDefinition` from test to production, fixed three YAML divergences (HumanTaskTarget, schemas, capability count). #72: diagnosed two engine bugs (engine#444 SchedulerService null getCaseDefinition, async CDI emitter chain), remains `@Disabled`.
+Shipped Layer 4 (`issue-73-layer4-ledger-audit`) covering devtown#73 + devtown#7. `MergeDecisionLedgerEntry` (JOINED, V2002) captures APPROVED/REJECTED for terminal PR review cases. `MergeDecisionObserver` derives the decision from `CaseLifecycleEvent`. Compliance report endpoint (`GET /api/compliance/code-review/{caseId}`) assembles evidence across audit chain, trust routing, SLA, and GDPR dimensions. Spec went through 4 revisions (16 review findings) before implementation — discovered foundation hash gap (ledger#128), `CaseLedgerEntryRepository` PU bug (engine#450), and `LedgerVerificationService` rollback-only contamination.
 
 ## Immediate Next Step
 
-Pick from What's Next — Layer 4 (casehub-ledger tamper-evident audit trail) is the next foundation layer. Or pick off cross-repo items.
+Update ARC42STORIES.MD — Layer 4 shipped but the layer taxonomy (line 128), chapter matrix (line 399), and Layer entries (lines 779, 788) still show 🔲 pending. Run the stale scan deferred from this session.
 
 ## What's Left
 
-- **devtown#72** — CaseMemoryIntegrationTest: two bugs identified (engine#444 + async emitter), blocked on engine fix · S · Med
-- **parent#200** — doc sync: casehub-devtown.md needs DSL companion + allowedWriters additions · XS · Low
+- **devtown#72** — CaseMemoryIntegrationTest: two engine bugs (engine#444 + async emitter), blocked on engine fix · S · Med
+- **parent#200** — doc sync: casehub-devtown.md needs DSL companion + allowedWriters + Layer 4 additions · XS · Low
 - **platform#72** — CaseMemoryStore.eraseEntity() should return int · XS · Low
 - **engine#436** — CaseLedgerEntryRepository should use composition over inheritance · M · Med
-- **engine#444** — SchedulerService.registerScheduledTriggers() null getCaseDefinition · S · Med
+- **engine#444** — SchedulerService null getCaseDefinition · S · Med
+- **engine#450** — CaseLedgerEntryRepository.findByCaseId() uses wrong PU in multi-datasource · S · Low
+- **ledger#128** — leafHash should incorporate supplementJson for content integrity · M · Med
+- **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence when foundation runs remotely · XL · High
+- **devtown#74** — GDPR Art.17 erasure REST endpoint · S · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Layer 4 — casehub-ledger tamper-evident audit trail | L | Med | Next foundation layer |
+| #5 | Post-merge trust feedback — FLAGGED attestation on incident | M | Low | All foundation deps resolved |
+| #56 | ActionRiskClassifier oversight gate | M | High | engine#402 shipped |
+| #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `blog/2026-06-08-mdp01-six-issues-three-fixes.md` — this session's diary
-- `specs/2026-06-07-xs-s-m-batch-design.md` — batch spec (promoted to project)
-- GE-20260608-983041 — CDI @Alternative on framework-internal classes causes augmentation failure
-- GE-20260608-e1eff5 — Qhorus MessageDispatch.Builder rejects .content() on EVENT messages
+- `blog/2026-06-09-mdp01-the-hash-that-doesnt-hash.md` — this session's diary
+- `docs/specs/2026-06-08-layer4-ledger-audit-design.md` — Layer 4 spec (revision 4, promoted to project)
+- GE-20260609-e8ff82 — CaseLedgerEntryRepository wrong PU in multi-datasource
+- GE-20260609-afdc55 — LedgerVerificationService rollback-only contamination
+- GE-20260609-c18613 — EntrySnapshot pattern for cross-transaction JPA data
+- GE-20260609-0eef9c — Merkle leaf hash excludes supplementJson
