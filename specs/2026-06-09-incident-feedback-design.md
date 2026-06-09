@@ -309,6 +309,7 @@ Each `LedgerAttestation` written by the service:
 | No agent for capability | Valid case, no agent did `security-review` → 404 |
 | Ambiguous PR | Two APPROVED cases for same PR → 409 with candidate caseIds |
 | Disambiguated with caseId | Ambiguous + explicit caseId → 200 |
+| caseId provided, no APPROVED merge decision | Explicit caseId but no APPROVED MergeDecisionLedgerEntry for it → 404 |
 | Invalid capability tag | `"made-up"` → 400 |
 | Non-review capability tag | `"ci-runner"` → 400 (rejected by `ReviewDomain.REVIEW_CAPABILITIES`) |
 | Each severity level | Correct confidence per severity |
