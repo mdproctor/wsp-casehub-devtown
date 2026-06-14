@@ -91,7 +91,7 @@ When a real token exists, the compliance cross-reference (token-to-token matchin
 | `actorType` | `ActorType.SYSTEM` | Prevents `tokenise()` from creating an `ActorIdentity` mapping for the system actor (HUMAN path fires when `actorType` is null) |
 | `actorRole` | `"GDPR_COMPLIANCE"` | Follows `MergeDecisionObserver` pattern (`"ORCHESTRATOR"`) |
 | `entryType` | `LedgerEntryType.EVENT` | Erasure is a system event, not a command or attestation |
-| `subjectId` | `UUID.nameUUIDFromBytes(("erasure:" + erasedActorToken).getBytes())` | Deterministic from the token/hash. Repeated erasures of the same actor chain into the same Merkle tree |
+| `subjectId` | `UUID.nameUUIDFromBytes(("erasure:" + erasedActorToken).getBytes())` | Deterministic within each token resolution path. The first erasure (real token) and subsequent erasures (hash fallback) produce different `subjectId` values because the token mapping is destroyed by the first erasure. |
 
 **@NamedQuery:**
 
@@ -267,3 +267,7 @@ No `tenancy_id` column — inherited from `ledger_entry` via the FK join (V2003 
 - Foundation promotion of `ErasureReceiptLedgerEntry` (tracked in ledger#140)
 - Cross-tenant memory erasure in a single call (tracked in platform#99)
 - `ActorIdentityProvider.tokeniseForQuery()` → `Optional<String>` return type (tracked in ledger#142 — eliminates the need for hash fallback detection)
+
+### Implementation notes
+
+- **Fix `MemoryAdminResource` exception catch** — pre-existing bug: catches `UnsupportedOperationException` but `CaseMemoryStore.eraseEntity()` default throws `MemoryCapabilityException extends RuntimeException` (sibling, not subclass). Dormant because all active stores override `eraseEntity()`. Fix during implementation: change catch to `MemoryCapabilityException`.
