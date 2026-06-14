@@ -2,7 +2,7 @@
 
 **Issue:** casehubio/devtown#74
 **Date:** 2026-06-14
-**Status:** Revised (post-review)
+**Status:** Revised (post-review round 2)
 **Foundation issues:** casehubio/ledger#140 (promote receipt to foundation), casehubio/platform#99 (cross-tenant memory erasure)
 **Cross-repo issues filed:** aml#62, clinical#79, life#34
 
@@ -56,30 +56,65 @@ JOINED subclass of `LedgerEntry`. Records the erasure event in the Merkle chain.
 
 | Field | Type | Column | Notes |
 |-------|------|--------|-------|
-| `erasedActorToken` | `String` | `erased_actor_token` | The pseudonymous token captured via `ActorIdentityProvider.tokeniseForQuery()` BEFORE erasure destroys the mapping. Privacy-safe — stores the token, not the raw actor ID. |
+| `erasedActorToken` | `String` | `erased_actor_token` | Privacy-safe identifier for the erased actor. See token resolution below. |
 | `reason` | `String` | `reason` | Free text — "GDPR Art.17 request" |
 | `ledgerEntriesAffected` | `long` | `ledger_entries_affected` | Count from `LedgerErasureService` |
 | `memoryRecordsErased` | `int` | `memory_records_erased` | Count from `CaseMemoryStore.eraseEntity()` |
 
 `@DiscriminatorValue("ERASURE_RECEIPT")`. `domainContentBytes()` includes all four fields — follows the `MergeDecisionLedgerEntry` pattern.
 
-The entry's own `actorId` is set to `devtown:gdpr-erasure` (system actor). The `erasedActorToken` field stores the pseudonymous token, not the raw actor ID — the tokenisation pipeline in `JpaLedgerEntryRepository.save()` only processes `LedgerEntry.actorId`, not subclass join table fields, so raw PII in a subclass field would persist permanently.
+**Token resolution for `erasedActorToken`:**
 
-**subjectId:** `UUID.nameUUIDFromBytes(("erasure:" + token).getBytes())` — deterministic from the token. Repeated erasures of the same actor chain into the same Merkle tree. The token is already a pseudonym so no PII in the derivation.
+`ActorIdentityProvider.tokeniseForQuery(rawActorId)` is called before erasure. However, `InternalActorIdentityProvider.tokeniseForQuery()` falls through to the raw actor ID when no `ActorIdentity` mapping exists (`.orElse(rawActorId)` at line 37). This happens when the actor was never a HUMAN participant in a ledger entry (only HUMAN actors are tokenised — `tokenise()` skips non-HUMAN types) or when `PassThroughActorIdentityProvider` is active.
 
-**entryType:** `LedgerEntryType.EVENT` — an erasure is a system event, not a command or attestation.
+To prevent raw PII in the join table:
+
+```java
+String queryResult = actorIdentityProvider.tokeniseForQuery(rawActorId);
+String erasedActorToken = queryResult.equals(rawActorId)
+    ? sha256Hex("erasure:" + rawActorId)  // no mapping exists → hash fallback
+    : queryResult;                         // real token → use it
+```
+
+The hash fallback is:
+- Privacy-safe (SHA-256 is one-way)
+- Deterministic (same actor → same hash → same subjectId for Merkle chaining)
+- Verifiable (a DPO who knows the raw ID can hash it to confirm the receipt matches)
+
+When a real token exists, the compliance cross-reference (token-to-token matching against case entries) works. When the hash fallback fires, the cross-reference won't match — correct, because the actor has no ledger entries to match against.
+
+**Base entry fields:**
+
+| Field | Value | Rationale |
+|-------|-------|-----------|
+| `actorId` | `"devtown:gdpr-erasure"` | System actor, not the erased actor |
+| `actorType` | `ActorType.SYSTEM` | Prevents `tokenise()` from creating an `ActorIdentity` mapping for the system actor (HUMAN path fires when `actorType` is null) |
+| `actorRole` | `"GDPR_COMPLIANCE"` | Follows `MergeDecisionObserver` pattern (`"ORCHESTRATOR"`) |
+| `entryType` | `LedgerEntryType.EVENT` | Erasure is a system event, not a command or attestation |
+| `subjectId` | `UUID.nameUUIDFromBytes(("erasure:" + erasedActorToken).getBytes())` | Deterministic from the token/hash. Repeated erasures of the same actor chain into the same Merkle tree |
+
+**@NamedQuery:**
+
+```java
+@NamedQuery(
+    name = "ErasureReceiptLedgerEntry.findByTokens",
+    query = "SELECT e FROM ErasureReceiptLedgerEntry e WHERE e.erasedActorToken IN :tokens"
+)
+```
+
+No `tenancyId` filter — ledger identity erasure is global (`ActorIdentity` has no tenancy column). The receipt's existence proves erasure regardless of which tenancy the request originated from.
 
 **2. `GdprErasureService`** — `app/src/main/java/io/casehub/devtown/app/ledger/`
 
-`@ApplicationScoped`. Orchestrates three-step erasure. Injects: `LedgerErasureService`, `CaseMemoryStore`, `ActorIdentityProvider`, `LedgerEntryRepository`.
+`@ApplicationScoped`. **No `@Transactional` annotation on the class or the method.** Orchestrates three-step erasure. Injects: `LedgerErasureService`, `CaseMemoryStore`, `ActorIdentityProvider`, `LedgerEntryRepository`.
 
 **Operation order and transaction boundary:**
 
-1. **Capture token** — `ActorIdentityProvider.tokeniseForQuery(rawActorId)` (read-only, before anything destructive). If tokenisation is disabled (`PassThroughActorIdentityProvider`), returns the raw ID.
-2. **Memory erasure** (best-effort, outside JTA) — `CaseMemoryStore.eraseEntity(actorId, tenancyId)`. Catch `MemoryCapabilityException` → record 0. Executed first because it may be outside the JTA boundary; if the subsequent ledger TX fails and rolls back, memory erasure is harmless (no PII remains in memory).
-3. **Ledger erasure + receipt persist** (atomic, same JTA transaction) — `LedgerErasureService.erase(rawActorId)` then `LedgerEntryRepository.save(receipt, tenancyId)`. Both use `@LedgerPersistenceUnit` EntityManager. If the receipt persist fails, the ledger erasure rolls back — no partial state.
+1. **Capture token** (no TX) — `ActorIdentityProvider.tokeniseForQuery(rawActorId)`. If result equals input, apply SHA-256 hash fallback. Read-only, auto-commit.
+2. **Memory erasure** (no TX, best-effort) — `CaseMemoryStore.eraseEntity(actorId, tenancyId)`. Catch `MemoryCapabilityException` → record 0. Executed before the atomic pair because it may be outside the JTA boundary; if the subsequent ledger TX fails and rolls back, memory erasure is harmless (no PII remains in memory after erasure).
+3. **Ledger erasure + receipt persist** (atomic) — wrapped in `QuarkusTransaction.requiringNew().call(() -> { ... })` per the `CodeReviewComplianceService` pattern. `LedgerErasureService.erase()` and `LedgerEntryRepository.save()` both use `@LedgerPersistenceUnit` EntityManager and join this transaction via their own `@Transactional(REQUIRED)`. If the receipt persist fails, the ledger erasure rolls back — no partial state.
 
-**Transactional guarantee:** Ledger erasure and receipt persist are atomic (same JTA transaction). Memory erasure is best-effort, executed before the atomic pair. On memory failure, the receipt records `memoryRecordsErased=0` — the compliance officer knows memory erasure failed and can retry.
+**Transactional guarantee:** Ledger erasure and receipt persist are atomic (same JTA transaction via `QuarkusTransaction.requiringNew()`). Memory erasure is best-effort, executed before the atomic pair. On memory failure, the receipt records `memoryRecordsErased=0` — the compliance officer knows memory erasure needs retry.
 
 Edge cases:
 - Actor not found in ledger: `ErasureResult.mappingFound=false`. Still proceeds with memory erasure and writes a receipt (the receipt records "no ledger data found" — useful for compliance audit).
@@ -120,7 +155,7 @@ public record GdprRequirement(
 )
 ```
 
-`erasurePerformed` is true when at least one `ErasureReceiptLedgerEntry` exists whose `erasedActorToken` matches any `actorId` token in the case's ledger entries. This works because both the receipt and the entries store the same pseudonymous token — the match is token-to-token, not raw-to-raw. No identity mapping needed.
+`erasurePerformed` is true when at least one `ErasureReceiptLedgerEntry` exists whose `erasedActorToken` matches any `actorId` token in the case's ledger entries. This works because both the receipt and the entries store the same pseudonymous token — the match is token-to-token. When the hash fallback was used (no mapping existed), the match won't fire — correct, because the actor has no ledger entries in the case.
 
 `erasureReceiptIds` lists the receipt entry IDs for traceability. Breaking change to the record — call-site migration is mechanical (add two args to the single constructor call in `CodeReviewComplianceService.buildGdpr()`).
 
@@ -129,7 +164,7 @@ public record GdprRequirement(
 Currently returns static values. After this change:
 - Accept the `List<EntrySnapshot>` from the caller (already computed for the case)
 - Collect unique `actorId` tokens from the snapshots
-- Query for `ErasureReceiptLedgerEntry` records matching those tokens (JPQL: `SELECT e FROM ErasureReceiptLedgerEntry e WHERE e.erasedActorToken IN :tokens AND e.tenancyId = :tenancyId`)
+- Query via named query `ErasureReceiptLedgerEntry.findByTokens` — no `tenancyId` filter (erasure is global; the receipt's existence proves erasure regardless of originating tenancy)
 - If found: `erasurePerformed=true`, `erasureReceiptIds` = list of receipt IDs
 
 **7. Relationship to `MemoryAdminResource`**
@@ -161,20 +196,24 @@ No `tenancy_id` column — inherited from `ledger_entry` via the FK join (V2003 
 
 **Unit tests** (`GdprErasureServiceTest`):
 - Happy path: actor exists, ledger entries found, memory records found → receipt with correct counts, `erasedActorToken` is the token not the raw ID
+- Hash fallback: actor with no mapping → `erasedActorToken` is SHA-256 hash, not raw ID
 - Actor not found: `ErasureResult.mappingFound=false` → receipt with `ledgerEntriesAffected=0`
 - Memory store returns 0 → receipt with `memoryRecordsErased=0`
 - Memory store throws `MemoryCapabilityException` → caught, receipt with `memoryRecordsErased=0`
 - Idempotent: second erasure of same actor → new receipt with zero counts
 - Token capture happens before erasure: verify `tokeniseForQuery()` called before `erase()`
+- Verify `actorType=SYSTEM` on the receipt entry (prevents tokenisation of system actor)
 
 **`@QuarkusTest`** (`GdprErasureResourceTest`):
 - `@TestProfile` with `casehub.ledger.identity.tokenisation.enabled=true` (per GE-20260531-46f8ab)
 - Write ledger entries with known actor → `POST /api/actors/{actorId}/erasure` → verify 200, receipt counts, `resolve()` returns empty
 - Verify `ErasureReceiptLedgerEntry` persisted in ledger with token (not raw ID)
 - Verify `ErasureReceiptLedgerEntry.erasedActorToken` matches the token on the original entries
+- Verify receipt entry has `actorType=SYSTEM`, `actorRole="GDPR_COMPLIANCE"`
 
 **Compliance report test:**
 - Erase actor → `GET /api/compliance/code-review/{caseId}` → verify `GdprRequirement.erasurePerformed=true` and `erasureReceiptIds` contains the receipt ID
+- Verify compliance query works cross-tenancy: erase in tenancy A, report in tenancy B → receipt still found (no tenancyId filter)
 
 ### Module placement
 
@@ -195,7 +234,9 @@ No `tenancy_id` column — inherited from `ledger_entry` via the FK join (V2003 
 - [x] Migration version V2004 — within devtown's allocated V2000+ range (V2003 taken by `merge_decision_repo_pr_index`)
 - [x] No `tenancy_id` in join table — inherited from `ledger_entry` via FK join
 - [x] `domainContentBytes()` includes subclass fields (follows `MergeDecisionLedgerEntry` pattern post-ledger#128)
-- [x] `erasedActorToken` stores pseudonymous token, not raw PII
+- [x] `erasedActorToken` stores pseudonymous token or SHA-256 hash — never raw PII
+- [x] `actorType = ActorType.SYSTEM` — prevents tokenisation of system actor
+- [x] `@NamedQuery` for compliance lookup (follows `MergeDecisionLedgerEntry` pattern)
 
 ### Out of scope
 
