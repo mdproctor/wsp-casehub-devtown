@@ -1,6 +1,6 @@
 # HANDOFF — 2026-06-09
 
-*Updated: #200 (parent) closed — removed from backlog.*
+*Updated: #5, platform#72, engine#436, engine#444, engine#450, ledger#128 closed — removed from backlog.*
 
 ## Last Session
 
@@ -12,12 +12,7 @@ Update ARC42STORIES.MD — Layer 4 shipped but the layer taxonomy (line 128), ch
 
 ## What's Left
 
-- **devtown#72** — CaseMemoryIntegrationTest: two engine bugs (engine#444 + async emitter), blocked on engine fix · S · Med
-- **platform#72** — CaseMemoryStore.eraseEntity() should return int · XS · Low
-- **engine#436** — CaseLedgerEntryRepository should use composition over inheritance · M · Med
-- **engine#444** — SchedulerService null getCaseDefinition · S · Med
-- **engine#450** — CaseLedgerEntryRepository.findByCaseId() uses wrong PU in multi-datasource · S · Low
-- **ledger#128** — leafHash should incorporate supplementJson for content integrity · M · Med
+- **devtown#72** — CaseMemoryIntegrationTest: async emitter issue remains; engine#444 now fixed · S · Med
 - **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence when foundation runs remotely · XL · High
 - **devtown#74** — GDPR Art.17 erasure REST endpoint · S · Low
 
@@ -25,7 +20,6 @@ Update ARC42STORIES.MD — Layer 4 shipped but the layer taxonomy (line 128), ch
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #5 | Post-merge trust feedback — FLAGGED attestation on incident | M | Low | All foundation deps resolved |
 | #56 | ActionRiskClassifier oversight gate | M | High | engine#402 shipped |
 | #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
