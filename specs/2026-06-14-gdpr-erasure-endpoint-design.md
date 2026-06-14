@@ -2,8 +2,8 @@
 
 **Issue:** casehubio/devtown#74
 **Date:** 2026-06-14
-**Status:** Revised (post-review round 2)
-**Foundation issues:** casehubio/ledger#140 (promote receipt to foundation), casehubio/platform#99 (cross-tenant memory erasure)
+**Status:** Revised (post-review round 3)
+**Foundation issues:** casehubio/ledger#140 (promote receipt to foundation), casehubio/ledger#142 (tokeniseForQuery Optional API), casehubio/platform#99 (cross-tenant memory erasure)
 **Cross-repo issues filed:** aml#62, clinical#79, life#34
 
 ---
@@ -111,16 +111,38 @@ No `tenancyId` filter — ledger identity erasure is global (`ActorIdentity` has
 **Operation order and transaction boundary:**
 
 1. **Capture token** (no TX) — `ActorIdentityProvider.tokeniseForQuery(rawActorId)`. If result equals input, apply SHA-256 hash fallback. Read-only, auto-commit.
-2. **Memory erasure** (no TX, best-effort) — `CaseMemoryStore.eraseEntity(actorId, tenancyId)`. Catch `MemoryCapabilityException` → record 0. Executed before the atomic pair because it may be outside the JTA boundary; if the subsequent ledger TX fails and rolls back, memory erasure is harmless (no PII remains in memory after erasure).
+2. **Memory erasure** (no TX, best-effort) — Erase all devtown entity types for this actor. devtown stores memory under prefixed entity IDs (see `docs/specs/2026-06-05-case-memory-store-integration-design.md`):
+
+   ```java
+   int contributorCount = eraseEntitySafely(
+       DevtownMemoryDomain.CONTRIBUTOR_PREFIX + rawActorId, tenancyId);
+   int reviewerCount = eraseEntitySafely(
+       DevtownMemoryDomain.REVIEWER_PREFIX + rawActorId, tenancyId);
+   int memoryRecordsErased = contributorCount + reviewerCount;
+   ```
+
+   `eraseEntitySafely()` catches `MemoryCapabilityException` and returns 0. Code area entities (`module:`) don't contain contributor identity by design — no erasure needed. Executed before the atomic pair because it may be outside the JTA boundary; if the subsequent ledger TX fails and rolls back, memory erasure is harmless (no PII remains in memory after erasure).
 3. **Ledger erasure + receipt persist** (atomic) — wrapped in `QuarkusTransaction.requiringNew().call(() -> { ... })` per the `CodeReviewComplianceService` pattern. `LedgerErasureService.erase()` and `LedgerEntryRepository.save()` both use `@LedgerPersistenceUnit` EntityManager and join this transaction via their own `@Transactional(REQUIRED)`. If the receipt persist fails, the ledger erasure rolls back — no partial state.
 
 **Transactional guarantee:** Ledger erasure and receipt persist are atomic (same JTA transaction via `QuarkusTransaction.requiringNew()`). Memory erasure is best-effort, executed before the atomic pair. On memory failure, the receipt records `memoryRecordsErased=0` — the compliance officer knows memory erasure needs retry.
 
 Edge cases:
 - Actor not found in ledger: `ErasureResult.mappingFound=false`. Still proceeds with memory erasure and writes a receipt (the receipt records "no ledger data found" — useful for compliance audit).
-- `CaseMemoryStore` throws `MemoryCapabilityException` (store exists but doesn't support `ERASE_ENTITY`): catch, record `memoryRecordsErased=0`.
-- `NoOpCaseMemoryStore` active: returns 0 (confirmed in bytecode). No error.
+- `CaseMemoryStore` throws `MemoryCapabilityException` (store exists but doesn't support `ERASE_ENTITY`): caught by `eraseEntitySafely()`, returns 0 per prefix.
+- `NoOpCaseMemoryStore` active: `eraseEntity()` returns 0 (confirmed in bytecode). No error.
 - Repeated erasure of same actor: idempotent. Second call finds no mapping, writes another receipt with `ledgerEntriesAffected=0`.
+
+**`DevtownMemoryDomain` entity ID prefix constants** — `domain/src/main/java/io/casehub/devtown/domain/memory/`
+
+Add to the existing `DevtownMemoryDomain` class:
+
+```java
+public static final String CONTRIBUTOR_PREFIX = "contributor:";
+public static final String REVIEWER_PREFIX = "reviewer:";
+public static final String MODULE_PREFIX = "module:";
+```
+
+Update existing inline usages in `CaseMemoryEmitter`, `CaseMemoryRecaller`, and `MemoryAdminResource` to use these constants. Breaking change — mechanical, grep-and-replace.
 
 **3. `ErasureReceipt`** — `review/src/main/java/io/casehub/devtown/review/compliance/`
 
@@ -195,7 +217,7 @@ No `tenancy_id` column — inherited from `ledger_entry` via the FK join (V2003 
 ### Testing
 
 **Unit tests** (`GdprErasureServiceTest`):
-- Happy path: actor exists, ledger entries found, memory records found → receipt with correct counts, `erasedActorToken` is the token not the raw ID
+- Happy path: actor exists, ledger entries found, memory records found → receipt with correct counts, `erasedActorToken` is the token not the raw ID, memory erased for both `contributor:` and `reviewer:` prefixes
 - Hash fallback: actor with no mapping → `erasedActorToken` is SHA-256 hash, not raw ID
 - Actor not found: `ErasureResult.mappingFound=false` → receipt with `ledgerEntriesAffected=0`
 - Memory store returns 0 → receipt with `memoryRecordsErased=0`
@@ -244,3 +266,4 @@ No `tenancy_id` column — inherited from `ledger_entry` via the FK join (V2003 
 - `@RolesAllowed` enforcement (auth retrofit tracked in devtown#71 — endpoint is structurally ready)
 - Foundation promotion of `ErasureReceiptLedgerEntry` (tracked in ledger#140)
 - Cross-tenant memory erasure in a single call (tracked in platform#99)
+- `ActorIdentityProvider.tokeniseForQuery()` → `Optional<String>` return type (tracked in ledger#142 — eliminates the need for hash fallback detection)
