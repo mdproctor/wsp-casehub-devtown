@@ -19,3 +19,15 @@
 **Foundation issues filed:** ledger#140 (promote receipt), ledger#142 (tokeniseForQuery Optional API), platform#99 (cross-tenant memory erasure).
 
 **Cross-repo issues:** aml#62, clinical#79, life#34 — deep GDPR erasure for other harnesses.
+
+## §2 CaseMemoryIntegrationTest Fix (#72)
+
+**Three root causes** — none was the originally suspected async emitter issue:
+
+1. **`Instance.destroy()` on `@ApplicationScoped` singleton.** Quarkus ArC's `Instance.destroy()` removes the contextual instance from the application context — destroying the `InMemoryMemoryStore` singleton and its `ConcurrentHashMap`. Every subsequent `Instance.get()` creates a fresh, empty instance. Both `CaseMemoryEmitter` and `CaseMemoryRecaller` had this bug. CDI spec says `destroy()` on normal-scoped beans is a no-op — ArC diverges.
+
+2. **`CaseMemoryRecaller.withQuestion()` substring mismatch.** `InMemoryMemoryStore.query()` filters: `m.text().contains(query.question())`. The question `"review history for app in casehubio/devtown"` is never a substring of the stored fact `"The app module in casehubio/devtown received a style review..."`. Entity-ID-scoped queries don't need semantic search — removed `withQuestion()`.
+
+3. **Engine signal race (engine#494).** `CaseHubRuntime.signal()` dispatches to the Vert.x event loop; `startCase()` returns the caseId before the case is cached. Worked around by pre-seeding the outcome in the initial context.
+
+**Garden entry candidate:** `Instance.destroy()` on `@ApplicationScoped` beans in Quarkus ArC — silent data loss.
