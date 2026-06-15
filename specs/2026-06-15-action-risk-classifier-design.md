@@ -3,7 +3,7 @@
 **Issue:** devtown#56
 **Foundation:** engine#402 (shipped)
 **Layer:** 5 extension (casehub-engine SPI implementation)
-**Date:** 2026-06-15 (revised after round 2 review)
+**Date:** 2026-06-15 (revised after round 3 review)
 
 ## Problem
 
@@ -313,6 +313,12 @@ Each per-action-type method:
 3. If the context key is missing or the value is unparseable → `GateRequired` (fail-safe)
 4. Compares and returns the appropriate `RiskDecision`
 
+**Context value extraction:** `PlannedAction.context()` is
+`Map<String, Object>`. JSON deserialization typically produces `Long` for
+integer values, not `Integer`. Integer metrics must be extracted via
+`Number.intValue()` (not `(Integer)` cast). String metrics are extracted
+via `(String)` cast or `Objects.toString()`.
+
 ### app/ — DevtownRiskClassifierProducer
 
 `@ApplicationScoped @RiskClassifier` bean that **implements
@@ -333,6 +339,10 @@ Synchronous classification — the engine wraps it reactively via
   rejects typos like "ture" (~5 tests)
 - `DevtownActionTypeTest` — constants exist and match expected strings
   (~8 assertions)
+- `HumanOversightTest` — update existing test (4 assertions for
+  ROUTING_REVIEW) to add 4 matching assertions for GENERAL:
+  constantNonBlank, valueMatchesSpec (`human-oversight:general`),
+  prefixedCorrectly (`human-oversight:`), noOverlapWithHumanDecision
 - `RiskPreferenceKeysTest` — all keys have correct namespace, name,
   defaults; both expiration keys share name but differ in defaults (~12 tests)
 - `DevtownActionRiskClassifierTest` — per action type:
