@@ -1,33 +1,27 @@
-# HANDOFF — 2026-06-09
-
-*Updated: #5, platform#72, engine#436, engine#444, engine#450, ledger#128 closed — removed from backlog.*
+# HANDOFF — 2026-06-15
 
 ## Last Session
 
-Shipped Layer 4 (`issue-73-layer4-ledger-audit`) covering devtown#73 + devtown#7. `MergeDecisionLedgerEntry` (JOINED, V2002) captures APPROVED/REJECTED for terminal PR review cases. `MergeDecisionObserver` derives the decision from `CaseLifecycleEvent`. Compliance report endpoint (`GET /api/compliance/code-review/{caseId}`) assembles evidence across audit chain, trust routing, SLA, and GDPR dimensions. Spec went through 4 revisions (16 review findings) before implementation — discovered foundation hash gap (ledger#128), `CaseLedgerEntryRepository` PU bug (engine#450), and `LedgerVerificationService` rollback-only contamination.
+Closed three issues and delivered two features. GDPR Art.17 erasure endpoint (#74) with tamper-evident receipt, polished via #77 (PII echo removal, pipe escaping, sha256 utility extraction). ActionRiskClassifier oversight gate (#56) — 8 action types, 4 classification categories, PreferenceProvider-driven thresholds, 38 test methods. Fixed CaseMemoryIntegrationTest (#72) and resolved CurrentPrincipal CDI ambiguity from upstream SNAPSHOT updates. Spec for #56 went through 4 review rounds (14 findings) before TDD implementation.
 
 ## Immediate Next Step
 
-Update ARC42STORIES.MD — Layer 4 shipped but the layer taxonomy (line 128), chapter matrix (line 399), and Layer entries (lines 779, 788) still show 🔲 pending. Run the stale scan deferred from this session.
+Pick next issue from the backlog. Layer 6 (trust routing) is the next major layer — devtown#3 (TrustWeightedSelectionStrategy) is the entry point. Or continue with smaller issues.
 
 ## What's Left
 
-- **devtown#72** — CaseMemoryIntegrationTest: async emitter issue remains; engine#444 now fixed · S · Med
 - **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence when foundation runs remotely · XL · High
-- **devtown#74** — GDPR Art.17 erasure REST endpoint · S · Low
+- **parent#253** — docs: sync casehub-devtown.md for ActionRiskClassifier (#56) · XS · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #56 | ActionRiskClassifier oversight gate | M | High | engine#402 shipped |
+| #3 | TrustWeightedSelectionStrategy — route by capability-scoped trust | M | Med | Layer 6 entry point |
 | #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `blog/2026-06-09-mdp01-the-hash-that-doesnt-hash.md` — this session's diary
-- `docs/specs/2026-06-08-layer4-ledger-audit-design.md` — Layer 4 spec (revision 4, promoted to project)
-- GE-20260609-e8ff82 — CaseLedgerEntryRepository wrong PU in multi-datasource
-- GE-20260609-afdc55 — LedgerVerificationService rollback-only contamination
-- GE-20260609-c18613 — EntrySnapshot pattern for cross-transaction JPA data
-- GE-20260609-0eef9c — Merkle leaf hash excludes supplementJson
+- `specs/2026-06-15-action-risk-classifier-design.md` — #56 spec (4 review rounds, promoted to project)
+- `specs/2026-06-14-gdpr-erasure-endpoint-design.md` — #74 spec (promoted to project)
+- `design/JOURNAL.md` — 2 journal entries (#74 GDPR erasure, #72 root cause analysis)
