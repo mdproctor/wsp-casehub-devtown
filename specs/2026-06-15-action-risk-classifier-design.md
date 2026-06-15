@@ -3,7 +3,7 @@
 **Issue:** devtown#56
 **Foundation:** engine#402 (shipped)
 **Layer:** 5 extension (casehub-engine SPI implementation)
-**Date:** 2026-06-15 (revised after round 1 review)
+**Date:** 2026-06-15 (revised after round 2 review)
 
 ## Problem
 
@@ -56,21 +56,29 @@ the categorisation against the engine's own taxonomy.
 
 ## Action Type Catalog
 
-| Constant | Action Type String | Description |
-|----------|-------------------|-------------|
-| `PR_MERGE_EXECUTE` | `pr-merge-execute` | Merge a PR to the target branch |
-| `PR_FORCE_MERGE` | `pr-force-merge` | Merge overriding failed checks |
-| `PR_REVIEW_OVERRIDE` | `pr-review-override` | Override a reviewer's decision |
-| `SECURITY_ESCALATION` | `security-escalation` | Block PR and alert on security finding |
-| `ISSUE_CLOSE_INVALID` | `issue-close-invalid` | Close issue as invalid |
-| `DEPENDENCY_REMOVAL` | `dependency-removal` | Remove a flagged dependency |
-| `CONTRIBUTOR_ACCESS_CHANGE` | `contributor-access-change` | Add/remove contributor access |
-| `PRODUCTION_DEPLOY` | `production-deploy` | Deploy to production |
-| `GENERAL_OVERSIGHT` | `human-oversight:general` | Catch-all oversight group for actions without a specific group |
+| Constant | Class | Value | Description |
+|----------|-------|-------|-------------|
+| `PR_MERGE_EXECUTE` | `DevtownActionType` | `pr-merge-execute` | Merge a PR to the target branch |
+| `PR_FORCE_MERGE` | `DevtownActionType` | `pr-force-merge` | Merge overriding failed checks |
+| `PR_REVIEW_OVERRIDE` | `DevtownActionType` | `pr-review-override` | Override a reviewer's decision |
+| `SECURITY_ESCALATION` | `DevtownActionType` | `security-escalation` | Block PR and alert on security finding |
+| `ISSUE_CLOSE_INVALID` | `DevtownActionType` | `issue-close-invalid` | Close issue as invalid |
+| `DEPENDENCY_REMOVAL` | `DevtownActionType` | `dependency-removal` | Remove a flagged dependency |
+| `CONTRIBUTOR_ACCESS_CHANGE` | `DevtownActionType` | `contributor-access-change` | Add/remove contributor access |
+| `PRODUCTION_DEPLOY` | `DevtownActionType` | `production-deploy` | Deploy to production |
 
-`GENERAL_OVERSIGHT` is a candidateGroup constant, not an action type. It
-ensures WorkItems always have group scoping — `null` candidateGroups would
-allow any user to claim the item, not just qualified humans.
+### Candidate Group Constants (separate from action types)
+
+| Constant | Class | Value | Used by |
+|----------|-------|-------|---------|
+| `PR_APPROVAL` | `HumanDecision` | `human-decision:pr-approval` | pr-merge-execute, pr-force-merge, pr-review-override |
+| `ROUTING_REVIEW` | `HumanOversight` | `human-oversight:routing-review` | security-escalation, production-deploy |
+| `GENERAL` | `HumanOversight` | `human-oversight:general` | issue-close-invalid, dependency-removal, contributor-access-change, unknown types |
+
+`HumanOversight.GENERAL` is a new constant in the existing `HumanOversight`
+class. It follows the `human-oversight:` prefix convention alongside the
+existing `ROUTING_REVIEW`. It ensures WorkItems always have group scoping —
+`null` candidateGroups would allow any user to claim the item.
 
 ## Classification Categories
 
@@ -82,8 +90,8 @@ Always return `GateRequired` unless explicitly disabled via preference.
 
 | Action | Reason | Reversible | candidateGroups |
 |--------|--------|------------|-----------------|
-| `pr-force-merge` | Bypasses safety checks — requires explicit human approval | false | `human-decision:pr-approval` |
-| `contributor-access-change` | Access changes are consequential regardless of scope | false | `human-oversight:general` |
+| `pr-force-merge` | Bypasses safety checks — requires explicit human approval | false | `HumanDecision.PR_APPROVAL` |
+| `contributor-access-change` | Access changes are consequential regardless of scope | false | `HumanOversight.GENERAL` |
 
 ### 2. Minimum-requirement (THRESHOLD, inverted comparison)
 
@@ -95,7 +103,7 @@ This is the inverse of risk-threshold actions: the metric measures safety
 
 | Action | Context Key | Minimum Default | Reversible | candidateGroups | Rationale |
 |--------|------------|-----------------|------------|-----------------|-----------|
-| `pr-merge-execute` | `approvedReviewCount` | 1 | false | `human-decision:pr-approval` | Zero approvals must never proceed |
+| `pr-merge-execute` | `approvedReviewCount` | 1 | false | `HumanDecision.PR_APPROVAL` | Zero approvals must never proceed |
 
 ### 3. Risk-threshold (THRESHOLD, standard comparison)
 
@@ -104,10 +112,10 @@ threshold. **At or above threshold → `GateRequired`. Below → `Autonomous`.**
 
 | Action | Context Key | Threshold Default | Reversible | candidateGroups | Rationale |
 |--------|------------|-------------------|------------|-----------------|-----------|
-| `security-escalation` | `severity` | `HIGH` (via `IncidentSeverity` ordinal) | true | `human-oversight:routing-review` | LOW/MEDIUM can auto-report |
-| `issue-close-invalid` | `commentCount` | 5 | true | `human-oversight:general` | Low engagement can auto-close |
-| `dependency-removal` | `transitiveUsageCount` | 3 | false | `human-oversight:general` | Narrow-use deps can auto-remove |
-| `production-deploy` | `modulesAffected` | 3 | false | `human-oversight:routing-review` | Single-module deploys can auto-proceed |
+| `security-escalation` | `severity` | `HIGH` (via `IncidentSeverity` ordinal) | true | `HumanOversight.ROUTING_REVIEW` | LOW/MEDIUM can auto-report |
+| `issue-close-invalid` | `commentCount` | 5 | true | `HumanOversight.GENERAL` | Low engagement can auto-close |
+| `dependency-removal` | `transitiveUsageCount` | 3 | false | `HumanOversight.GENERAL` | Narrow-use deps can auto-remove |
+| `production-deploy` | `modulesAffected` | 3 | false | `HumanOversight.ROUTING_REVIEW` | Single-module deploys can auto-proceed |
 
 The `security-escalation` threshold uses `IncidentSeverity` (domain enum
 with `LOW(0.3)`, `MEDIUM(0.5)`, `HIGH(0.7)`, `CRITICAL(0.9)`) for
@@ -122,14 +130,32 @@ a numeric threshold.
 
 | Action | Rule | Reversible | candidateGroups |
 |--------|------|------------|-----------------|
-| `pr-review-override` | `GateRequired` when `context.get("originalVerdict")` is `"REJECTED"` (overriding a rejection is consequential). `Autonomous` when `"APPROVED"`, `"PENDING"`, or absent (no reviewer decision being overturned) | true | `human-decision:pr-approval` |
+| `pr-review-override` | `GateRequired` when `context.get("originalVerdict")` is `"REJECTED"` (overriding a rejection is consequential). `Autonomous` when `"APPROVED"`, `"PENDING"`, or absent (no reviewer decision being overturned) | true | `HumanDecision.PR_APPROVAL` |
 
 ### 5. Unknown action type (fail-safe)
 
 Unknown action types return `GateRequired("Unknown action type — manual
-review required", true, List.of(GENERAL_OVERSIGHT), Duration.ofHours(24),
-actionType)`. Consistent with the engine's fail-safe principle — unknown
-actions must not proceed autonomously.
+review required", true, List.of(HumanOversight.GENERAL),
+Duration.ofHours(24), actionType)`. Consistent with the engine's fail-safe
+principle — unknown actions must not proceed autonomously.
+
+### Null/Missing Context Key Rule
+
+**Missing or unparseable context metrics default to fail-safe
+(`GateRequired`), except for conditional actions where absence has defined
+non-risk semantics.**
+
+Specifically:
+- **Minimum-requirement** (`approvedReviewCount` missing): no evidence of
+  approval → `GateRequired`. Zero is the safe assumption.
+- **Risk-threshold** (`severity`, `commentCount`, etc. missing): unknown
+  risk is not zero risk → `GateRequired`.
+- **Risk-threshold** (value present but unparseable — e.g., `severity`
+  string that does not map to `IncidentSeverity`): malformed input is not
+  safe input → `GateRequired`.
+- **Conditional** (`originalVerdict` absent): already specified — absent
+  means no verdict to override → `Autonomous`. This is correct because
+  you cannot override a verdict that does not exist.
 
 ## PreferenceProvider Integration
 
@@ -148,20 +174,36 @@ Preferences prefs = preferenceProvider.resolve(
 BooleanPreference enabled = prefs.getOrDefault(RiskPreferenceKeys.ENABLED);
 ```
 
-### Preference keys per action type
+### Preference keys
 
-Each action type's `Preferences` bag contains:
+**Shared keys** (all action types):
 
-| Key name | Type | Default | Notes |
-|----------|------|---------|-------|
-| `enabled` | `BooleanPreference` | `true` | Escape hatch — `false` returns `Autonomous` regardless |
-| `expiresInMinutes` | `IntPreference` | 240 (reversible) / 1440 (irreversible) | Per-action-type override, no separate global defaults |
+| Key constant | Name | Type | Default | Notes |
+|-------------|------|------|---------|-------|
+| `ENABLED` | `enabled` | `BooleanPreference` | `true` | Escape hatch — `false` returns `Autonomous` regardless |
+| `EXPIRES_IN_MINUTES_REVERSIBLE` | `expiresInMinutes` | `IntPreference` | `240` (4h) | Used by classifier methods for reversible actions |
+| `EXPIRES_IN_MINUTES_IRREVERSIBLE` | `expiresInMinutes` | `IntPreference` | `1440` (24h) | Used by classifier methods for irreversible actions |
 
-Threshold-gated and minimum-requirement actions add:
+Both expiration keys share the same `name` (`expiresInMinutes`) so they
+resolve to the same YAML property within a scope. If a user configures
+a custom value at a specific action-type scope, it overrides both. The
+distinct defaults serve only the case where no YAML value is present —
+each classifier method picks the key matching its action's reversibility
+(a compile-time constant per action type).
 
-| Key name | Type | Default | Notes |
-|----------|------|---------|-------|
-| `threshold` | `IntPreference` or `StringPreference` | Per action type (see tables above) | Each classifier method reads its own key directly |
+**Per-action-type threshold keys:**
+
+| Key constant | Name | Type | Default |
+|-------------|------|------|---------|
+| `MERGE_MIN_APPROVED_REVIEWS` | `threshold` | `IntPreference` | `1` |
+| `SECURITY_SEVERITY_THRESHOLD` | `threshold` | `StringPreference` | `"HIGH"` |
+| `ISSUE_CLOSE_COMMENT_THRESHOLD` | `threshold` | `IntPreference` | `5` |
+| `DEPENDENCY_USAGE_THRESHOLD` | `threshold` | `IntPreference` | `3` |
+| `DEPLOY_MODULE_THRESHOLD` | `threshold` | `IntPreference` | `3` |
+
+All threshold keys share `name` = `threshold` but each classifier method
+reads its own typed key. The `SettingsScope` per action type means each
+scope bag has at most one `threshold` value — no collision.
 
 ### Namespace convention
 
@@ -172,18 +214,32 @@ inconsistency — not addressed in this issue.
 
 ### New preference types required
 
-**`BooleanPreference`** — new record in `domain/preferences/` following
-the existing pattern:
+**`BooleanPreference`** — new record in `domain/preferences/` with strict
+parsing (consistent with `IntPreference`/`DoublePreference` which throw on
+invalid input):
 
 ```java
 public record BooleanPreference(boolean value) implements SingleValuePreference {
-    public static BooleanPreference of(boolean value) { return new BooleanPreference(value); }
+    public static BooleanPreference of(boolean value) {
+        return new BooleanPreference(value);
+    }
     public static BooleanPreference parse(String raw) {
         Objects.requireNonNull(raw, "raw must not be null");
-        return new BooleanPreference(Boolean.parseBoolean(raw));
+        return switch (raw.strip().toLowerCase()) {
+            case "true" -> new BooleanPreference(true);
+            case "false" -> new BooleanPreference(false);
+            default -> throw new IllegalArgumentException(
+                "Invalid boolean preference: '" + raw
+                + "' — expected 'true' or 'false'");
+        };
     }
 }
 ```
+
+`Boolean.parseBoolean("ture")` silently returns `false`. In a system where
+`enabled=false` disables an oversight gate, a YAML typo silently turning
+off security review is a serious failure mode. Strict parsing fails fast
+at preference resolution.
 
 No `DurationPreference` needed. Time-based preferences use `IntPreference`
 representing minutes, following the convention established by
@@ -194,45 +250,47 @@ The key name (`expiresInMinutes`) encodes the unit.
 
 ```
 domain/
-  DevtownActionType.java           — typed string constants (action types + GENERAL_OVERSIGHT group)
+  DevtownActionType.java             — typed string constants (action types only)
+  HumanOversight.java                — + GENERAL constant (new, alongside existing ROUTING_REVIEW)
   preferences/BooleanPreference.java — new SingleValuePreference for boolean keys
   preferences/RiskPreferenceKeys.java — PreferenceKey constants per action type
 
 review/
-  DevtownActionRiskClassifier.java — implements ActionRiskClassifier
-                                     classification logic per action type
+  DevtownActionRiskClassifier.java   — classification logic per action type
+                                       (does NOT implement ActionRiskClassifier —
+                                       own method signature takes Preferences)
 
 app/
-  DevtownRiskClassifierProducer.java — @ApplicationScoped @RiskClassifier CDI adapter
+  DevtownRiskClassifierProducer.java — @ApplicationScoped @RiskClassifier
+                                       implements ActionRiskClassifier
+                                       CDI adapter: resolves Preferences, delegates
 ```
 
 ### domain/ — DevtownActionType
 
 Typed constant class following `ReviewDomain`/`AgentQualification` pattern.
-Each constant is a `public static final String`. Includes the
-`GENERAL_OVERSIGHT` candidateGroup constant.
+Each constant is a `public static final String`. Contains only action type
+constants — no candidate group constants (those belong in `HumanDecision`
+and `HumanOversight`).
+
+### domain/ — HumanOversight (existing, extended)
+
+Add `GENERAL = "human-oversight:general"` alongside the existing
+`ROUTING_REVIEW = "human-oversight:routing-review"`. Follows the
+`human-oversight:` prefix convention.
 
 ### domain/ — RiskPreferenceKeys
 
-Preference key constants shared across all action types. Contains:
+Preference key constants. Contains:
 - `ENABLED` — `PreferenceKey<BooleanPreference>` (namespace `casehubio.devtown.risk`, name `enabled`)
-- Per-action-type threshold keys (e.g., `MERGE_APPROVED_REVIEW_COUNT`, `SECURITY_SEVERITY_THRESHOLD`)
-- Per-action-type `expiresInMinutes` keys with defaults based on reversibility
+- `EXPIRES_IN_MINUTES_REVERSIBLE` / `EXPIRES_IN_MINUTES_IRREVERSIBLE` — both name `expiresInMinutes`, different defaults
+- Per-action-type threshold keys (see table above)
 
 ### review/ — DevtownActionRiskClassifier
 
-Implements `ActionRiskClassifier`. Constructor takes no CDI dependencies —
-pure logic. The `classify()` method:
-
-1. Receives `PlannedAction` plus a `Preferences` bag (resolved by the CDI adapter)
-2. Checks `ENABLED` — if false, returns `Autonomous`
-3. Dispatches on `actionType` to a per-action-type method
-4. Each method reads its own threshold from `Preferences` and applies category rules
-5. Unknown action type → fail-safe `GateRequired`
-
-No `RiskConfig` record. Each per-action-type method reads directly from
-`Preferences` via its specific `PreferenceKey`, avoiding the type mismatch
-between `IntPreference` and `StringPreference` thresholds.
+Pure logic class. Does **not** implement `ActionRiskClassifier` — its
+`classify()` method takes an extra `Preferences` parameter that the SPI
+signature does not have. The CDI adapter in app/ bridges the gap.
 
 ```java
 public RiskDecision classify(PlannedAction action, Preferences prefs) {
@@ -249,40 +307,59 @@ public RiskDecision classify(PlannedAction action, Preferences prefs) {
 }
 ```
 
+Each per-action-type method:
+1. Reads its own threshold from `Preferences` via its specific `PreferenceKey`
+2. Extracts the relevant metric from `PlannedAction.context()`
+3. If the context key is missing or the value is unparseable → `GateRequired` (fail-safe)
+4. Compares and returns the appropriate `RiskDecision`
+
 ### app/ — DevtownRiskClassifierProducer
 
-`@ApplicationScoped @RiskClassifier` bean. Injects `PreferenceProvider`.
-On each `classify()` call:
+`@ApplicationScoped @RiskClassifier` bean that **implements
+`ActionRiskClassifier`** (the SPI). Injects `PreferenceProvider`. On each
+`classify(PlannedAction action)` call:
 1. Resolves `SettingsScope.of("casehubio", "devtown", "risk", action.actionType())`
 2. Gets `Preferences` bag
 3. Delegates to `DevtownActionRiskClassifier.classify(action, prefs)`
 
-Implements `ActionRiskClassifier` (not `ReactiveActionRiskClassifier`) —
-synchronous classification is sufficient. The engine wraps it in a reactive
-chain automatically via `ChainedReactiveActionRiskClassifier`.
+Synchronous classification — the engine wraps it reactively via
+`ChainedReactiveActionRiskClassifier`.
 
 ## Testing
 
 ### Unit tests (domain + review, no CDI)
 
-- `BooleanPreferenceTest` — of/parse/value roundtrip (~3 tests)
-- `DevtownActionTypeTest` — constants exist and match expected strings (~9 assertions)
-- `RiskPreferenceKeysTest` — all keys have correct namespace, name, defaults (~10 tests)
+- `BooleanPreferenceTest` — of/parse/value roundtrip, strict parsing
+  rejects typos like "ture" (~5 tests)
+- `DevtownActionTypeTest` — constants exist and match expected strings
+  (~8 assertions)
+- `RiskPreferenceKeysTest` — all keys have correct namespace, name,
+  defaults; both expiration keys share name but differ in defaults (~12 tests)
 - `DevtownActionRiskClassifierTest` — per action type:
-  - Always-gate: returns `GateRequired` with correct fields
-  - Minimum-requirement: below minimum → `GateRequired`, at minimum → `Autonomous`
-  - Risk-threshold: below threshold → `Autonomous`, at threshold → `GateRequired`
-  - Security escalation: `IncidentSeverity` ordinal comparison
-  - Conditional: `pr-review-override` with `REJECTED` vs `APPROVED`/`PENDING`/absent
+  - Always-gate: returns `GateRequired` with correct fields (reason,
+    reversible, candidateGroups, scope)
+  - Minimum-requirement: below minimum → `GateRequired`, at minimum →
+    `Autonomous`, above → `Autonomous`
+  - Risk-threshold: below threshold → `Autonomous`, at threshold →
+    `GateRequired`, above → `GateRequired`
+  - Security escalation: `IncidentSeverity` ordinal comparison (LOW →
+    auto, MEDIUM → auto, HIGH → gate, CRITICAL → gate)
+  - Conditional: `pr-review-override` with `REJECTED` vs
+    `APPROVED`/`PENDING`/absent
   - Disabled (`enabled=false`) → `Autonomous` for every action type
   - Unknown action type → fail-safe `GateRequired`
-  - Null/missing context keys → handled gracefully per action type
+  - Missing context key → fail-safe `GateRequired` (for min-req and
+    risk-threshold categories)
+  - Unparseable context value (e.g., invalid severity string) → fail-safe
+    `GateRequired`
   - ~30+ test cases total
 
 ### Integration tests (app, @QuarkusTest)
 
 - `DevtownRiskClassifierWiringTest` — `@RiskClassifier` bean discovered
-- Preference override test — set preference via YAML, verify threshold change
+  by `ChainedReactiveActionRiskClassifier`
+- Preference override test — set preference via YAML, verify threshold
+  change takes effect
 - ~4 test cases
 
 ## Gastown Feature Parity
