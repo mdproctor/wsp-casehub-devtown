@@ -1,3 +1,5 @@
+*Updated: parent#253 closed — removed from backlog.*
+
 # HANDOFF — 2026-06-16
 
 ## Last Session
@@ -11,7 +13,7 @@ Pick next work. Three options: (a) build the demo harness (3 S-scale issues — 
 ## What's Left
 
 - **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence when foundation runs remotely · XL · High
-- **parent#253** — docs: sync casehub-devtown.md for ActionRiskClassifier (#56) · XS · Low
+
 
 ## What's Next
 
