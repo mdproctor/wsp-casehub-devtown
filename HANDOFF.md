@@ -1,12 +1,12 @@
-# HANDOFF — 2026-06-15
+# HANDOFF — 2026-06-16
 
 ## Last Session
 
-Closed three issues and delivered two features. GDPR Art.17 erasure endpoint (#74) with tamper-evident receipt, polished via #77 (PII echo removal, pipe escaping, sha256 utility extraction). ActionRiskClassifier oversight gate (#56) — 8 action types, 4 classification categories, PreferenceProvider-driven thresholds, 38 test methods. Fixed CaseMemoryIntegrationTest (#72) and resolved CurrentPrincipal CDI ambiguity from upstream SNAPSHOT updates. Spec for #56 went through 4 review rounds (14 findings) before TDD implementation.
+Gastown comparison docs refresh. Closed devtown#3 as duplicate of #57 (Layer 6 trust routing — already shipped). Wrote `gastown-casehub-analysis-v3.md` (full rewrite — 9 sections), updated `PROGRESS.md` (P1.3 done, DT-011–014 added), updated `orchestration-advantages.md` (engine#186 gap closed), archived v1, fixed 4 stale ARC42STORIES.MD entries. New `devtown-ui-requirements.md` with phased panel taxonomy and Gastown UI analysis.
 
 ## Immediate Next Step
 
-Pick next issue from the backlog. Layer 6 (trust routing) is the next major layer — devtown#3 (TrustWeightedSelectionStrategy) is the entry point. Or continue with smaller issues.
+Pick next work. Three options: (a) build the demo harness (3 S-scale issues — mock workers, trust seeding, demo script), (b) start the casehub-ui panel work (Phase 1: 5 demo-ready panels), (c) pick from the backlog below.
 
 ## What's Left
 
@@ -17,11 +17,13 @@ Pick next issue from the backlog. Layer 6 (trust routing) is the next major laye
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #3 | TrustWeightedSelectionStrategy — route by capability-scoped trust | M | Med | Layer 6 entry point |
+| — | Demo harness (mock workers + trust seeding + demo script) | S | Low | Critical path to demo — no issue filed yet |
+| — | casehub-ui Phase 1 panels (PR timeline, trust card, routing explanation, commitments, inbox) | M | Med | Requires casehub-ui repo rename from melviz |
 | #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `specs/2026-06-15-action-risk-classifier-design.md` — #56 spec (4 review rounds, promoted to project)
-- `specs/2026-06-14-gdpr-erasure-endpoint-design.md` — #74 spec (promoted to project)
-- `design/JOURNAL.md` — 2 journal entries (#74 GDPR erasure, #72 root cause analysis)
+- `docs/gastown-casehub-analysis-v3.md` — v3 rewrite (this session)
+- `docs/devtown-ui-requirements.md` — phased UI panel spec (this session)
+- `docs/PROGRESS.md` — refreshed with DT-011–014
+- `blog/2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md`
