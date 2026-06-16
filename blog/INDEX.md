@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md](2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md) | 2026-06-16 | The feedback loop nobody noticed — 29 stale items across 4 docs; Gastown advantage surface narrowed to 3 operational gaps; v3 rewrite; UI requirements spec; demo critical path is 3 small issues |
 | [2026-06-07-mdp01-the-concrete-class-trap.md](2026-06-07-mdp01-the-concrete-class-trap.md) | 2026-06-07 | The concrete class trap — CaseLedgerEntryRepository extends a concrete JPA class, making CDI displacement impossible; GDPR erasure void return gap; first @RolesAllowed in any CaseHub harness |
 | [2026-06-06-mdp01-five-small-fixes.md](2026-06-06-mdp01-five-small-fixes.md) | 2026-06-06 | Five small fixes: bootstrapEscalationRequired one-liner, async tenancy red herring, InMemoryMemoryStore question filter gotcha, configurable recall limits, GDPR erasure endpoint |
 | [2026-06-05-mdp01-the-extraction-problem.md](2026-06-05-mdp01-the-extraction-problem.md) | 2026-06-05 | The extraction problem — CaseMemoryStore integration; ReviewCompletedEvent isolates untyped case context extraction; PlanItemCompletedEvent only fires for worker completions; async tenancy silent failure |
