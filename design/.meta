@@ -1,0 +1,9 @@
+branch: issue-14-failure-handling
+project-sha: 85180d88afe4bb6a7a5ead29938b7c31c7a34409
+date: 2026-06-16
+issue: 14
+issue-repo: casehubio/devtown
+covers: 14
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
