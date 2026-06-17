@@ -1,7 +1,7 @@
 # Failure Handling — Declarative DECLINED vs FAILED Routing
 
 **Epic:** casehubio/devtown#14
-**Date:** 2026-06-16 (revised 2026-06-17, rev3)
+**Date:** 2026-06-16 (revised 2026-06-17, rev4)
 **Status:** Blocked by casehubio/engine#501
 
 ---
@@ -32,7 +32,7 @@ Three distinct outcomes require different routing:
 
 **Terminal failure:** Failure goals produce `CaseStatus.COMPLETED` with failure outcome metadata — not `FAULTED`. FAULTED is reserved for system errors. A review that exhausted all tiers is a legitimate process conclusion.
 
-**Scope reduction:** Generic mechanism — any capability can declare `scopeReductionAllowed: true` and provide a `reducedInputSchema`. Uses `Binding.inputSchemaOverride` (engine#509) to dispatch the same capability with narrowed input — same agent qualification, same trust scoring path. Uses `Binding.contextWrite` (engine#511) to write `reducedScope: true` and reset `status` to `PENDING` before dispatch, preventing infinite re-fire and Tier 4 race conditions.
+**Scope reduction:** Generic mechanism — any capability can declare `scopeReductionAllowed: true` and provide a `reducedInputSchema`. Uses `Binding.inputSchemaOverride` (engine#509) to dispatch the same capability with narrowed input — same agent qualification, same trust scoring path. Uses `Binding.contextWrite` (engine#511) to write `reducedScope: true` and reset `status` to `PENDING` before dispatch, preventing infinite re-fire and Tier 4 race conditions. `contextWrite` uses JSON Merge Patch semantics (RFC 7396) — object keys are merged recursively; scalars and arrays are replaced. This is the engine#511 contract: `excludedAgents: []` replaces the array (clears it), while `history` and `attempts` (not mentioned in contextWrite) are preserved.
 
 **Output merge:** Success output merges into existing failure tracking state via `DEEP_MERGE` conflict resolver strategy (engine#508). Applies to both worker output (`WorkflowExecutionCompletedHandler`) and humanTask output (`PlanItemCompletionApplier`). Prevents successful retry or human resolution from destroying attempt history and audit trail.
 
@@ -582,6 +582,9 @@ Current: 9 bindings. After failure handling: 18 bindings (9 existing with added 
 **Qhorus integration (`QhorusPrReviewService`):**
 - Handle `ReviewerOutcome.Failed` → `MessageType.FAILURE`
 
+**SLA breach handler generalization (`SlaBreachHandler`):**
+- Current implementation hardcodes `"humanApproval"` as the signal path. Must be generalized to route breach signals to the correct blackboard path based on the binding's output mapping. The handler reads `planItemId` from `CallerRef`, looks up the binding in the case definition, extracts the output mapping, and applies the breach outcome through it — same path as `PlanItemCompletionApplier` uses for happy-path output. Without this, a Tier 4 human reviewer who misses the SLA deadline produces a case that never completes.
+
 **Protocol:**
 - `failure-cascade-pattern.md` in `casehub/garden/docs/protocols/casehub/`
 
@@ -615,3 +618,10 @@ Current: 9 bindings. After failure handling: 18 bindings (9 existing with added 
 | M2 | hasUnresolvableCapability undefined | **Fixed.** Goal condition body now explicit with loop over REQUIRED_CAPABILITIES. |
 | M3 | Binding count "~6" should be "7" | **Fixed.** 7 human escalation bindings (one per capability). |
 | M4 | EXPIRED trust dimension is domain model change | **Fixed.** `DevtownTrustDimension.RESPONSIVENESS` noted as domain model change in §14. |
+
+### Revision 4 (2 issues)
+
+| # | Issue | Resolution |
+|---|-------|-----------|
+| 1 | SlaBreachHandler hardcodes humanApproval — Tier 4 breach misses capability key | **Agreed.** SlaBreachHandler generalization added to §14 as devtown implementation requirement. Handler reads planItemId from CallerRef and routes breach signal through binding's output mapping. |
+| 2 | contextWrite merge semantics unspecified | **Agreed.** Added JSON Merge Patch (RFC 7396) contract to §2: objects merge recursively, scalars and arrays replace. Locks down engine#511 contract. |
