@@ -1,7 +1,7 @@
 # Failure Handling — Declarative DECLINED vs FAILED Routing
 
 **Epic:** casehubio/devtown#14
-**Date:** 2026-06-16 (revised 2026-06-17)
+**Date:** 2026-06-16 (revised 2026-06-17, rev3)
 **Status:** Blocked by casehubio/engine#501
 
 ---
@@ -32,11 +32,11 @@ Three distinct outcomes require different routing:
 
 **Terminal failure:** Failure goals produce `CaseStatus.COMPLETED` with failure outcome metadata — not `FAULTED`. FAULTED is reserved for system errors. A review that exhausted all tiers is a legitimate process conclusion.
 
-**Scope reduction:** Generic mechanism — any capability can declare `scopeReductionAllowed: true` and provide a `reducedInputSchema`. Uses `Binding.inputSchemaOverride` (engine#509) to dispatch the same capability with narrowed input — same agent qualification, same trust scoring path.
+**Scope reduction:** Generic mechanism — any capability can declare `scopeReductionAllowed: true` and provide a `reducedInputSchema`. Uses `Binding.inputSchemaOverride` (engine#509) to dispatch the same capability with narrowed input — same agent qualification, same trust scoring path. Uses `Binding.contextWrite` (engine#511) to write `reducedScope: true` and reset `status` to `PENDING` before dispatch, preventing infinite re-fire and Tier 4 race conditions.
 
-**Output merge:** Success output merges into existing failure tracking state via `DEEP_MERGE` conflict resolver strategy (engine#508). Prevents successful retry from destroying attempt history and audit trail.
+**Output merge:** Success output merges into existing failure tracking state via `DEEP_MERGE` conflict resolver strategy (engine#508). Applies to both worker output (`WorkflowExecutionCompletedHandler`) and humanTask output (`PlanItemCompletionApplier`). Prevents successful retry or human resolution from destroying attempt history and audit trail.
 
-**YAML canonical:** YAML remains the canonical case definition. OutcomePolicy is expressed per binding in YAML. Tier 3/4 application-level bindings are explicit YAML entries — manageable count (~6-9 additional bindings).
+**YAML canonical:** YAML remains the canonical case definition. OutcomePolicy is expressed per binding in YAML. Tier 3/4 application-level bindings are explicit YAML entries.
 
 **Protocol:** The four-tier failure cascade is a repeatable pattern captured as `failure-cascade-pattern.md` in `casehub/garden/docs/protocols/casehub/`.
 
@@ -85,7 +85,7 @@ The engine immediately re-dispatches (same capability, excludedAgents filters ag
 }
 ```
 
-`DEEP_MERGE` (engine#508) preserves `history`, `attempts`, `excludedAgents` when the success output `{outcome: "APPROVED"}` is applied.
+`DEEP_MERGE` (engine#508) preserves `history`, `attempts`, `excludedAgents` when the success output `{outcome: "APPROVED"}` is applied. Applies to both worker and humanTask output paths.
 
 **On reroutes exhausted (engine writes terminal state):**
 ```json
@@ -101,7 +101,7 @@ The engine immediately re-dispatches (same capability, excludedAgents filters ag
 
 `REROUTES_EXHAUSTED` is the terminal state the engine writes when `OutcomePolicy.maxRerouteAttempts` is reached. This triggers application-level bindings (Tier 3 or Tier 4).
 
-**On scope reduction (Tier 3 — application binding writes):**
+**On scope reduction (Tier 3 — binding's contextWrite applies before dispatch):**
 ```json
 {
   "securityReview": {
@@ -114,9 +114,9 @@ The engine immediately re-dispatches (same capability, excludedAgents filters ag
 }
 ```
 
-Tier 3 resets `status` to `PENDING` (preventing Tier 4 race) and clears `excludedAgents` — a previously-declined agent might handle the narrower scope successfully. The rationale: a DECLINE for "I can't review 500 files of Rust" doesn't imply "I can't review 3 flagged Rust files." The engine then runs a fresh OutcomePolicy reroute loop for the reduced-scope dispatch.
+`Binding.contextWrite` (engine#511) writes `status: PENDING`, `reducedScope: true`, and clears `excludedAgents` before the capability dispatch. This prevents Tier 3 re-fire (condition `reducedScope == null` is now false) and Tier 4 race (status is no longer `REROUTES_EXHAUSTED`). Excluded agents reset because a previously-declined agent might handle the narrower scope — a DECLINE for "I can't review 500 files of Rust" doesn't imply "I can't review 3 flagged Rust files."
 
-**On scope reduction also exhausted (engine writes terminal state again):**
+**On scope reduction also exhausted:**
 ```json
 {
   "securityReview": {
@@ -137,7 +137,7 @@ Tier 4 fires: `REROUTES_EXHAUSTED AND reducedScope == true`.
 - `outcome` only appears on successful completion (APPROVED/REJECTED) — domain semantics, not dispatch state
 - `history` is append-only — full audit trail of every attempt across all tiers
 - `excludedAgents` accumulates within a reroute cycle, resets on scope reduction
-- `DEEP_MERGE` on output application preserves tracking state when success output is written
+- `DEEP_MERGE` on output application preserves tracking state when success or humanTask output is written
 - Existing goal conditions (`securityReview.outcome == "APPROVED"`) still work — they check `outcome`, not `status`
 
 ---
@@ -172,55 +172,59 @@ This is generic infrastructure — every harness gets it for free.
 
 ### Tier 3: Application-owned (scope reduction)
 
-Fires when reroutes are exhausted and scope reduction is allowed for this capability. Only capabilities with `scopeReductionAllowed: true` in the `FailurePolicy` have this binding.
+Fires when reroutes are exhausted and scope reduction is allowed for this capability. Uses `Binding.contextWrite` (engine#511) to update blackboard state before dispatch, and `Binding.inputSchemaOverride` (engine#509) to narrow the input.
 
 ```yaml
-- name: security-review-reduced-scope
-  on: { contextChange: {} }
-  when: >-
-    .securityReview.status == "REROUTES_EXHAUSTED" and
-    .securityReview.reducedScope == null
-  capability: security-review
-  inputSchemaOverride: "{ flaggedFiles: .codeAnalysis.flaggedFiles }"
-  outcomePolicy:
-    onDecline: REROUTE
-    onFailure: REROUTE
-    onExpired: REROUTE
-    maxRerouteAttempts: 2
-  conflictResolverStrategy: DEEP_MERGE
+  - name: security-review-reduced-scope
+    on: { contextChange: {} }
+    when: >-
+      .securityReview.status == "REROUTES_EXHAUSTED" and
+      .securityReview.reducedScope == null
+    contextWrite:
+      securityReview:
+        status: PENDING
+        reducedScope: true
+        excludedAgents: []
+    capability: security-review
+    inputSchemaOverride: "{ flaggedFiles: .codeAnalysis.flaggedFiles }"
+    outcomePolicy:
+      onDecline: REROUTE
+      onFailure: REROUTE
+      onExpired: REROUTE
+      maxRerouteAttempts: 2
+    conflictResolverStrategy: DEEP_MERGE
 ```
 
-The binding:
-1. Resets `status` to `PENDING` (prevents Tier 4 race — see §3)
-2. Writes `reducedScope: true`
-3. Clears `excludedAgents` (fresh agent pool for narrowed scope)
-4. Dispatches same capability with `inputSchemaOverride` (engine#509) — narrowed input
-5. The engine's OutcomePolicy runs a fresh reroute loop for the reduced-scope dispatch
+The engine's OutcomePolicy runs a fresh reroute loop for the reduced-scope dispatch.
 
 ### Tier 4: Application-owned (human escalation)
 
-Fires when all automated tiers are exhausted — either scope reduction also failed, or scope reduction isn't available for this capability.
+Fires when all automated tiers are exhausted.
 
 ```yaml
-- name: security-review-human-escalation
-  on: { contextChange: {} }
-  when: >-
-    .securityReview.status == "REROUTES_EXHAUSTED" and
-    (.securityReview.reducedScope == true or .policy.failurePolicy.securityReview.scopeReductionAllowed == false)
-  humanTask:
-    title: "Security review escalation — all automated reviewers exhausted"
-    candidateGroups: [security-reviewers]
-    expiresIn: PT4H
-    outputMapping: "{ securityReview: { outcome: . } }"
-    outcomes: [APPROVED, REJECTED, BLOCKED]
+  - name: security-review-human-escalation
+    on: { contextChange: {} }
+    when: >-
+      .securityReview.status == "REROUTES_EXHAUSTED" and
+      (.securityReview.reducedScope == true or
+       .policy.failurePolicy["security-review"].scopeReductionAllowed == false)
+    conflictResolverStrategy: DEEP_MERGE
+    humanTask:
+      title: "Security review escalation — all automated reviewers exhausted"
+      candidateGroups: [security-reviewers]
+      expiresIn: PT4H
+      outputMapping: "{ securityReview: { outcome: . } }"
+      outcomes: [APPROVED, REJECTED, BLOCKED]
 ```
 
-The WorkItem carries the full `history` from the blackboard so the human reviewer sees what was tried and why.
+`conflictResolverStrategy: DEEP_MERGE` applies to the humanTask output path — `PlanItemCompletionApplier` must read the merge strategy (engine#508 expanded scope).
+
+`outcomes: [APPROVED, REJECTED, BLOCKED]` requires `HumanTaskTarget.outcomes` (engine#512) — engine-enforced valid outcomes, not convention-only.
 
 Human outcomes:
-- **APPROVED** — human did the review themselves (override)
-- **REJECTED** — PR should not merge
-- **BLOCKED** — human can't resolve it either → triggers `review-blocked` failure goal
+- **APPROVED** — human did the review themselves (override) → success goals can be satisfied
+- **REJECTED** — PR should not merge → `review-rejected` failure goal fires
+- **BLOCKED** — human can't resolve it either → `review-blocked` failure goal fires
 
 ---
 
@@ -254,21 +258,45 @@ Capabilities without scope reduction skip Tier 3 — Tier 4 fires directly on `R
 
 ## 6. Failure Goals
 
-Two failure goals added to the case definition:
+Three failure goals added to the case definition:
 
 ### review-blocked
 
-At least one required capability exhausted all tiers. The Tier 4 human WorkItem completed with BLOCKED outcome.
+At least one required capability exhausted all tiers and the Tier 4 human WorkItem completed with BLOCKED outcome.
 
 ```java
 Goal.builder()
     .name("review-blocked")
     .kind(GoalKind.FAILURE)
-    .condition(ctx -> hasUnresolvableCapability(ctx))
+    .condition(ctx -> {
+        // Checks each required capability key for outcome == "BLOCKED"
+        for (String cap : REQUIRED_CAPABILITIES) {
+            String outcome = ctx.getPathAsString(cap + ".outcome");
+            if ("BLOCKED".equals(outcome)) return true;
+        }
+        return false;
+    })
     .build();
 ```
 
-Checks whether any capability's human escalation WorkItem completed with outcome `BLOCKED`.
+### review-rejected
+
+A human reviewer explicitly rejected the PR — the review completed with a negative verdict.
+
+```java
+Goal.builder()
+    .name("review-rejected")
+    .kind(GoalKind.FAILURE)
+    .condition(ctx -> {
+        for (String cap : REQUIRED_CAPABILITIES) {
+            String outcome = ctx.getPathAsString(cap + ".outcome");
+            if ("REJECTED".equals(outcome)) return true;
+        }
+        // Also check humanApproval for direct rejection
+        return "REJECTED".equals(ctx.getPathAsString("humanApproval.outcome"));
+    })
+    .build();
+```
 
 ### review-abandoned
 
@@ -294,8 +322,8 @@ Written via external signal (REST call for now; GitHub webhook in Epic #15).
 
 ```java
 .completion(
-    GoalExpression.allOf(prApproved, securityVerified, ciPassing),   // success
-    GoalExpression.anyOf(reviewBlocked, reviewAbandoned)              // failure
+    GoalExpression.allOf(prApproved, securityVerified, ciPassing),
+    GoalExpression.anyOf(reviewBlocked, reviewRejected, reviewAbandoned)
 )
 ```
 
@@ -315,7 +343,7 @@ public sealed interface ReviewerOutcome
 }
 ```
 
-`Failed` carries a reason only — no `transient_` flag. RetryPolicy (existing) handles infrastructure transients (worker threw an exception — retry same agent with backoff). OutcomePolicy handles semantic failures (worker explicitly reported failure — reroute to different agent). These are different levels and should not be conflated.
+`Failed` carries a reason only. RetryPolicy (existing) handles infrastructure transients (worker threw an exception — retry same agent with backoff). OutcomePolicy handles semantic failures (worker explicitly reported failure — reroute to different agent). These are different levels and should not be conflated.
 
 `QhorusPrReviewService` handles the new variant with `MessageType.FAILURE`:
 
@@ -344,8 +372,10 @@ case ReviewerOutcome.Failed failed ->
 | engine#503 | Semantic DECLINE/FAIL/EXPIRED — structured blackboard write | L / High | — |
 | engine#504 | OutcomePolicy — REROUTE/FAULT for speech-act outcomes incl. EXPIRED | L / High | #503, qhorus#281 |
 | engine#506 | Failure goals → COMPLETED not FAULTED | S / Med | — |
-| engine#508 | DEEP_MERGE conflict resolver strategy on output application | M / Med | — |
+| engine#508 | DEEP_MERGE conflict resolver (worker + humanTask paths) | M / Med | — |
 | engine#509 | Binding.inputSchemaOverride for scope-reduced dispatch | S / Low | — |
+| engine#511 | Binding.contextWrite — pre-dispatch blackboard update | S / Med | — |
+| engine#512 | HumanTaskTarget.outcomes — propagate to WorkItem | XS / Low | — |
 
 **Cross-repo:**
 
@@ -388,7 +418,9 @@ The trust dimension mapping for failure outcomes is:
 |---------|----------------|--------|
 | DECLINED | scope-calibration | Agent correctly identified its capability boundary — positive signal |
 | FAILED | review-thoroughness | Agent attempted but couldn't complete — negative signal |
-| EXPIRED | (new dimension: responsiveness) | Agent went silent — negative signal |
+| EXPIRED | responsiveness (new) | Agent went silent — negative signal |
+
+`responsiveness` is a new trust dimension — requires adding a constant to `DevtownTrustDimension` (domain model change, noted in §14).
 
 The mechanism: commitment terminal state (`CommitmentState.DECLINED/FAILED/EXPIRED`) already flows to the ledger via P0.2 wiring (qhorus#123). The trust dimension mapping is application-layer configuration in devtown.
 
@@ -405,10 +437,12 @@ To be written as `casehub/garden/docs/protocols/casehub/failure-cascade-pattern.
 - Engine/application boundary: OutcomePolicy owns reroute loop, application owns domain-specific responses
 - FailurePolicy on the descriptor as the application-level configuration
 - Blackboard failure state schema including `REROUTES_EXHAUSTED` terminal state
-- `DEEP_MERGE` conflict resolver on failure-tracking bindings
-- `inputSchemaOverride` for scope-reduced dispatch
+- `Binding.contextWrite` for pre-dispatch state marking (prevents infinite re-fire and race conditions)
+- `DEEP_MERGE` conflict resolver on all failure-tracking bindings (worker and humanTask paths)
+- `Binding.inputSchemaOverride` for scope-reduced dispatch
+- `HumanTaskTarget.outcomes` for engine-enforced human decision options
 - Failure goals as legitimate case outcomes via `COMPLETED` (not `FAULTED`)
-- Tier 3 resets `status` to `PENDING` and clears `excludedAgents` to prevent race conditions
+- Tier 3 resets `status` to `PENDING` and clears `excludedAgents` via contextWrite
 
 ---
 
@@ -434,7 +468,7 @@ All Goal instances are type-safe — searchable by type across the codebase. Pla
 
 YAML remains the canonical case definition. The DSL is the testing companion.
 
-### OutcomePolicy on bindings (engine#504)
+### OutcomePolicy on existing bindings (engine#504)
 
 ```yaml
 bindings:
@@ -453,7 +487,7 @@ bindings:
       maxRerouteAttempts: 2
 ```
 
-### Tier 3 bindings (application-level, ~2-3 per case definition)
+### Tier 3 scope-reduction bindings (~2 per case definition)
 
 ```yaml
   - name: security-review-reduced-scope
@@ -461,6 +495,11 @@ bindings:
     when: >-
       .securityReview.status == "REROUTES_EXHAUSTED" and
       .securityReview.reducedScope == null
+    contextWrite:
+      securityReview:
+        status: PENDING
+        reducedScope: true
+        excludedAgents: []
     capability: security-review
     inputSchemaOverride: "{ flaggedFiles: .codeAnalysis.flaggedFiles }"
     conflictResolverStrategy: DEEP_MERGE
@@ -471,25 +510,36 @@ bindings:
       maxRerouteAttempts: 2
 ```
 
-### Tier 4 bindings (application-level, ~1 per capability)
+### Tier 4 human-escalation bindings (7 — one per capability)
 
+For capabilities with scope reduction:
 ```yaml
   - name: security-review-human-escalation
     on: { contextChange: {} }
     when: >-
       .securityReview.status == "REROUTES_EXHAUSTED" and
-      (.securityReview.reducedScope == true or false)
+      .securityReview.reducedScope == true
+    conflictResolverStrategy: DEEP_MERGE
     humanTask:
-      title: "Security review escalation"
+      title: "Security review escalation — all automated reviewers exhausted"
       candidateGroups: [security-reviewers]
       expiresIn: PT4H
       outputMapping: "{ securityReview: { outcome: . } }"
       outcomes: [APPROVED, REJECTED, BLOCKED]
 ```
 
-For capabilities without scope reduction, the Tier 4 condition simplifies:
+For capabilities without scope reduction:
 ```yaml
-    when: ".styleCheck.status == \"REROUTES_EXHAUSTED\""
+  - name: style-check-human-escalation
+    on: { contextChange: {} }
+    when: '.styleCheck.status == "REROUTES_EXHAUSTED"'
+    conflictResolverStrategy: DEEP_MERGE
+    humanTask:
+      title: "Style review escalation"
+      candidateGroups: [pr-reviewers]
+      expiresIn: PT2H
+      outputMapping: "{ styleCheck: { outcome: . } }"
+      outcomes: [APPROVED, REJECTED, BLOCKED]
 ```
 
 ### Failure goals in completion
@@ -504,12 +554,13 @@ completion:
   failure:
     anyOf:
       - review-blocked
+      - review-rejected
       - review-abandoned
 ```
 
 ### Total binding count
 
-Current: 9 bindings. After failure handling: ~18 bindings (9 existing + ~3 scope reduction + ~6 human escalation). Each existing binding gains an `outcomePolicy` and `conflictResolverStrategy` section. Readable and maintainable.
+Current: 9 bindings. After failure handling: 18 bindings (9 existing with added `outcomePolicy` + 2 scope reduction + 7 human escalation). Each existing binding gains an `outcomePolicy` and `conflictResolverStrategy` section. Readable and maintainable.
 
 ---
 
@@ -519,13 +570,14 @@ Current: 9 bindings. After failure handling: ~18 bindings (9 existing + ~3 scope
 - `ReviewerOutcome.Failed` sealed variant
 - `FailurePolicy` record (scope reduction + human escalation only)
 - `PrReviewCaseDescriptor` with `FAILURE_POLICIES` map
+- `DevtownTrustDimension.RESPONSIVENESS` — new trust dimension constant for EXPIRED outcomes
 
 **Case definition (YAML + DSL companion):**
-- Two failure goals (`review-blocked`, `review-abandoned`)
+- Three failure goals (`review-blocked`, `review-rejected`, `review-abandoned`)
 - Two-arg completion expression (success + failure)
 - `outcomePolicy` + `conflictResolverStrategy: DEEP_MERGE` on all existing capability bindings
-- Tier 3 scope-reduction bindings for security-review and architecture-review
-- Tier 4 human-escalation bindings for all capabilities
+- Tier 3 scope-reduction bindings with `contextWrite` for security-review and architecture-review
+- Tier 4 human-escalation bindings with `outcomes` for all 7 capabilities
 
 **Qhorus integration (`QhorusPrReviewService`):**
 - Handle `ReviewerOutcome.Failed` → `MessageType.FAILURE`
@@ -537,15 +589,29 @@ Current: 9 bindings. After failure handling: ~18 bindings (9 existing + ~3 scope
 
 ## Appendix: Review Issues Addressed
 
+### Revision 2 (10 issues)
+
 | # | Issue | Resolution |
 |---|-------|-----------|
 | 1 | Tiers 1-2 duplicate engine#504 | **Agreed.** Removed application-level Tier 1/2 bindings. Engine owns reroute loop via OutcomePolicy. |
 | 2 | Successful retry overwrites failure history | **Agreed.** Filed engine#508 (DEEP_MERGE). Bindings declare `conflictResolverStrategy: DEEP_MERGE`. |
 | 3 | Scope reduction needs input schema override | **Agreed.** Filed engine#509 (Binding.inputSchemaOverride). |
-| 4 | Tier 3→4 race on status | **Agreed.** Tier 3 resets `status` to `PENDING`. Tier 4 fires on `REROUTES_EXHAUSTED AND (reducedScope == true OR NOT scopeReductionAllowed)`. |
+| 4 | Tier 3→4 race on status | **Agreed.** Tier 3 resets `status` to `PENDING` via contextWrite. Tier 4 fires on `REROUTES_EXHAUSTED AND (reducedScope == true OR NOT scopeReductionAllowed)`. |
 | 5 | EXPIRED outcome missing | **Agreed.** Filed qhorus#281 (CommitmentExpiredEvent). Updated engine#504 to include `onExpired`. |
 | 6 | review-timed-out has no mechanism | **Agreed.** Removed from spec. Filed engine#510 (case-level SLA) separately. |
-| 7 | transient_ conflicts with static OutcomePolicy | **Agreed.** Dropped `transient_`. `Failed(String reason)` only. RetryPolicy handles infrastructure transients. |
-| 8 | YAML representation unaddressed | **Agreed.** Added §13 with full YAML examples. YAML stays canonical. |
-| 9 | failureGoal always same value | **Agreed.** Removed from FailurePolicy. Failure goal is case-level. |
+| 7 | transient_ conflicts with static OutcomePolicy | **Agreed.** Dropped `transient_`. `Failed(String reason)` only. |
+| 8 | YAML representation unaddressed | **Agreed.** Added §13 with full YAML examples. |
+| 9 | failureGoal always same value | **Agreed.** Removed from FailurePolicy. |
 | 10 | Trust scoring unspecified | **Agreed.** Added §10 with dimension mapping and explicit deferral to devtown#13. |
+
+### Revision 3 (3 issues + 4 minor)
+
+| # | Issue | Resolution |
+|---|-------|-----------|
+| 1 | Tier 3 pre-dispatch context write has no engine mechanism | **Agreed.** Filed engine#511 (Binding.contextWrite). All Tier 3 bindings use `contextWrite` for pre-dispatch state marking. |
+| 2 | Tier 4 humanTask missing DEEP_MERGE + outcomes gap | **Agreed.** Added `conflictResolverStrategy: DEEP_MERGE` to all Tier 4 bindings. Expanded engine#508 scope to cover PlanItemCompletionApplier. Filed engine#512 (HumanTaskTarget.outcomes). |
+| 3 | REJECTED human outcome creates dead case | **Agreed.** Added `review-rejected` failure goal. Completion expression: `anyOf(reviewBlocked, reviewRejected, reviewAbandoned)`. |
+| M1 | §4/§13 Tier 4 condition inconsistency | **Fixed.** Standardized to use `policy.failurePolicy` path in §4, DSL-substituted boolean in §13 YAML. |
+| M2 | hasUnresolvableCapability undefined | **Fixed.** Goal condition body now explicit with loop over REQUIRED_CAPABILITIES. |
+| M3 | Binding count "~6" should be "7" | **Fixed.** 7 human escalation bindings (one per capability). |
+| M4 | EXPIRED trust dimension is domain model change | **Fixed.** `DevtownTrustDimension.RESPONSIVENESS` noted as domain model change in §14. |
