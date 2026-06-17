@@ -1,0 +1,9 @@
+branch: issue-17-observability-tooling
+project-sha: 85180d88afe4bb6a7a5ead29938b7c31c7a34409
+date: 2026-06-17
+issue: 17
+issue-repo: casehubio/devtown
+covers: 17
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
