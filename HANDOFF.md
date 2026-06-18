@@ -1,31 +1,35 @@
-*Updated: parent#253 closed — removed from backlog.*
-
-# HANDOFF — 2026-06-16
+# HANDOFF — 2026-06-18
 
 ## Last Session
 
-Gastown comparison docs refresh. Closed devtown#3 as duplicate of #57 (Layer 6 trust routing — already shipped). Wrote `gastown-casehub-analysis-v3.md` (full rewrite — 9 sections), updated `PROGRESS.md` (P1.3 done, DT-011–014 added), updated `orchestration-advantages.md` (engine#186 gap closed), archived v1, fixed 4 stale ARC42STORIES.MD entries. New `devtown-ui-requirements.md` with phased panel taxonomy and Gastown UI analysis.
+Shipped devtown#17 (Epic 10: Observability and operational tooling). Built 11 MCP tools (8 read + 3 write) + W3C PROV-DM export in `DevtownMcpTools.java`. Full Gastown CLI parity achieved. Fixed 3 pre-existing ledger API breaks along the way. Filed 5 issues: devtown#80 (production persistence), devtown#81 (full gt seance), devtown#83 (@QuarkusTest broken), devtown#84 (minor MCP tool gaps), engine#523 (CaseInstanceRepository listing methods).
 
 ## Immediate Next Step
 
-Pick next work. Three options: (a) build the demo harness (3 S-scale issues — mock workers, trust seeding, demo script), (b) start the casehub-ui panel work (Phase 1: 5 demo-ready panels), (c) pick from the backlog below.
+Pick next work. Pause stack has `issue-14-failure-handling` (#14). Three priorities: (a) fix @QuarkusTest (devtown#83 — blocks all integration testing), (b) resume #14 failure handling, (c) pick from backlog.
 
 ## What's Left
 
-- **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence when foundation runs remotely · XL · High
-
+- **devtown#80** — activate production persistence backend (remove compile-scope persistence-memory) · M · Med
+- **devtown#83** — @QuarkusTest broken by Hibernate/scheduler exception · S · Med
+- **devtown#84** — DevtownMcpTools minor gaps (WorkItemStore, reroute policy context) · XS · Low
+- **engine#523** — add listing methods to CaseInstanceRepository SPI · S · Low
+- **devtown#81** — full gt seance equivalent with Doltgres time-travel · L · High
+- **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence · XL · High
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| — | Demo harness (mock workers + trust seeding + demo script) | S | Low | Critical path to demo — no issue filed yet |
-| — | casehub-ui Phase 1 panels (PR timeline, trust card, routing explanation, commitments, inbox) | M | Med | Requires casehub-ui repo rename from melviz |
+| #14 | Failure handling — DECLINED vs FAILED routing | L | High | Paused — spec complete, implementation not started |
+| #83 | Fix @QuarkusTest — Hibernate scheduler exception | S | Med | Blocks all integration testing |
+| — | Demo harness (mock workers + trust seeding + demo script) | S | Low | No issue filed |
+| — | casehub-ui Phase 1 panels | M | Med | Requires casehub-ui repo |
 | #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `docs/gastown-casehub-analysis-v3.md` — v3 rewrite (this session)
-- `docs/devtown-ui-requirements.md` — phased UI panel spec (this session)
-- `docs/PROGRESS.md` — refreshed with DT-011–014
-- `blog/2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md`
+- `app/src/main/java/io/casehub/devtown/app/mcp/DevtownMcpTools.java` — 11 MCP tools
+- `app/src/main/java/io/casehub/devtown/app/mcp/PrReviewCaseTracker.java` — event-sourced read model
+- `docs/specs/issue-17-observability-tooling/` — design spec (promoted to project)
+- `specs/issue-17-observability-tooling/` — workspace copy of design spec
