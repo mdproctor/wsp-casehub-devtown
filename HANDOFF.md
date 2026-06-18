@@ -2,34 +2,35 @@
 
 ## Last Session
 
-Shipped devtown#17 (Epic 10: Observability and operational tooling). Built 11 MCP tools (8 read + 3 write) + W3C PROV-DM export in `DevtownMcpTools.java`. Full Gastown CLI parity achieved. Fixed 3 pre-existing ledger API breaks along the way. Filed 5 issues: devtown#80 (production persistence), devtown#81 (full gt seance), devtown#83 (@QuarkusTest broken), devtown#84 (minor MCP tool gaps), engine#523 (CaseInstanceRepository listing methods).
+Updated PROGRESS.md and Gastown analysis v3 — synced Epic 10 (MCP tooling) as shipped, added DT-015, rewrote demo section with three paths and demo extras. Then shipped devtown#14 (failure handling): four-tier cascade with OutcomePolicy, 18 YAML bindings (was 9), generalized SlaBreachHandler, failure-cascade-pattern protocol. Four engine issues (#508, #509, #511, #512) delivered in parallel.
 
 ## Immediate Next Step
 
-Pick next work. Pause stack has `issue-14-failure-handling` (#14). Three priorities: (a) fix @QuarkusTest (devtown#83 — blocks all integration testing), (b) resume #14 failure handling, (c) pick from backlog.
+Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration testing), (b) demo harness (mock workers + trust seeding + script), (c) merge queue Epic #11.
 
 ## What's Left
 
-- **devtown#80** — activate production persistence backend (remove compile-scope persistence-memory) · M · Med
+- **devtown#80** — activate production persistence backend · M · Med
 - **devtown#83** — @QuarkusTest broken by Hibernate/scheduler exception · S · Med
-- **devtown#84** — DevtownMcpTools minor gaps (WorkItemStore, reroute policy context) · XS · Low
+- **devtown#84** — DevtownMcpTools minor gaps · XS · Low
+- **devtown#82** — migrate ErasureReceiptLedgerEntry to foundation version · S · Low
 - **engine#523** — add listing methods to CaseInstanceRepository SPI · S · Low
-- **devtown#81** — full gt seance equivalent with Doltgres time-travel · L · High
+- **devtown#81** — full gt seance with Doltgres time-travel · L · High
 - **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence · XL · High
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #14 | Failure handling — DECLINED vs FAILED routing | L | High | Paused — spec complete, implementation not started |
 | #83 | Fix @QuarkusTest — Hibernate scheduler exception | S | Med | Blocks all integration testing |
+| #11 | Merge queue — CasePlanModel batch-then-bisect | XL | High | Spec not started |
 | — | Demo harness (mock workers + trust seeding + demo script) | S | Low | No issue filed |
 | — | casehub-ui Phase 1 panels | M | Med | Requires casehub-ui repo |
 | #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `app/src/main/java/io/casehub/devtown/app/mcp/DevtownMcpTools.java` — 11 MCP tools
-- `app/src/main/java/io/casehub/devtown/app/mcp/PrReviewCaseTracker.java` — event-sourced read model
-- `docs/specs/issue-17-observability-tooling/` — design spec (promoted to project)
-- `specs/issue-17-observability-tooling/` — workspace copy of design spec
+- `review/src/main/resources/devtown/pr-review.yaml` — 18-binding case definition with failure cascade
+- `docs/specs/issue-14-failure-handling/` — failure handling design spec (rev4)
+- `docs/protocols/casehub/failure-cascade-pattern.md` — four-tier failure cascade protocol
+- `docs/gastown-casehub-analysis-v3.md` — updated with Epic 10 shipped + demo rewrite
