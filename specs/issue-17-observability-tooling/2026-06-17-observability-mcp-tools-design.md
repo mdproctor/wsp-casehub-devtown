@@ -56,7 +56,7 @@ Application-tier read model tracking active PR review cases. Temporary solution 
 
 ### Population
 
-`PrReviewCaseService.review()` captures the case UUID from `caseHub.startCase()` and registers it with the tracker alongside PR metadata (repo, PR number, contributor, lines changed).
+`PrReviewCaseService.review()` captures the case UUID from `caseHub.startCase()` and registers the full `PrPayload` with the tracker. The tracker stores the complete payload — not a subset of fields — so that `reroute_review` can reconstruct a case from the tracker alone without querying the case context.
 
 ### Updates — Case-Level Status
 
@@ -111,9 +111,7 @@ Delete `PrReviewCaseTracker` when devtown#80 (production persistence) + engine#5
 record CaseInfo(
     UUID caseId,
     String tenancyId,
-    String repo,
-    int prNumber,
-    String contributor,
+    PrPayload payload,
     Instant startedAt,
     Instant lastEventAt,
     CaseTrackingStatus status
@@ -185,7 +183,7 @@ record TrackedEvent(
 |---|---|
 | Gastown equivalent | `gt problems` + `gt stale` |
 | Params | `threshold_minutes` (default 60) |
-| Source | `CommitmentStore.findAllOpen()` + `findExpiredBefore()`, `PrReviewCaseTracker` for stalled cases (derived from `lastEventAt`), `TrustGateService` for below-threshold agents, event log for failed workers |
+| Source | `CommitmentStore.findAllOpen()` + `findExpiredBefore()`, `PrReviewCaseTracker` for stalled cases (derived from `lastEventAt`), `TrustGateService` for below-threshold agents, ring buffer for recent worker failures (filtered by `eventType` containing `"Failed"`) |
 | Returns | Categorised problem list — stalled reviewers, failed workers, SLA-breached work items, below-threshold agents, stalled cases |
 
 ### 3.6 `get_system_health` — Operational health check
@@ -249,8 +247,10 @@ All three are audit-visible — they appear in the event log with the operator's
 |---|---|
 | Params | `case_id` (UUID), `tenancy_id` (optional) |
 | Action | Cancels the current case and starts a fresh one with the same PR payload. Blunt instrument — use `retry_reviewer` for individual capabilities. |
-| Source | `CaseHubRuntime.cancelCase()` + `PrReviewCaseService.review()` with original `PrPayload` (retrieved from tracker's `CaseInfo`) |
+| Source | `CaseHubRuntime.cancelCase()` + `PrReviewCaseHub.startCase()` directly, building initial context from `CaseInfo.payload()` |
 | Returns | Old case ID (cancelled) + new case ID |
+
+**Request scope constraint:** The MCP tool does NOT call `PrReviewCaseService.review()`. That method injects `CaseMemoryRecaller` → `CurrentPrincipal`, which requires CDI request scope unavailable in MCP context. Instead, the tool builds the initial context itself (mirroring the context-building logic in `PrReviewCaseService.review()`) and calls `caseHub.startCase(initialContext)` directly. Memory recall is skipped during reroute — an acceptable trade-off for an emergency operator action. The new case is registered with the tracker normally.
 
 ### 4.3 `force_complete_check` — Inject a synthetic outcome
 
@@ -291,7 +291,7 @@ Java records as inner types of `DevtownMcpTools`, following the Qhorus `QhorusMc
 ```java
 record QueueStatus(int total, Map<String, Integer> countsByStatus, List<ActiveReview> reviews)
 record ActiveReview(UUID caseId, String repo, int prNumber, String contributor,
-                    String status, Instant startedAt, Instant lastEventAt)
+                    int linesChanged, String status, Instant startedAt, Instant lastEventAt)
 
 record ReviewDetail(UUID caseId, PrPayload pr, List<GoalStatus> goals,
                     List<EventEntry> timeline, List<LedgerRecord> ledgerEntries,
