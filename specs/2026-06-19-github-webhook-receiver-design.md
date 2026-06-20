@@ -3,7 +3,7 @@
 **Issue:** devtown#15 (Epic 8: GitHub integration)
 **Scope:** Webhook receiver for PR events (opened/updated/closed). Not CI status, merge executor, or PR analysis workers — those are separate components within #15.
 **Date:** 2026-06-19
-**Rev:** 3 (post-review round 2)
+**Rev:** 4 (post-review round 3)
 
 ---
 
@@ -386,6 +386,7 @@ All pure unit tests — no `@QuarkusTest` (devtown#83 blocks integration testing
 | `GitHubPullRequestEvent` parsing | Sample webhook JSON for each action type. Unknown fields ignored. Nested records parsed correctly. |
 | `GitHubPayloadMapper` | Field mapping correctness. `changedPaths` is empty list. `linesChanged = additions + deletions`. |
 | `GitHubWebhookResource` | Mock `PrReviewApplicationService`. Correct method called per action. Draft filtering. Signature rejection (401). Unhandled events return 200 ignored. Processing exceptions return 500. |
+| `PrReviewCaseService.revisePr()` | Signal ordering: recording mock of `CaseHubRuntime.signal()` captures `(path, value)` pairs and asserts `pr.headSha` and `pr.linesChanged` are signaled BEFORE `codeAnalysis` is nulled. |
 
 ---
 
