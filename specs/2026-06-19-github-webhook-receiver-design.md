@@ -3,7 +3,7 @@
 **Issue:** devtown#15 (Epic 8: GitHub integration)
 **Scope:** Webhook receiver for PR events (opened/updated/closed). Not CI status, merge executor, or PR analysis workers — those are separate components within #15.
 **Date:** 2026-06-19
-**Rev:** 2 (post-review)
+**Rev:** 3 (post-review round 2)
 
 ---
 
@@ -100,50 +100,93 @@ return switch (event.action()) {
 
 ### Context update on `synchronize`
 
-Find the active case via tracker, then signal context updates:
+Find the active case via tracker, then signal context updates.
 
-- **Update:** `pr.headSha` → new SHA, `pr.linesChanged` → new count
-- **Null out (stale):** `codeAnalysis`, `securityReview`, `architectureReview`, `styleCheck`, `testCoverage`, `performanceAnalysis`
-- **Preserve:** human approvals, policy, memory context
+**Signal ordering contract:** PR metadata signals MUST complete before analysis invalidation signals. The `initial-analysis` binding fires on `.codeAnalysis == null` and reads `pr.headSha` as input (`{ pr: .pr }`). Reversing the order causes re-analysis of stale code. Vert.x EventBus `request()` processes signals sequentially per call — code order equals execution order — but this ordering is a correctness requirement, not an implementation detail. A refactor that reorders these calls breaks correctness silently.
+
+**Required signal order:**
+
+1. `signal(caseId, "pr.headSha", newSha)` — update metadata FIRST
+2. `signal(caseId, "pr.linesChanged", newLines)` — update metadata
+3. `signal(caseId, "codeAnalysis", null)` — invalidation triggers binding with CURRENT metadata
+4. `signal(caseId, "securityReview", null)` — order among remaining invalidations is irrelevant
+5. `signal(caseId, "architectureReview", null)` — all guard on `.codeAnalysis.complete == true`
+6. `signal(caseId, "styleCheck", null)`
+7. `signal(caseId, "testCoverage", null)`
+8. `signal(caseId, "performanceAnalysis", null)`
+
+**Preserve: human approvals.** This is an explicit policy choice. Rationale:
+- Human approval is expensive — SLA-bounded, consumes reviewer time. A fixup commit should not invalidate a thorough human review.
+- The re-triggered code-analysis detects if new changes alter the review scope (new security-sensitive files, new API crossings). If scope changes, the relevant specialist binding fires regardless of existing approvals.
+- The audit trail records the approval SHA vs merge SHA. The compliance report captures the delta naturally.
+- Mirrors Gastown's default: approvals persist across pushes unless explicitly dismissed.
+- **Configurable in future:** per-repo policy via `PreferenceProvider` when scoped preferences are wired (parent#26). Teams that want stale-approval dismissal can opt in.
 
 **Engine mechanism (verified):** `CaseHubRuntime.signal(caseId, "codeAnalysis", null)` sets the context key to null via `WritablePanelImpl.setPath()`. The null value increments the context version, triggering `contextChange` binding re-evaluation. JQ condition `.codeAnalysis == null` evaluates true for both null-valued keys and absent keys. DEEP_MERGE does not interfere — it is the conflict resolver strategy on binding **outputs** (worker results merged into context), not on signals. Signals bypass the conflict resolver entirely.
 
 This is the canonical **context invalidation pattern** for CaseHub harnesses: signal the key to null, let bindings re-fire against the null check.
 
+### Prerequisite fix: mutable sub-maps in initial context
+
+**`PrReviewCaseService.review()` must use mutable maps for sub-map values.** The current code constructs `prContext` with `Map.of(...)` (unmodifiable). `WritablePanelImpl` copies the top-level `data` via `putAll(initial)` but does NOT deep-copy sub-maps. The `pr` key still points to the original `Map.of()` instance. Sub-path signals like `signal(caseId, "pr.headSha", newSha)` navigate into the sub-map and call `current.put("headSha", newSha)` on the unmodifiable map — `UnsupportedOperationException` at runtime.
+
+**Fix in `PrReviewCaseService`:**
+```java
+// Before (broken for sub-path signals):
+var prContext = Map.<String, Object>of("id", ..., "repo", ..., ...);
+
+// After (mutable — supports sub-path signals):
+var prContext = new LinkedHashMap<>(Map.of("id", ..., "repo", ..., ...));
+```
+
+This is also an engine bug — `WritablePanelImpl` should defensively deep-copy initial data to ensure all sub-maps are mutable. Filed as engine#NNN. The devtown fix is the immediate resolution; the engine fix prevents all future harnesses from hitting the same issue.
+
+Top-level signals (e.g., `signal(caseId, "codeAnalysis", null)`) are unaffected — they call `this.data.put(key, value)` on the top-level `LinkedHashMap`, which is always mutable.
+
 ### Context update on `closed`
 
 - **`merged == false`:** Signal `pr.status = "closed"`. The `review-abandoned` failure goal (`'.pr.status == "closed" or .pr.status == "superseded"'`) triggers. Case completes via failure path.
-- **`merged == true`:** Signal `pr.status = "merged"`. The `externally-merged` success goal (`'.pr.status == "merged"'`) triggers. Case completes via success path.
+- **`merged == true`:** Signal `pr.status = "merged"`. All three success goals short-circuit to satisfied (each includes `.pr.status == "merged" or ...`). Case completes via success path. See CasePlanModel update below.
 
-### CasePlanModel update — `externally-merged` goal
+### CasePlanModel update — external merge completion path
 
-The current completion spec has no path for externally merged PRs. Adding:
+The current success goals and completion spec have no path for externally merged PRs. Signaling `pr.status = "merged"` matches neither the success goals (they check review approvals + CI) nor the failure goals (they check for "closed"/"superseded"). The case would be stuck.
 
-```yaml
-goals:
-  - name: externally-merged
-    kind: success
-    condition: '.pr.status == "merged"'
-```
-
-Updated completion spec:
+**Fix: add `.pr.status == "merged" or` to each success goal's JQ condition.** When a PR is externally merged, all three success goals short-circuit to satisfied, and the existing `allOf: [pr-approved, security-verified, ci-passing]` completion spec triggers without modification.
 
 ```yaml
-completion:
-  success:
-    anyOf:
-      - allOf: [pr-approved, security-verified, ci-passing]
-      - externally-merged
-  failure:
-    anyOf: [review-blocked, review-rejected, review-abandoned]
+- name: pr-approved
+  kind: success
+  condition: >-
+    .pr.status == "merged" or
+    ((.codeAnalysis.securitySensitive == false or .securityReview.outcome == "APPROVED") and
+     (.codeAnalysis.architectureCrossing == false or .architectureReview.outcome == "APPROVED") and
+     .styleCheck.outcome == "APPROVED" and
+     .testCoverage.outcome == "APPROVED" and
+     .performanceAnalysis.outcome == "APPROVED")
+
+- name: security-verified
+  kind: success
+  condition: >-
+    .pr.status == "merged" or
+    .codeAnalysis.securitySensitive == false or
+    .securityReview.outcome == "APPROVED"
+
+- name: ci-passing
+  kind: success
+  condition: '.pr.status == "merged" or .ci.status == "passing"'
 ```
 
-**Engine validation required:** Verify at implementation time whether the engine supports nested `anyOf/allOf` in the completion spec. If not, file an engine issue for composed completion criteria and use a flattened workaround until resolved.
+Completion spec unchanged: `allOf: [pr-approved, security-verified, ci-passing]`.
+
+**Why this approach instead of a separate `externally-merged` goal:** The engine's `GoalExpression` schema supports `List<String> allOf` and `List<String> anyOf` as flat lists of goal names — no nested composition (`anyOf(allOf(...), goal)` is not expressible). A separate goal would require composed completion expressions the engine doesn't support. The right design is a separate goal with engine support for composed expressions — filed as engine#NNN. The `.pr.status == "merged" or` approach is the pragmatic solution within the current engine.
+
+**Observability impact:** `pr-approved: true` when the PR was externally merged, even though no formal approvals were received. Semantically defensible: merge access implies approval authority. The audit trail distinguishes external merge (webhook `closed` with `merged=true`) from merge-executor binding — the distinction is in the event log, not in goal satisfaction.
 
 ### `reopened` — old and new case relationship
 
 1. `findActiveCaseByPr()` returns only non-terminal cases (`CaseTrackingStatus.isTerminal()` already supports this)
-2. The old case remains in the tracker with terminal status — historical record, not deleted
+2. The old case remains in the primary `cases` map with terminal status — historical record, not deleted
 3. The new case has no relationship to the old case — a reopened PR is a fresh review
 4. If linking is needed, that's the governance dashboard (devtown#85)
 
@@ -173,6 +216,8 @@ public enum LifecycleResult {
     ALREADY_ABANDONED     // case already reached failure (closed, rejected, blocked)
 }
 ```
+
+**Note on `ALREADY_COMPLETED` / `ALREADY_ABANDONED`:** These values are forward-compatible for devtown#80 (persistent store). With the current in-memory tracker, both are unreachable — the `prIndex` entry is removed on terminal status, so `findActiveCaseByPr()` returns empty for terminal cases and the service returns `NO_ACTIVE_CASE`. When the persistent store ships, `CaseInstanceRepository` queries can distinguish terminal states, making these values producible.
 
 ### `@DefaultBean` displacement — all implementations updated
 
@@ -287,7 +332,7 @@ Single `@ConfigProperty`. Environment variable override. No per-repo secrets, no
 
 ## Case Tracker — Secondary Index
 
-`PrReviewCaseTracker` adds a secondary `ConcurrentHashMap<String, UUID>` keyed by `repo + "#" + prNumber` → case ID. Updated on `register()`, removed when the case reaches terminal status.
+`PrReviewCaseTracker` adds a secondary `ConcurrentHashMap<String, UUID>` keyed by `repo + "#" + prNumber` → case ID. Updated on `register()`. Removed in `onCaseLifecycle()` when `CaseTrackingStatus.fromCaseStatus(event.caseStatus()).isTerminal()` — the same `@ObservesAsync CaseLifecycleEvent` observer that already calls `updateStatus()`. No separate cleanup method, no consistency gap.
 
 ```java
 public Optional<CaseInfo> findActiveCaseByPr(String repo, int prNumber) {
@@ -341,6 +386,15 @@ All pure unit tests — no `@QuarkusTest` (devtown#83 blocks integration testing
 | `GitHubPullRequestEvent` parsing | Sample webhook JSON for each action type. Unknown fields ignored. Nested records parsed correctly. |
 | `GitHubPayloadMapper` | Field mapping correctness. `changedPaths` is empty list. `linesChanged = additions + deletions`. |
 | `GitHubWebhookResource` | Mock `PrReviewApplicationService`. Correct method called per action. Draft filtering. Signature rejection (401). Unhandled events return 200 ignored. Processing exceptions return 500. |
+
+---
+
+## Issues to File
+
+| Target repo | Issue | Reason |
+|-------------|-------|--------|
+| casehub-engine | `WritablePanelImpl` should deep-copy initial sub-maps | `Map.of()` sub-map values cause `UnsupportedOperationException` on sub-path signals — any harness can hit this |
+| casehub-engine | Composed `GoalExpression` — nested `anyOf(allOf(...), goal)` | Enables separate `externally-merged` goal without polluting individual goal conditions |
 
 ---
 
