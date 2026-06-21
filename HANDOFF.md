@@ -1,12 +1,12 @@
-# HANDOFF — 2026-06-18
+# HANDOFF — 2026-06-21
 
 ## Last Session
 
-Updated PROGRESS.md and Gastown analysis v3 — synced Epic 10 (MCP tooling) as shipped, added DT-015, rewrote demo section with three paths and demo extras. Then shipped devtown#14 (failure handling): four-tier cascade with OutcomePolicy, 18 YAML bindings (was 9), generalized SlaBreachHandler, failure-cascade-pattern protocol. Four engine issues (#508, #509, #511, #512) delivered in parallel.
+Designed and shipped the GitHub webhook receiver (devtown#15). Three rounds of spec review (17 review points across architecture, engine internals, and completion path). Implementation: hexagonal adapter in `github/` module with JAX-RS endpoint, HMAC-SHA256 verification, typed DTO, signal ordering contract, and CasePlanModel updates for external merge. Discovered engine shallow-copy bug (engine#547) and GoalExpression composition limitation (engine#548). Filed devtown#85 (PR governance dashboard), devtown#86 (CI status), devtown#87 (merge execution).
 
 ## Immediate Next Step
 
-Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration testing), (b) demo harness (mock workers + trust seeding + script), (c) merge queue Epic #11.
+Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration testing), (b) CI status integration (#86 — next event type handler in the webhook endpoint), (c) demo harness (mock workers + trust seeding + script).
 
 ## What's Left
 
@@ -15,6 +15,8 @@ Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration
 - **devtown#84** — DevtownMcpTools minor gaps · XS · Low
 - **devtown#82** — migrate ErasureReceiptLedgerEntry to foundation version · S · Low
 - **engine#523** — add listing methods to CaseInstanceRepository SPI · S · Low
+- **engine#547** — WritablePanelImpl should deep-copy initial sub-maps · S · Low
+- **engine#548** — composed GoalExpression (nested anyOf/allOf) · M · Med
 - **devtown#81** — full gt seance with Doltgres time-travel · L · High
 - **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence · XL · High
 
@@ -23,14 +25,15 @@ Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #83 | Fix @QuarkusTest — Hibernate scheduler exception | S | Med | Blocks all integration testing |
+| #86 | CI status integration — check_suite/check_run events | M | Med | Next webhook event type |
+| #87 | Merge execution — GitHub API merge worker | M | Med | Requires GitHub App/PAT auth |
+| #85 | PR governance dashboard — supersede/relink | M | Med | Requires casehub-ui |
 | #11 | Merge queue — CasePlanModel batch-then-bisect | XL | High | Spec not started |
 | — | Demo harness (mock workers + trust seeding + demo script) | S | Low | No issue filed |
-| — | casehub-ui Phase 1 panels | M | Med | Requires casehub-ui repo |
-| #24 | Contributor trust for open source PR routing | XL | High | Idea/proposal |
 
 ## References
 
-- `review/src/main/resources/devtown/pr-review.yaml` — 18-binding case definition with failure cascade
-- `docs/specs/issue-14-failure-handling/` — failure handling design spec (rev4)
-- `docs/protocols/casehub/failure-cascade-pattern.md` — four-tier failure cascade protocol
-- `docs/gastown-casehub-analysis-v3.md` — updated with Epic 10 shipped + demo rewrite
+- `specs/2026-06-19-github-webhook-receiver-design.md` — webhook receiver design spec (rev 4, 17 review points)
+- `plans/attic/issue-15-github-webhook-receiver/` — implementation plan (archived)
+- `blog/2026-06-21-mdp01-domain-events-are-not-messages.md` — session diary entry
+- `github/src/main/java/io/casehub/devtown/github/` — new webhook receiver code
