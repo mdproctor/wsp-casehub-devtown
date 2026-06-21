@@ -2,7 +2,7 @@
 
 **Issue:** devtown#87
 **Date:** 2026-06-21
-**Status:** Approved (rev 2 — post review, 8 findings addressed)
+**Status:** Approved (rev 3 — hexagonal port fix, binding guard, thread-safe registration)
 
 ## Problem
 
@@ -10,7 +10,7 @@ The merge binding in `pr-review.yaml` fires capability `merge-executor` when all
 
 ## Architecture
 
-The engine dispatches `merge-executor` to a `Worker` registered programmatically in the `CaseDefinition`. The Worker wraps a `WorkerFunction.Sync` that calls the GitHub merge API via a `MergeClient` port interface.
+The engine dispatches `merge-executor` to a `Worker` registered programmatically in the `CaseDefinition`. The Worker wraps a `WorkerFunction.Sync` that calls the GitHub merge API via a domain-level `MergeClient` port interface.
 
 **Why not @Named CDI lookup:** The engine does not perform CDI lookup for workers. Worker dispatch goes through `CaseDefinition.getWorkers()` → `AgentCandidateFactory.buildCandidates()` → `AgentRoutingStrategy.select()`. A CDI bean is invisible to this chain. Workers must be registered in the CaseDefinition.
 
@@ -18,37 +18,57 @@ The engine dispatches `merge-executor` to a `Worker` registered programmatically
 
 ## Worker registration
 
-`PrReviewCaseHub` overrides `getDefinition()` to programmatically add the merge-executor Worker after YAML parsing:
+`PrReviewCaseHub` registers the merge-executor Worker eagerly in `@PostConstruct`:
 
 ```java
-@Override
-public CaseDefinition getDefinition() {
+@Inject MergeClient mergeClient;
+
+@PostConstruct
+void registerWorkers() {
     CaseDefinition def = super.getDefinition();
-    if (def.getWorkers().stream().noneMatch(w -> w.getName().equals("merge-executor"))) {
-        Capability mergeCap = def.getCapabilities().stream()
-            .filter(c -> "merge-executor".equals(c.getName()))
-            .findFirst().orElseThrow();
-        def.getWorkers().add(Worker.builder()
-            .name("merge-executor")
-            .capabilities(mergeCap)
-            .function(mergeClient::merge)
-            .build());
-    }
-    return def;
+    Capability mergeCap = def.getCapabilities().stream()
+        .filter(c -> "merge-executor".equals(c.getName()))
+        .findFirst().orElseThrow();
+    def.getWorkers().add(Worker.builder()
+        .name("merge-executor")
+        .capabilities(mergeCap)
+        .function(input -> adaptMerge(input))
+        .build());
+}
+
+private WorkerResult adaptMerge(Map<String, Object> input) {
+    @SuppressWarnings("unchecked")
+    Map<String, Object> pr = (Map<String, Object>) input.get("pr");
+    String repo = (String) pr.get("repo");
+    String[] parts = repo.split("/");
+    int prNumber = Integer.parseInt((String) pr.get("id"));
+    String headSha = (String) pr.get("headSha");
+
+    return switch (mergeClient.merge(parts[0], parts[1], prNumber, headSha)) {
+        case MergeOutcome.Success s -> WorkerResult.of(Map.of("merge_sha", s.mergeSha()));
+        case MergeOutcome.Failure f -> WorkerResult.failed(f.reason());
+    };
 }
 ```
 
-The `mergeClient` is injected via the `MergeClient` port interface (see hexagonal boundary below).
+**Why @PostConstruct, not getDefinition() override:** `YamlCaseHub.getDefinition()` uses double-checked locking, but an override's `noneMatch + add` runs outside that synchronized block. Two concurrent callers could both add the Worker. `@PostConstruct` runs once during CDI initialization on a single thread — no race.
+
+**Initialization ordering:** `@PostConstruct` calls `super.getDefinition()`, which lazy-loads the YAML using injected `ObjectMapper` and `ExpressionEngineRegistry`. Quarkus CDI guarantees `@Inject` fields are set before `@PostConstruct` runs, so the dependencies are available.
+
+**Input extraction:** The `adaptMerge` lambda handles the engine-specific input map structure (repo parsing, id→int conversion). This is adapter logic — it belongs in `app/`, not in the domain or github modules.
 
 ## Hexagonal boundary
 
 | Layer | Module | Class | Responsibility |
 |-------|--------|-------|---------------|
-| Port | `review/` | `MergeClient` (interface) | `WorkerResult merge(Map<String, Object> input)` |
-| Adapter | `github/` | `GitHubMergeClient` | Calls GitHub merge API, returns `WorkerResult` |
-| Wiring | `app/` | `PrReviewCaseHub` | Injects `MergeClient`, registers Worker in CaseDefinition |
+| Port | `domain/` | `MergeClient` (interface) | `MergeOutcome merge(String owner, String repo, int prNumber, String headSha)` |
+| Result | `domain/` | `MergeOutcome` (sealed interface) | `Success(String mergeSha)` \| `Failure(String reason)` |
+| Adapter | `github/` | `GitHubMergeClient` | Calls GitHub merge API, returns `MergeOutcome` |
+| Wiring | `app/` | `PrReviewCaseHub` | Injects `MergeClient`, adapts to `WorkerFunction.Sync`, registers Worker |
 
-`MergeClient` returns `WorkerResult` directly — the Worker function signature is `Function<Map<String, Object>, WorkerResult>`. No separate `MergeResult` record needed.
+**Why domain/, not review/:** The three-tier protocol says `domain/` = pure Java, no framework coupling. `MergeClient` expresses the domain concept "merge a PR" — its contract should not depend on the engine's `WorkerResult` type. The `WorkerResult` adaptation happens in `app/` (the wiring layer), where the engine dependency already exists.
+
+`github/pom.xml` already depends on `casehub-devtown-domain`, so no new dependency needed.
 
 ## GitHubMergeClient (github module)
 
@@ -70,14 +90,14 @@ devtown.github.merge-method=squash
 
 `merge-method` accepts `squash` (default), `rebase`, or `merge`. The `sha` parameter is a server-side guard — GitHub rejects the merge if the PR's HEAD has changed.
 
-**Dependencies:** Add `quarkus-rest-client` and `quarkus-rest-client-jackson` to `github/pom.xml`.
+**Dependencies:** `github/pom.xml` already has `quarkus-rest-client` and `quarkus-rest-client-jackson`. No changes needed.
 
 **Response handling:**
-- 200 OK → extract `sha` (merge commit SHA) → `WorkerResult.of(Map.of("merge_sha", sha))`
-- 409 Conflict → `WorkerResult.failed("merge conflict or SHA mismatch")`
-- 405 Not Allowed → `WorkerResult.failed("branch protection prevents merge")`
-- 422 Unprocessable → `WorkerResult.failed("PR not in mergeable state")`
-- Network/other → `WorkerResult.failed("api error: " + message)`
+- 200 OK → extract `sha` (merge commit SHA) → `MergeOutcome.Success(sha)`
+- 409 Conflict → `MergeOutcome.Failure("merge conflict or SHA mismatch")`
+- 405 Not Allowed → `MergeOutcome.Failure("branch protection prevents merge")`
+- 422 Unprocessable → `MergeOutcome.Failure("PR not in mergeable state")`
+- Network/other → `MergeOutcome.Failure("api error: " + message)`
 
 ## YAML changes to pr-review.yaml
 
@@ -93,12 +113,13 @@ devtown.github.merge-method=squash
 
 **Why not `outputSchema: "{}"`:** JQ `{}` constructs an empty object, discarding all output keys. The merge_sha would be lost.
 
-### merge binding: add outcomePolicy and conflictResolverStrategy
+### merge binding: add guard, outcomePolicy, conflictResolverStrategy
 
 ```yaml
 - name: merge
   on: { contextChange: {} }
   when: >-
+    .merge_sha == null and
     .pr.status != "merged" and
     (.codeAnalysis.securitySensitive == false or .securityReview.outcome == "APPROVED") and
     (.codeAnalysis.architectureCrossing == false or .architectureReview.outcome == "APPROVED") and
@@ -114,6 +135,8 @@ devtown.github.merge-method=squash
     onFailure: FAULT
     onExpired: FAULT
 ```
+
+**`.merge_sha == null` guard:** Every other capability binding guards against its own output. Without this guard, the merge binding's complex condition evaluates to TRUE on every context change after the first merge — only to be filtered out by `filterToDispatchable()`. The guard short-circuits to FALSE immediately and documents idempotency intent.
 
 **outcomePolicy:** Explicit FAULT on all failure modes. The engine's default `OutcomePolicy()` is `REROUTE×3` — omitting the policy would cause three futile retry attempts against a single worker. FAULT transitions the case to FAULTED state, which is genuinely terminal.
 
@@ -176,14 +199,14 @@ For REJECTED decisions (case CANCELLED), `merge_sha` is null — falls back to `
 
 | File | Module | Change |
 |------|--------|--------|
-| `review/.../MergeClient.java` | review | New — port interface for merge execution |
+| `domain/.../MergeClient.java` | domain | New — port interface for merge execution |
+| `domain/.../MergeOutcome.java` | domain | New — sealed interface: Success \| Failure |
 | `github/.../GitHubMergeClient.java` | github | New — REST client implementing MergeClient |
-| `github/pom.xml` | github | Add quarkus-rest-client, quarkus-rest-client-jackson deps |
-| `app/.../PrReviewCaseHub.java` | app | Override getDefinition() to register merge Worker |
+| `app/.../PrReviewCaseHub.java` | app | @PostConstruct Worker registration with adaptMerge lambda |
 | `app/.../ledger/MergeDecisionObserver.java` | app | Read merge_sha from context instead of pr.headSha |
-| `review/.../resources/devtown/pr-review.yaml` | review | Remove merge-executor outputSchema, add merge binding outcomePolicy + conflictResolverStrategy, add merge-completed goal, update completion |
+| `review/.../resources/devtown/pr-review.yaml` | review | Remove merge-executor outputSchema, add merge binding guard + outcomePolicy + conflictResolverStrategy, add merge-completed goal, update completion |
 | `app/src/main/resources/application.properties` | app | Add devtown.github.token, devtown.github.merge-method |
-| Tests | All | Worker registration, merge client (mock HTTP), merge function (mock client), YAML goal/binding changes, MergeDecisionObserver merge_sha preference |
+| Tests | All | Domain types, Worker registration, merge client (mock HTTP), adaptMerge (mock client), YAML goal/binding changes, MergeDecisionObserver merge_sha preference |
 
 ## What this does NOT include
 
