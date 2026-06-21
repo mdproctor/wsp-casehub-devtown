@@ -1,0 +1,9 @@
+branch: issue-83-batch-fixes
+project-sha: 63cc1b02daa932964197328c33b41bc1e4c612ce
+date: 2026-06-21
+issue: 83
+issue-repo: casehubio/devtown
+covers: 83,84,82,86,87
+flyway-next-v: unknown
+design-repo: workspace
+design-section-hashes: 
