@@ -1,3 +1,5 @@
+*Updated: engine#523 closed — removed from backlog.*
+
 # HANDOFF — 2026-06-21
 
 ## Last Session
@@ -14,7 +16,6 @@ Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration
 - **devtown#83** — @QuarkusTest broken by Hibernate/scheduler exception · S · Med
 - **devtown#84** — DevtownMcpTools minor gaps · XS · Low
 - **devtown#82** — migrate ErasureReceiptLedgerEntry to foundation version · S · Low
-- **engine#523** — add listing methods to CaseInstanceRepository SPI · S · Low
 - **engine#547** — WritablePanelImpl should deep-copy initial sub-maps · S · Low
 - **engine#548** — composed GoalExpression (nested anyOf/allOf) · M · Med
 - **devtown#81** — full gt seance with Doltgres time-travel · L · High
