@@ -2,7 +2,7 @@
 
 **Issue:** devtown#87
 **Date:** 2026-06-21
-**Status:** Approved (rev 3 — hexagonal port fix, binding guard, thread-safe registration)
+**Status:** Approved (rev 4 — final, PlanItem note, extensibility note)
 
 ## Problem
 
@@ -136,7 +136,7 @@ devtown.github.merge-method=squash
     onExpired: FAULT
 ```
 
-**`.merge_sha == null` guard:** Every other capability binding guards against its own output. Without this guard, the merge binding's complex condition evaluates to TRUE on every context change after the first merge — only to be filtered out by `filterToDispatchable()`. The guard short-circuits to FALSE immediately and documents idempotency intent.
+**`.merge_sha == null` guard:** Every other capability binding guards against its own output. Without this guard, the merge binding's complex condition evaluates to TRUE on every context change after the first merge — only to be filtered out by `filterToDispatchable()`. The guard short-circuits to FALSE immediately and documents idempotency intent. The engine's PlanItem model (`addPlanItemIfAbsent` + `filterToDispatchable`) also prevents double-dispatch structurally, but the guard is clearer and cheaper.
 
 **outcomePolicy:** Explicit FAULT on all failure modes. The engine's default `OutcomePolicy()` is `REROUTE×3` — omitting the policy would cause three futile retry attempts against a single worker. FAULT transitions the case to FAULTED state, which is genuinely terminal.
 
@@ -214,3 +214,4 @@ For REJECTED decisions (case CANCELLED), `merge_sha` is null — falls back to `
 - Merge queue batch-then-bisect — devtown#11 (separate epic)
 - GitHub App authentication — PAT is sufficient for v1
 - Commit message customization — uses GitHub's default squash message
+- Merge-specific outcome variants (Conflict, Blocked) — `MergeOutcome` is a sealed interface; when merge queue (#11) or retry logic is added, new variants can be added and Java's exhaustiveness checking forces every `switch` (including `adaptMerge`) to handle them mechanically
