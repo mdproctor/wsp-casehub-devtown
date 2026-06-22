@@ -4,7 +4,7 @@
 **Branch:** `issue-90-wire-platform-oidc`  
 **Date:** 2026-06-22  
 **Reference implementation:** casehub-life#40 (identical pattern, same session)  
-**Rev:** 2 (post-review: default-deny, MCP transport, tenant isolation, library endpoints)
+**Rev:** 3 (rev 2 + MCP tenant isolation, build-time claim correction, test cleanup)
 
 ---
 
@@ -77,7 +77,10 @@ the test displacement chain.
 quarkus.oidc.application-type=service
 
 # Default-deny: every JAX-RS endpoint must carry @RolesAllowed or @PermitAll.
-# Unannotated endpoints fail at build time (augmentation error).
+# Augmentation adds @DenyAll to unannotated endpoints — the build succeeds,
+# but the endpoint returns 403 Forbidden at runtime. In dev mode with
+# auth.enabled-in-dev-mode=false, @DenyAll is bypassed entirely — the gap
+# only surfaces in production or in tests with security enabled.
 quarkus.security.jaxrs.deny-unannotated-endpoints=true
 
 # Dev profile — disable OIDC and security enforcement.
@@ -257,7 +260,8 @@ Devtown has three categories of HTTP endpoint, each requiring a different securi
 ### Category 1: Devtown-owned JAX-RS endpoints → annotations
 
 All resources in `app/` and `github/` — covered by §5. Every endpoint carries `@RolesAllowed`
-or `@PermitAll`. `deny-unannotated-endpoints=true` enforces completeness at build time.
+or `@PermitAll`. `deny-unannotated-endpoints=true` enforces completeness at runtime (403
+on unannotated endpoints).
 
 ### Category 2: Library-provided JAX-RS endpoints → patch foundation + interim path rules
 
@@ -291,6 +295,29 @@ quarkus.http.auth.permission.mcp.policy=authenticated
 This requires an authenticated principal for all MCP calls. In dev mode,
 `auth.enabled-in-dev-mode=false` bypasses this — local Claude CLI sessions are unaffected.
 
+**MCP tenant isolation** — 7 of 11 tools accept `tenancy_id` as a `@ToolArg` with
+fallback to `TenancyConstants.DEFAULT_TENANT_ID`. This is the same tenant isolation
+bypass that §5 fixes for REST. With the `authenticated` path-based rule, a
+`SecurityIdentity` is present and `OidcCurrentPrincipal @RequestScoped` activates
+per-request for Vert.x routes — `CurrentPrincipal` is injectable from `DevtownMcpTools
+@ApplicationScoped` via the request-scoped CDI proxy.
+
+**Fix:** inject `CurrentPrincipal`, use `principal.tenancyId()`, remove `tenancy_id`
+`@ToolArg` from all 7 tools:
+
+| Tool | Line | Change |
+|---|---|---|
+| `inspectReview` | 305 | remove `tenancy_id` param; inject `principal.tenancyId()` |
+| `getReviewerHealth` | 367 | same |
+| `getPriorDecisions` | 416 | same |
+| `exportProv` | 457 | same |
+| `retryReviewer` | 473 | same |
+| `rerouteReview` | 501 | same |
+| `forceCompleteCheck` | 549 | same |
+
+`getQueueStatus`, `getRecentEvents`, `getSystemHealth`, `listProblems` do not take
+`tenancy_id` — no change needed.
+
 **SmallRye Health** — `/q/health`, `/q/health/ready`, `/q/health/live` are Vert.x routes
 contributed by the SmallRye Health extension. They must remain accessible for container
 orchestration probes (Kubernetes liveness/readiness). They are unaffected by
@@ -301,7 +328,7 @@ health endpoints are public by default and should remain so.
 
 | Category | Mechanism | Enforced at |
 |---|---|---|
-| Devtown JAX-RS | `@RolesAllowed` / `@PermitAll` | Build time (augmentation) |
+| Devtown JAX-RS | `@RolesAllowed` / `@PermitAll` | Runtime (403 via augmented `@DenyAll`) |
 | Library JAX-RS | Patch foundation; path-based interim | Runtime |
 | MCP (Vert.x) | `quarkus.http.auth.permission` | Runtime |
 | Health (Vert.x) | Public by default | — |
@@ -326,6 +353,19 @@ Verify with a full test run; any remaining 401 failures indicate an unpatched te
 - `devtown-admin` → not 401, not 403 on admin endpoints
 - Unauthenticated → not 401 on `@PermitAll` endpoints (`/api/github/webhook`)
 - Unauthenticated → not 401 on path-permitted endpoints (`/actors/{actorId}/state`)
+
+### Test cleanup — remove dead `@QueryParam("tenancyId")` assertions
+
+After removing `@QueryParam("tenancyId")` from `GdprErasureResource` and
+`CodeReviewComplianceResource`, JAX-RS silently ignores caller-supplied query params
+that no longer map to a method parameter. Tests pass but `.queryParam("tenancyId", ...)`
+calls become dead code:
+
+- `GdprErasureResourceTest` — 5 occurrences (lines 44, 72, 103, 112, 129)
+- `CodeReviewComplianceServiceTest` — 1 occurrence (line 160, RestAssured call)
+
+Remove the `.queryParam("tenancyId", ...)` calls from both test classes. The tenant
+is now carried by `CurrentPrincipal` (controlled in tests via `FixedCurrentPrincipal`).
 
 ### Foundation issue to file
 
