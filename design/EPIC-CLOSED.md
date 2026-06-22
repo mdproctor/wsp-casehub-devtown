@@ -1,4 +1,5 @@
-# Branch Closed — issue-59-s-xs-cleanup
-**Date:** 2026-06-01
-**Issue:** #59
-**Scheduled for deletion:** 2026-06-15
+# Branch Closed: issue-83-batch-fixes
+
+**Date:** 2026-06-22
+**Issues:** 83,84,82,86,87,78,79
+**Status:** merged to main
