@@ -387,4 +387,5 @@ is now carried by `CurrentPrincipal` (controlled in tests via `FixedCurrentPrinc
 
 `casehubio/engine` — add `@PermitAll` to `ActorStateResource` and
 `ReactiveActorStateResource` in `casehub-engine-actor-state`. Once shipped, remove the
-`quarkus.http.auth.permission.actor-state` path-based rule from devtown.
+`ActorStateResource` and `ReactiveActorStateResource` entries from
+`quarkus.arc.exclude-types` in devtown.
