@@ -4,7 +4,7 @@
 **Branch:** `issue-90-wire-platform-oidc`  
 **Date:** 2026-06-22  
 **Reference implementation:** casehub-life#40 (identical pattern, same session)  
-**Rev:** 3 (rev 2 + MCP tenant isolation, build-time claim correction, test cleanup)
+**Rev:** 4 (rev 3 + ActorStateResource interim fix, residual language corrections)
 
 ---
 
@@ -149,8 +149,8 @@ prevents collision with IDP's generic admin role and forces explicit IDP configu
 
 - `GitHubWebhookResource` — called by GitHub infrastructure; HMAC-SHA256 signature is its
   authentication mechanism. OIDC is not applicable. `@PermitAll` is required (not decorative)
-  because `deny-unannotated-endpoints=true` would otherwise reject webhook calls at
-  augmentation time.
+  because `deny-unannotated-endpoints=true` would otherwise add `@DenyAll` via
+  augmentation, returning 403 at runtime.
 - `PrReviewResource` — webhook calls go through `GitHubWebhookResource` → CDI service
   (not HTTP), so `@RolesAllowed` here only gates direct API callers. Starting restrictive:
   `@RolesAllowed(DevtownRoles.ADMIN)` now. devtown#91 tracks `devtown-service` role for
@@ -233,22 +233,35 @@ via Jandex discovery. Only one is active at a time:
 | `ActorStateResource` | `GET /actors/{actorId}/state` | `casehub.qhorus.reactive.enabled` absent or `false` (default) | **none** |
 | `ReactiveActorStateResource` | `GET /actors/{actorId}/state` | `casehub.qhorus.reactive.enabled=true` | **none** |
 
-Neither carries security annotations. With `deny-unannotated-endpoints=true`, the active
-resource would fail at augmentation time.
+Neither carries security annotations. With `deny-unannotated-endpoints=true`, augmentation
+adds `@DenyAll` to the active resource — requests return 403 at runtime.
+
+**Note on path-based rules:** a `quarkus.http.auth.permission` `permit` rule cannot fix
+this. Quarkus security has two independent layers evaluated sequentially: (1) HTTP
+permission layer (Vert.x routes) evaluates `quarkus.http.auth.permission.*` first, then
+(2) JAX-RS annotation layer (`EagerSecurityHandler`) evaluates `@RolesAllowed`/`@DenyAll`/
+`@PermitAll` second. A path-based `permit` lets the request through the HTTP layer, but the
+augmented `@DenyAll` blocks it at the JAX-RS layer → 403. The two layers are independent.
 
 **Right fix:** patch the foundation — add `@PermitAll` to both resources in
-`casehub-engine-actor-state`. Actor state is diagnostic data; finer-grained access
-control (devtown#91) can be applied later. File: `casehubio/engine` issue.
+`casehub-engine-actor-state`. One-line change per class. No end users, breaking changes
+cost nothing. Ship the engine patch before devtown enables `deny-unannotated-endpoints=true`.
+File: `casehubio/engine` issue.
 
-**Interim fix (until engine ships):** path-based permission rule in devtown's production
-and test `application.properties`:
+**Interim fix (if engine can't ship first):** exclude the bean entirely via
+`quarkus.arc.exclude-types` in devtown's `application.properties`:
 
 ```properties
 # Interim: ActorStateResource (casehub-engine-actor-state) has no security annotations.
-# Path-based rule permits access until the foundation adds @PermitAll (engine issue TBD).
-quarkus.http.auth.permission.actor-state.paths=/actors/*
-quarkus.http.auth.permission.actor-state.policy=permit
+# deny-unannotated-endpoints=true adds @DenyAll via augmentation — 403 at runtime.
+# Path-based permit cannot override JAX-RS @DenyAll (independent security layers).
+# Excluding the bean removes the endpoint entirely until the foundation adds @PermitAll.
+# ActorStateResource is diagnostic — not required for the PR review workflow.
+quarkus.arc.exclude-types=...,io.casehub.actorstate.ActorStateResource,io.casehub.actorstate.ReactiveActorStateResource
 ```
+
+Append to the existing `quarkus.arc.exclude-types` line. Remove when the engine ships
+with `@PermitAll`.
 
 ---
 
@@ -263,10 +276,12 @@ All resources in `app/` and `github/` — covered by §5. Every endpoint carries
 or `@PermitAll`. `deny-unannotated-endpoints=true` enforces completeness at runtime (403
 on unannotated endpoints).
 
-### Category 2: Library-provided JAX-RS endpoints → patch foundation + interim path rules
+### Category 2: Library-provided JAX-RS endpoints → patch foundation (or exclude)
 
 `ActorStateResource` / `ReactiveActorStateResource` from `casehub-engine-actor-state` —
-covered by §6. Foundation should carry its own annotations; path-based rule is the interim.
+covered by §6. Foundation should carry its own annotations. Path-based rules cannot
+override augmented `@DenyAll` (independent security layers — see §6). If the foundation
+can't ship first, exclude the bean via `quarkus.arc.exclude-types`.
 
 ### Category 3: Non-JAX-RS Vert.x routes → path-based rules
 
@@ -329,7 +344,7 @@ health endpoints are public by default and should remain so.
 | Category | Mechanism | Enforced at |
 |---|---|---|
 | Devtown JAX-RS | `@RolesAllowed` / `@PermitAll` | Runtime (403 via augmented `@DenyAll`) |
-| Library JAX-RS | Patch foundation; path-based interim | Runtime |
+| Library JAX-RS | Patch foundation; exclude bean as interim | Build time (bean removal) |
 | MCP (Vert.x) | `quarkus.http.auth.permission` | Runtime |
 | Health (Vert.x) | Public by default | — |
 
@@ -352,7 +367,8 @@ Verify with a full test run; any remaining 401 failures indicate an unpatched te
   `/api/compliance/code-review/{id}`)
 - `devtown-admin` → not 401, not 403 on admin endpoints
 - Unauthenticated → not 401 on `@PermitAll` endpoints (`/api/github/webhook`)
-- Unauthenticated → not 401 on path-permitted endpoints (`/actors/{actorId}/state`)
+- If `ActorStateResource` is excluded: verify `/actors/{actorId}/state` returns 404 (not 403)
+- If foundation shipped `@PermitAll`: unauthenticated → 200 on `/actors/{actorId}/state`
 
 ### Test cleanup — remove dead `@QueryParam("tenancyId")` assertions
 
