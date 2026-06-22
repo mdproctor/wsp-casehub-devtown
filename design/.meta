@@ -1,0 +1,9 @@
+branch: issue-90-wire-platform-oidc
+project-sha: 7c5b296a7a7d639343fa7d7d171accc8776fd6ee
+date: 2026-06-22
+issue: 90
+issue-repo: casehubio/devtown
+covers: 90
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
