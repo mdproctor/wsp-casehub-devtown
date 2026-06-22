@@ -3,7 +3,8 @@
 **Issue:** devtown#90  
 **Branch:** `issue-90-wire-platform-oidc`  
 **Date:** 2026-06-22  
-**Reference implementation:** casehub-life#40 (identical pattern, same session)
+**Reference implementation:** casehub-life#40 (identical pattern, same session)  
+**Rev:** 2 (post-review: default-deny, MCP transport, tenant isolation, library endpoints)
 
 ---
 
@@ -14,6 +15,9 @@ is the active production principal — devtown has no OIDC module on the classpa
 (noted in `application.properties` as "devtown#71"). `MemoryAdminResource` and
 `IncidentFeedbackResource` already have `@RolesAllowed("admin")` but use a hardcoded
 string literal. `GdprErasureResource` is unguarded despite being a privileged operation.
+`CodeReviewComplianceResource` and `GdprErasureResource` take `tenancyId` from
+`@QueryParam` — a caller-controlled parameter that bypasses tenant isolation once OIDC
+provides a principal-carried tenancy claim.
 
 ---
 
@@ -51,6 +55,14 @@ needed. `TenantScopedPrincipal` and `QhorusInboundCurrentPrincipal` are already 
 exclusions needed. `@TestSecurity` controls `SecurityIdentity` for `@RolesAllowed` checks;
 `FixedCurrentPrincipal` controls `CurrentPrincipal` for business logic.
 
+**Injection constraint:** `OidcCurrentPrincipal` must never be injected by concrete type —
+always inject `CurrentPrincipal` (the interface). `OidcCurrentPrincipal` injects both
+`SecurityIdentity` and `JsonWebToken`; in test mode with `@TestSecurity`, a mock
+`SecurityIdentity` is provided but `JsonWebToken` resolution depends on the OIDC test
+infrastructure being wired. `FixedCurrentPrincipal @Alternative @Priority(1)` displaces
+at the `CurrentPrincipal` level only — direct injection of `OidcCurrentPrincipal` bypasses
+the test displacement chain.
+
 ---
 
 ## 3. Configuration
@@ -64,6 +76,10 @@ exclusions needed. `@TestSecurity` controls `SecurityIdentity` for `@RolesAllowe
 #   QUARKUS_OIDC_CLIENT_ID       — e.g. casehub-devtown
 quarkus.oidc.application-type=service
 
+# Default-deny: every JAX-RS endpoint must carry @RolesAllowed or @PermitAll.
+# Unannotated endpoints fail at build time (augmentation error).
+quarkus.security.jaxrs.deny-unannotated-endpoints=true
+
 # Dev profile — disable OIDC and security enforcement.
 # DevModeDisabledAuthorizationController (quarkus-security-runtime-spi 3.32.2) makes
 # isAuthorizationEnabled()=false, bypassing EagerSecurityHandler and the CDI interceptor.
@@ -76,11 +92,17 @@ quarkus.oidc.application-type=service
 
 ```properties
 # OIDC test config — devtown#90
+# These properties are test-only (no equivalent in main application.properties),
+# so no %test. prefix is needed — the file itself is test-scoped.
 # GE-20260521-f50602: discovery-disabled requires jwks-path (lazy-loaded, never fetched with @TestSecurity)
 quarkus.oidc.auth-server-url=http://localhost:8180/realms/test
 quarkus.oidc.discovery-enabled=false
 quarkus.oidc.jwks-path=protocol/openid-connect/certs
 quarkus.keycloak.devservices.enabled=false
+
+# Default-deny must also apply in tests — otherwise tests pass on unannotated
+# endpoints that would fail in production.
+quarkus.security.jaxrs.deny-unannotated-endpoints=true
 ```
 
 ---
@@ -109,30 +131,184 @@ prevents collision with IDP's generic admin role and forces explicit IDP configu
 
 ---
 
-## 5. @RolesAllowed mapping
+## 5. @RolesAllowed mapping — JAX-RS endpoints (devtown-owned)
 
 | Resource | Path | Current | Change |
 |---|---|---|---|
 | `MemoryAdminResource` | `/api/admin/memory` | `@RolesAllowed("admin")` (class-level) | → `@RolesAllowed(DevtownRoles.ADMIN)` |
 | `IncidentFeedbackResource` | `/api/incident-feedback` | `@RolesAllowed("admin")` (class-level) | → `@RolesAllowed(DevtownRoles.ADMIN)` |
 | `GdprErasureResource.POST` | `/api/actors/{actorId}/erasure` | none | add `@RolesAllowed(DevtownRoles.ADMIN)` |
-| `PrReviewResource.POST` | `/api/reviews` | none | add `@PermitAll` |
-| `CodeReviewComplianceResource.GET` | `/api/compliance/code-review/{caseId}` | none | add `@PermitAll` |
+| `CodeReviewComplianceResource.GET` | `/api/compliance/code-review/{caseId}` | none | add `@RolesAllowed(DevtownRoles.ADMIN)` |
+| `PrReviewResource.POST` | `/api/reviews` | none | add `@RolesAllowed(DevtownRoles.ADMIN)` |
 | `GitHubWebhookResource.POST` | `/api/github/webhook` | HMAC only | add `@PermitAll` |
 
-**`@PermitAll` rationale:**
+**Annotation rationale:**
 
 - `GitHubWebhookResource` — called by GitHub infrastructure; HMAC-SHA256 signature is its
-  authentication mechanism. OIDC is not applicable.
+  authentication mechanism. OIDC is not applicable. `@PermitAll` is required (not decorative)
+  because `deny-unannotated-endpoints=true` would otherwise reject webhook calls at
+  augmentation time.
 - `PrReviewResource` — webhook calls go through `GitHubWebhookResource` → CDI service
-  (not HTTP), so `@RolesAllowed` here only gates direct API callers. `@PermitAll` for
-  now; devtown#91 tracks `devtown-service` role for machine-to-machine differentiation.
-- `CodeReviewComplianceResource` — read-only compliance evidence; no PII. Tenant isolation
-  via `tenancyId` query param is sufficient for now.
+  (not HTTP), so `@RolesAllowed` here only gates direct API callers. Starting restrictive:
+  `@RolesAllowed(DevtownRoles.ADMIN)` now. devtown#91 tracks `devtown-service` role for
+  machine-to-machine differentiation — relax to
+  `@RolesAllowed({DevtownRoles.ADMIN, DevtownRoles.SERVICE})` when it lands.
+- `CodeReviewComplianceResource` — compliance evidence includes trust routing decisions,
+  audit chain digests, and GDPR erasure receipt IDs. This is privileged data.
+  `@RolesAllowed(DevtownRoles.ADMIN)` now; relax to `devtown-auditor` when devtown#91 ships.
+
+### Tenant isolation fix — remove `@QueryParam("tenancyId")`
+
+`CodeReviewComplianceResource` and `GdprErasureResource` currently take `tenancyId`
+as a `@QueryParam`. With OIDC providing `CurrentPrincipal.tenancyId()` from the JWT
+`tenancyId` claim, the caller-supplied parameter is a tenant isolation bypass.
+
+**Fix for both resources:**
+1. Inject `CurrentPrincipal`
+2. Use `principal.tenancyId()` as the authoritative tenant identifier
+3. Remove `@QueryParam("tenancyId")` parameter
+
+`MemoryAdminResource` already injects `CurrentPrincipal` and uses `principal.tenancyId()`
+— no change needed.
+
+**CodeReviewComplianceResource after:**
+
+```java
+@Path("/api/compliance/code-review")
+@ApplicationScoped
+@Produces(MediaType.APPLICATION_JSON)
+@RolesAllowed(DevtownRoles.ADMIN)
+public class CodeReviewComplianceResource {
+
+    @Inject CodeReviewComplianceService service;
+    @Inject CurrentPrincipal principal;
+
+    @GET
+    @Path("/{caseId}")
+    public Response getEvidence(@PathParam("caseId") UUID caseId) {
+        return service.findEvidence(caseId, principal.tenancyId())
+                .map(evidence -> Response.ok(evidence).build())
+                .orElse(Response.status(Response.Status.NOT_FOUND).build());
+    }
+}
+```
+
+**GdprErasureResource after:**
+
+```java
+@Path("/api/actors/{actorId}/erasure")
+@ApplicationScoped
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@RolesAllowed(DevtownRoles.ADMIN)
+public class GdprErasureResource {
+
+    @Inject GdprErasureService service;
+    @Inject CurrentPrincipal principal;
+
+    @POST
+    public ErasureReceipt erase(
+            @PathParam("actorId") final String actorId,
+            final ErasureRequest request) {
+        return service.erase(actorId, principal.tenancyId(),
+                request != null ? request.reason() : null);
+    }
+
+    public record ErasureRequest(String reason) {}
+}
+```
 
 ---
 
-## 6. Tests
+## 6. Library-provided JAX-RS endpoints
+
+`casehub-engine-actor-state` (already in `app/pom.xml`) contributes two JAX-RS resources
+via Jandex discovery. Only one is active at a time:
+
+| Resource | Path | Active when | Security |
+|---|---|---|---|
+| `ActorStateResource` | `GET /actors/{actorId}/state` | `casehub.qhorus.reactive.enabled` absent or `false` (default) | **none** |
+| `ReactiveActorStateResource` | `GET /actors/{actorId}/state` | `casehub.qhorus.reactive.enabled=true` | **none** |
+
+Neither carries security annotations. With `deny-unannotated-endpoints=true`, the active
+resource would fail at augmentation time.
+
+**Right fix:** patch the foundation — add `@PermitAll` to both resources in
+`casehub-engine-actor-state`. Actor state is diagnostic data; finer-grained access
+control (devtown#91) can be applied later. File: `casehubio/engine` issue.
+
+**Interim fix (until engine ships):** path-based permission rule in devtown's production
+and test `application.properties`:
+
+```properties
+# Interim: ActorStateResource (casehub-engine-actor-state) has no security annotations.
+# Path-based rule permits access until the foundation adds @PermitAll (engine issue TBD).
+quarkus.http.auth.permission.actor-state.paths=/actors/*
+quarkus.http.auth.permission.actor-state.policy=permit
+```
+
+---
+
+## 7. Security boundary — annotation vs path-based
+
+Devtown has three categories of HTTP endpoint, each requiring a different security mechanism.
+`deny-unannotated-endpoints=true` covers only the first category.
+
+### Category 1: Devtown-owned JAX-RS endpoints → annotations
+
+All resources in `app/` and `github/` — covered by §5. Every endpoint carries `@RolesAllowed`
+or `@PermitAll`. `deny-unannotated-endpoints=true` enforces completeness at build time.
+
+### Category 2: Library-provided JAX-RS endpoints → patch foundation + interim path rules
+
+`ActorStateResource` / `ReactiveActorStateResource` from `casehub-engine-actor-state` —
+covered by §6. Foundation should carry its own annotations; path-based rule is the interim.
+
+### Category 3: Non-JAX-RS Vert.x routes → path-based rules
+
+These routes are not reachable by `@RolesAllowed`, `@PermitAll`, or
+`deny-unannotated-endpoints` (JAX-RS scoped only).
+
+**MCP transport** — `DevtownMcpTools` exposes 11 tools (8 read, 3 write) via
+`quarkus-mcp-server-http` on the `/mcp` path. Write operations (`retry_reviewer`,
+`reroute_review`, `force_complete_check`) have significant side effects: cancelling cases,
+force-completing checks with operator overrides, starting new cases. The MCP server extension
+uses Vert.x routes, not JAX-RS.
+
+Security stance: MCP is an operator interface intended for localhost-only access (Claude CLI
+sessions, local debugging). In current deployments it is not network-exposed. However, the
+spec must not rely on deployment topology for security — if the application is network-exposed,
+MCP must be gated.
+
+```properties
+# MCP transport — restrict to authenticated operators.
+# quarkus-mcp-server-http registers Vert.x routes on /mcp/*.
+# Path-based rule because MCP is not JAX-RS.
+quarkus.http.auth.permission.mcp.paths=/mcp/*
+quarkus.http.auth.permission.mcp.policy=authenticated
+```
+
+This requires an authenticated principal for all MCP calls. In dev mode,
+`auth.enabled-in-dev-mode=false` bypasses this — local Claude CLI sessions are unaffected.
+
+**SmallRye Health** — `/q/health`, `/q/health/ready`, `/q/health/live` are Vert.x routes
+contributed by the SmallRye Health extension. They must remain accessible for container
+orchestration probes (Kubernetes liveness/readiness). They are unaffected by
+`deny-unannotated-endpoints` (JAX-RS scoped). No path-based rule needed — Quarkus
+health endpoints are public by default and should remain so.
+
+**Policy summary:**
+
+| Category | Mechanism | Enforced at |
+|---|---|---|
+| Devtown JAX-RS | `@RolesAllowed` / `@PermitAll` | Build time (augmentation) |
+| Library JAX-RS | Patch foundation; path-based interim | Runtime |
+| MCP (Vert.x) | `quarkus.http.auth.permission` | Runtime |
+| Health (Vert.x) | Public by default | — |
+
+---
+
+## 8. Tests
 
 ### Existing @QuarkusTest classes — add @TestSecurity
 
@@ -145,7 +321,14 @@ Verify with a full test run; any remaining 401 failures indicate an unpatched te
 `@QuarkusTest` covering authorization boundaries via RestAssured + `@TestSecurity`:
 
 - Unauthenticated → 401 on admin-guarded endpoints (`/api/admin/memory/erase/contributor`,
-  `/api/incident-feedback`, `/api/actors/{actorId}/erasure`)
-- `devtown-admin` → not 401, not 403 on admin endpoints
-- Unauthenticated → not 401 on `@PermitAll` endpoints (`/api/reviews`, `/api/github/webhook`,
+  `/api/incident-feedback`, `/api/actors/{actorId}/erasure`, `/api/reviews`,
   `/api/compliance/code-review/{id}`)
+- `devtown-admin` → not 401, not 403 on admin endpoints
+- Unauthenticated → not 401 on `@PermitAll` endpoints (`/api/github/webhook`)
+- Unauthenticated → not 401 on path-permitted endpoints (`/actors/{actorId}/state`)
+
+### Foundation issue to file
+
+`casehubio/engine` — add `@PermitAll` to `ActorStateResource` and
+`ReactiveActorStateResource` in `casehub-engine-actor-state`. Once shipped, remove the
+`quarkus.http.auth.permission.actor-state` path-based rule from devtown.
