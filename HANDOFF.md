@@ -2,17 +2,18 @@
 
 ## Last Session
 
-Batch branch `issue-83-batch-fixes` closed 7 devtown issues and 1 umbrella issue (#88). Three design specs (CI status integration rev 3, merge execution rev 4, webhook receiver from prior session) went through multiple review rounds catching engine dispatch chain assumptions, JQ outputSchema semantics, and premature case completion timing. All pre-existing @QuarkusTest failures resolved — CDI activations for JpaActorTrustScoreRepository and ConfigFilePreferenceProvider, qhorus type enforcement advisory-only contract alignment.
+Branch `issue-90-wire-platform-oidc` closed. OIDC security wiring shipped: default-deny via `deny-unannotated-endpoints=true`, `@RolesAllowed(DevtownRoles.ADMIN)` on 5 REST endpoints, `@PermitAll` on webhook, tenant isolation via `CurrentPrincipal.tenancyId()` (REST + MCP), MCP path-based auth, `ActorStateResource` excluded pending engine#557. Spec went through 5 review rounds.
 
 ## Immediate Next Step
 
-Pick next work. The end-to-end PR lifecycle is now functional: webhook → case → review → CI → merge → audit trail. Top priorities: demo harness (mock workers + trust seeding + script), or GitHub REST API combined-status check (#89).
+Pick next work. Top candidates: demo harness (mock workers + trust seeding + script), or #89 GitHub REST API combined-status check.
 
 ## What's Left
 
 - **devtown#80** — activate production persistence backend · M · Med
 - **engine#547** — WritablePanelImpl deep-copy bug · S · Low
 - **engine#548** — composed GoalExpression · M · Med
+- **engine#557** — ActorStateResource @PermitAll (filed this session) · XS · Low
 - **devtown#81** — full gt seance with Doltgres · L · High
 - **parent#207** — distributed ledger subclass persistence · XL · High
 - **devtown#89** — GitHub REST API combined-status check · S · Med
@@ -21,13 +22,12 @@ Pick next work. The end-to-end PR lifecycle is now functional: webhook → case 
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #89 | GitHub REST API combined-status for multi-suite CI | S | Med | Eliminates aggregation gap from #86 |
+| #89 | GitHub REST API combined-status for multi-suite CI | S | Med | Eliminates aggregation gap |
 | #85 | PR governance dashboard — supersede/relink | M | Med | Requires casehub-ui |
 | #11 | Merge queue — CasePlanModel batch-then-bisect | XL | High | Spec not started |
 | — | Demo harness (mock workers + trust seeding + script) | S | Low | No issue filed |
 
 ## References
 
-- `specs/2026-06-21-ci-status-integration-design.md` — CI status spec (rev 3)
-- `specs/2026-06-21-merge-execution-design.md` — merge execution spec (rev 4)
-- `blog/2026-06-22-mdp01-domain-events-are-not-messages.md` — session diary
+- `specs/2026-06-22-oidc-wiring-design.md` — OIDC wiring spec (rev 5, promoted to project)
+- `blog/2026-06-22-mdp02-the-security-layers-that-dont-talk.md` — session diary
