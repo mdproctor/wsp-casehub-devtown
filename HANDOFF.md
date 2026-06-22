@@ -1,40 +1,33 @@
-*Updated: engine#523 closed — removed from backlog.*
-
-# HANDOFF — 2026-06-21
+# HANDOFF — 2026-06-22
 
 ## Last Session
 
-Designed and shipped the GitHub webhook receiver (devtown#15). Three rounds of spec review (17 review points across architecture, engine internals, and completion path). Implementation: hexagonal adapter in `github/` module with JAX-RS endpoint, HMAC-SHA256 verification, typed DTO, signal ordering contract, and CasePlanModel updates for external merge. Discovered engine shallow-copy bug (engine#547) and GoalExpression composition limitation (engine#548). Filed devtown#85 (PR governance dashboard), devtown#86 (CI status), devtown#87 (merge execution).
+Batch branch `issue-83-batch-fixes` closed 7 devtown issues and 1 umbrella issue (#88). Three design specs (CI status integration rev 3, merge execution rev 4, webhook receiver from prior session) went through multiple review rounds catching engine dispatch chain assumptions, JQ outputSchema semantics, and premature case completion timing. All pre-existing @QuarkusTest failures resolved — CDI activations for JpaActorTrustScoreRepository and ConfigFilePreferenceProvider, qhorus type enforcement advisory-only contract alignment.
 
 ## Immediate Next Step
 
-Pick next work. Top priorities: (a) fix @QuarkusTest (#83 — blocks integration testing), (b) CI status integration (#86 — next event type handler in the webhook endpoint), (c) demo harness (mock workers + trust seeding + script).
+Pick next work. The end-to-end PR lifecycle is now functional: webhook → case → review → CI → merge → audit trail. Top priorities: demo harness (mock workers + trust seeding + script), or GitHub REST API combined-status check (#89).
 
 ## What's Left
 
 - **devtown#80** — activate production persistence backend · M · Med
-- **devtown#83** — @QuarkusTest broken by Hibernate/scheduler exception · S · Med
-- **devtown#84** — DevtownMcpTools minor gaps · XS · Low
-- **devtown#82** — migrate ErasureReceiptLedgerEntry to foundation version · S · Low
-- **engine#547** — WritablePanelImpl should deep-copy initial sub-maps · S · Low
-- **engine#548** — composed GoalExpression (nested anyOf/allOf) · M · Med
-- **devtown#81** — full gt seance with Doltgres time-travel · L · High
-- **parent#207** — distributed ledger: app-specific LedgerEntry subclass persistence · XL · High
+- **engine#547** — WritablePanelImpl deep-copy bug · S · Low
+- **engine#548** — composed GoalExpression · M · Med
+- **devtown#81** — full gt seance with Doltgres · L · High
+- **parent#207** — distributed ledger subclass persistence · XL · High
+- **devtown#89** — GitHub REST API combined-status check · S · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #83 | Fix @QuarkusTest — Hibernate scheduler exception | S | Med | Blocks all integration testing |
-| #86 | CI status integration — check_suite/check_run events | M | Med | Next webhook event type |
-| #87 | Merge execution — GitHub API merge worker | M | Med | Requires GitHub App/PAT auth |
+| #89 | GitHub REST API combined-status for multi-suite CI | S | Med | Eliminates aggregation gap from #86 |
 | #85 | PR governance dashboard — supersede/relink | M | Med | Requires casehub-ui |
 | #11 | Merge queue — CasePlanModel batch-then-bisect | XL | High | Spec not started |
-| — | Demo harness (mock workers + trust seeding + demo script) | S | Low | No issue filed |
+| — | Demo harness (mock workers + trust seeding + script) | S | Low | No issue filed |
 
 ## References
 
-- `specs/2026-06-19-github-webhook-receiver-design.md` — webhook receiver design spec (rev 4, 17 review points)
-- `plans/attic/issue-15-github-webhook-receiver/` — implementation plan (archived)
-- `blog/2026-06-21-mdp01-domain-events-are-not-messages.md` — session diary entry
-- `github/src/main/java/io/casehub/devtown/github/` — new webhook receiver code
+- `specs/2026-06-21-ci-status-integration-design.md` — CI status spec (rev 3)
+- `specs/2026-06-21-merge-execution-design.md` — merge execution spec (rev 4)
+- `blog/2026-06-22-mdp01-domain-events-are-not-messages.md` — session diary
