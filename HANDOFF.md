@@ -25,7 +25,8 @@ Pick next work. Top candidates: demo harness (mock workers + trust seeding + scr
 | #89 | GitHub REST API combined-status for multi-suite CI | S | Med | Eliminates aggregation gap |
 | #85 | PR governance dashboard — supersede/relink | M | Med | Requires casehub-ui |
 | #11 | Merge queue — CasePlanModel batch-then-bisect | XL | High | Spec not started |
-| — | Demo harness (mock workers + trust seeding + script) | S | Low | No issue filed |
+| #13 | Trust-weighted reviewer routing (layer 6) | XL | High | Epic 6 — prerequisite for meaningful demo |
+| — | Demo harness (mock workers + trust seeding + script) | M | Low | Deferred until layer 6 lands |
 
 ## References
 
