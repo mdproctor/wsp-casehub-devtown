@@ -1,3 +1,5 @@
+*Updated: engine#547, engine#557 closed — removed from backlog.*
+
 # HANDOFF — 2026-06-23
 
 ## Last Session
@@ -12,9 +14,7 @@ Fix the review module compilation failure — `PlannedAction` and `Capability` f
 
 - **Review module compilation failure** — `PlannedAction`/`Capability` removed from engine API SNAPSHOT · S · Med
 - **devtown#80** — activate production persistence backend · M · Med
-- **engine#547** — WritablePanelImpl deep-copy bug · S · Low
 - **engine#548** — composed GoalExpression · M · Med
-- **engine#557** — ActorStateResource @PermitAll · XS · Low
 - **devtown#81** — full gt seance with Doltgres · L · High
 - **parent#207** — distributed ledger subclass persistence · XL · High
 - **CDI @Alternative @Priority chain cleanup** — all three PrReviewApplicationService impls need coordinated fix · M · Med
