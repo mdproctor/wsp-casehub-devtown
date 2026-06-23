@@ -3,7 +3,7 @@
 **Issue:** devtown#13  
 **Date:** 2026-06-23  
 **Branch:** issue-13-trust-weighted-routing  
-**Revision:** 2 (post-review — scope corrected to reflect shipped foundation)
+**Revision:** 3 (post-review — four corrections: config flag, method name, seed pattern, cache coherence)
 
 ---
 
@@ -88,10 +88,12 @@ TrustFeedbackClosedLoopTest
 **Phase 1 — Build trust from attestations (not seeded scores)**
 
 1. Register two agents (agent-alpha, agent-beta) — both start BOOTSTRAP (no trust history)
-2. Run N review cycles through the qhorus COMMAND→DONE path for `security-review`:
-   - Fire `WorkerDecisionEvent` to record the routing decision (`WorkerDecisionEventCapture` writes `WorkerDecisionEntry`)
-   - Simulate DONE via `LedgerWriteService` attestation path — `StoredCommitmentAttestationPolicy` returns SOUND
-   - Assert `AttestationRecordedEvent` fired → `IncrementalTrustUpdateObserver` ran → trust score materialized
+2. For each agent, seed N `WorkerDecisionEntry` records directly (same pattern as `IncidentFeedbackServiceTest.seedWorkerDecision()`), then write SOUND `LedgerAttestation` records against each entry via `LedgerEntryRepository.saveAttestation()`:
+   - `WorkerDecisionEntry.actorId` = the agent ID (not `"system"`)
+   - `LedgerAttestation.capabilityTag` = `"security-review"`
+   - `LedgerAttestation.verdict` = `SOUND`, `confidence` = 0.7
+   - `saveAttestation()` fires `AttestationRecordedEvent` → `IncrementalTrustUpdateObserver` → trust score materialized
+   - Seeding entries directly (not firing `@ObservesAsync WorkerDecisionEvent`) avoids async synchronisation hazards. The event-dispatch path is already tested by `WorkerDecisionEventCapture`'s own tests. This test proves the attestation→trust→routing chain.
 3. Repeat enough cycles to cross `minimumObservations` (10 for security-review) for both agents
 4. Assert both agents are now QUALIFIED (no longer BOOTSTRAP) with computed capability scores
 
@@ -104,14 +106,18 @@ TrustFeedbackClosedLoopTest
 
 **Phase 3 — Prove routing shift**
 
-9. Query `TrustGateService.capabilityScore()` for both agents on `security-review`
+9. Query `TrustGateService.currentScore(actorId, "security-review")` for both agents
 10. Assert agent-alpha's score < agent-beta's score (was equal or higher before incident)
 11. Call `TrustWeightedAgentStrategy.select()` with both agents as candidates for `security-review`
 12. Assert agent-beta is selected (agent-alpha's degraded score shifts the blended ranking)
 
 **Test infrastructure notes:**
-- The test needs `IncrementalTrustUpdateObserver` enabled: `casehub.ledger.trust-score.incremental.enabled=true` and `casehub.ledger.trust-score.materialization.enabled=true` in test properties
-- `WorkerDecisionEntry.actorId` must be set to the agent ID (not `"system"`) — this is how `TrustScoreJob` attributes trust
+- Trust scoring requires three config flags in test properties:
+  - `casehub.ledger.trust-score.enabled=true` (parent flag — defaults false; without it, `IncrementalTrustUpdateObserver` silently no-ops)
+  - `casehub.ledger.trust-score.incremental.enabled=true`
+  - `casehub.ledger.trust-score.materialization.enabled=true`
+- `TrustScoreSource` cache coherence: ensure `MaterializedTrustScoreSource` is the active implementation (reads directly from JPA table, not cached). If `CachedTrustScoreSource` is active, incremental writes may not be visible to the routing assertion in Phase 3. Verify the test profile activates the materialized source, or flush the cache between Phase 2 and Phase 3.
+- `WorkerDecisionEntry.actorId` must be set to the agent ID (not `"system"`) — this is how `TrustScoreJob`/`IncrementalTrustUpdateObserver` attributes trust
 - The test uses H2 with JPA-backed `LedgerEntryRepository` — same pattern as `IncidentFeedbackServiceTest`
 - Pre-seed via `QuarkusTransaction.requiringNew()` — same pattern as `CodeReviewComplianceServiceTest`
 
