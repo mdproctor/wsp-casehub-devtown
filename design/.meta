@@ -1,0 +1,9 @@
+branch: issue-13-trust-weighted-routing
+project-sha: eb0e4aa7d49c8870662fff619497af77fa007b4b
+date: 2026-06-23
+issue: 13
+issue-repo: casehubio/devtown
+covers: 13
+flyway-next-v: unknown
+design-repo: project
+design-section-hashes: 
