@@ -1,157 +1,145 @@
-# Epic 6 — Trust Feedback Loop: Closing the Prescriptive→Normative→Evaluative Loop
+# Epic 6 — Trust Feedback Loop: Proving the Closed Loop
 
 **Issue:** devtown#13  
 **Date:** 2026-06-23  
-**Branch:** issue-13-trust-weighted-routing
+**Branch:** issue-13-trust-weighted-routing  
+**Revision:** 2 (post-review — scope corrected to reflect shipped foundation)
 
 ---
 
-## Context
+## What's Already Done
 
-Trust-weighted reviewer routing is already wired (devtown#57): `TrustWeightedAgentStrategy` activated via `casehub-engine-ledger`, `DevtownTrustRoutingPolicyProvider` supplies per-capability policies, `WorkerDecisionEventCapture` records routing decisions. The routing infrastructure captures *decisions*, not *outcomes*.
+The trust feedback loop is structurally complete. Two prior epics shipped all the machinery:
 
-This epic closes the feedback loop — the system that makes trust scores meaningful:
+**Layer 6 — Trust-weighted routing (devtown#57):**
+- `TrustWeightedAgentStrategy` activated via `casehub-engine-ledger`
+- `DevtownTrustRoutingPolicyProvider` supplies per-capability policies from `DevtownCapabilityRegistry` + YAML
+- `WorkerDecisionEventCapture` records routing decisions as `WorkerDecisionEntry`
+- `TrustRoutingActivationTest` proves CDI wiring
 
-- **Positive feedback:** when a reviewer completes their assignment (qhorus DONE), write a SOUND attestation. Trust score increases.
-- **Negative feedback:** when a production incident is traced to a missed review, write a FLAGGED attestation. Trust score decreases.
-- **Trust-threshold gating:** high-trust agents earn presumption of honesty on DONE. Low-trust agents are structurally prepared for evidential verification (not yet wired — awaits qhorus EvidentialChecker extraction).
+**Incident feedback (devtown#5, commit `8da3e21`):**
+- `IncidentFeedbackService` — writes FLAGGED attestation against reviewer's `WorkerDecisionEntry`
+- `IncidentFeedbackResource` — `POST /api/incident-feedback` with `@RolesAllowed(ADMIN)`
+- `IncidentSeverity` — severity-to-confidence mapping (LOW=0.3, MEDIUM=0.5, HIGH=0.7, CRITICAL=0.9)
+- `ReviewDomain.REVIEW_CAPABILITIES` — capability validation
+- `MergeDecisionLedgerEntry` with `@NamedQuery("findApprovedByRepoAndPr")` — durable (repo, prNumber) → caseId lookup
+- `V2003__merge_decision_repo_pr_index.sql`
+- `IncidentFeedbackServiceTest` — 15 integration tests including idempotency, GDPR tokenisation, severity mapping
+- Spec: `docs/specs/2026-06-09-incident-feedback-design.md` (revision 4)
 
----
+**Positive feedback loop — already live:**
+SOUND attestations flow automatically on every review completion:
+`DONE` → `LedgerWriteService.record()` → `StoredCommitmentAttestationPolicy` returns SOUND at 0.7 confidence → `writeAttestation()` with `capabilityTag` extracted from COMMAND JSON → `QhorusLedgerEntryRepository.saveAttestation()` → fires `AttestationRecordedEvent` → `IncrementalTrustUpdateObserver.onAttestationRecorded()` → `PerActorTrustComputer.computeForActor()` → trust score updated immediately.
 
-## Normative + Evidential Verification
-
-Qhorus benchmarking revealed that `CommitmentState.FULFILLED` is not trustworthy on its own. A RESPONSE message closes a commitment as FULFILLED even when the agent used wrong vocabulary (should have sent DONE for a COMMAND obligation). Any system deriving meaning from "was the commitment fulfilled?" — including trust scores — needs an evidential check.
-
-Three layers:
-1. **Normative layer** — what qhorus already provides: typed messages, commitment lifecycle, ledger. Makes agent interactions structured and observable.
-2. **Trust-gated attestation** — reads trust scores to decide whether DONE earns SOUND immediately or should be evidentially verified. **Built in this epic.**
-3. **Evidential layer** — reads what the normative layer recorded and verifies obligations were honestly resolved. **Deferred — awaits qhorus EvidentialChecker extraction.**
-
-The hook point (`CommitmentAttestationPolicy`) is a published SPI in `casehub-qhorus-api`. The trust-gated policy overrides the default with `@Alternative @Priority(1)`.
-
----
-
-## Architecture — Two Repos, Two Phases
-
-### Phase 1: Qhorus (upstream platform primitives)
-
-Two new components in `casehub-qhorus` runtime. Zero new dependencies — qhorus already depends on `casehub-ledger-api` and `casehub-ledger` runtime.
-
-#### `TrustGatedAttestationPolicy`
-
-```
-Module:     casehub-qhorus runtime
-Package:    io.casehub.qhorus.runtime.ledger
-CDI:        @Alternative @Priority(1) @ApplicationScoped
-Displaces:  StoredCommitmentAttestationPolicy @DefaultBean
-Activates:  Only when TrustScoreSource is satisfied (casehub-ledger on classpath)
-```
-
-Implements `CommitmentAttestationPolicy`. Wraps `StoredCommitmentAttestationPolicy`:
-
-- **Non-DONE verdicts (FAILURE, DECLINE):** pass through unchanged — FLAGGED attestation as per default policy.
-- **DONE verdicts:** read agent's global trust score via `TrustScoreSource.globalScore(resolvedActorId)`.
-  - Score ≥ threshold OR score absent (bootstrap — no history): pass through SOUND unchanged. Presumption of honesty.
-  - Score < threshold: pass through SOUND for now (placeholder). When `EvidentialChecker` is extracted, this branch runs the evidential check and potentially downgrades to FLAGGED with lower confidence.
-- **Bootstrap safety:** agents with no trust history (`OptionalDouble.empty()`) are treated as trusted — consistent with Phase 0 of the trust maturity model. No data = no penalty.
-
-Threshold configurable via `QhorusConfig`: `casehub.qhorus.attestation.trust-threshold` (default 0.6).
-
-**Why `@Alternative @Priority(1)`, not `@ApplicationScoped`:** `StoredCommitmentAttestationPolicy` is `@DefaultBean`. An `@ApplicationScoped` bean would also displace it. But `@Alternative @Priority(1)` preserves the override chain — application-tier harnesses can further override with `@Alternative @Priority(100)`. This is the correct CDI pattern for platform-tier overrides that consumers may need to extend.
-
-#### `RetroactiveAttestationService`
-
-```
-Module:     casehub-qhorus runtime
-Package:    io.casehub.qhorus.runtime.ledger
-CDI:        @ApplicationScoped
-```
-
-Generic mechanism: write a FLAGGED attestation against a previous ledger entry. Any harness can use this to say "we later learned this outcome was bad."
-
-```java
-public record IncidentAttestation(
-    UUID ledgerEntryId,     // the original entry being retroactively flagged
-    String evidence,        // free-text description of what went wrong
-    String attestorId,      // who reported the incident
-    ActorType attestorType, // HUMAN or SYSTEM
-    String capabilityTag,   // capability context (e.g., "security-review")
-    String tenancyId
-) {}
-
-public UUID reportIncident(IncidentAttestation incident);
-```
-
-- Validates `ledgerEntryId` exists via `LedgerEntryRepository.findEntryById()`
-- Writes `LedgerAttestation` with `verdict=FLAGGED`, `confidence=0.9` (high — explicit report), capability tag from input
-- Returns attestation ID
-- `TrustScoreJob` picks up the FLAGGED attestation and decrements the actor's trust score
-
-**Future promotion candidate:** the raw attestation write mechanics may eventually move to `casehub-ledger` itself. The `RetroactiveAttestationService` API uses only ledger types (`LedgerAttestation`, `LedgerEntryRepository`). For now, qhorus is the right home because the service is composed with commitment semantics.
+**Foundation capabilities (verified in published JARs, not stale):**
+- `CommitmentAttestationPolicy` has 3-arg overload: `attestationFor(MessageType, String, CommitmentContext)`
+- `CommitmentContext(correlationId, channelId, channelName, commitmentId)` — already exists
+- `StoredCommitmentAttestationPolicy` handles `case RESPONSE → FLAGGED` at `config.attestation().responseConfidence()`
+- `EvidentialChecker` is at `io.casehub.qhorus.runtime.audit.EvidentialChecker` `@DefaultBean @ApplicationScoped` — already extracted from examples
 
 ---
 
-### Phase 2: Devtown (domain-specific wiring)
+## What This Epic Delivers
 
-#### `PostMergeIncidentHandler`
+The loop is wired but unproven. The done-when requires an end-to-end test that exercises every link in the chain — from review assignment through attestation accumulation through incident feedback through routing shift. This test IS the deliverable.
 
-```
-Module:     app
-Package:    io.casehub.devtown.app.incident
-CDI:        @ApplicationScoped
-```
+### Deliverables
 
-Accepts domain-specific incident reports and delegates to `RetroactiveAttestationService`:
-
-1. Incident arrives with `(repo, prNumber, description, capabilityTag?)`
-2. Correlate to the original PR review case via `PrReviewCaseTracker` (`repo:prNumber` → `caseId`)
-3. Find reviewer ledger entries — query `LedgerEntryRepository.findBySubjectId(caseId, tenancyId)`, filter for `WorkerDecisionEntry` with matching capability tag
-4. For each matching reviewer entry: call `RetroactiveAttestationService.reportIncident()`
-
-If `capabilityTag` is present, flag only that capability's reviewer. If absent, flag all reviewers who touched the PR.
-
-#### REST Entry Point
-
-```
-POST /incidents
-
-{
-  "repo": "casehubio/engine",
-  "prNumber": 547,
-  "description": "Production NPE traced to missing null check in WritablePanelImpl",
-  "capabilityTag": "security-review"
-}
-```
-
-On a dedicated `IncidentResource` — incidents are a separate concern from PR review lifecycle.
-
-#### MCP Tool
-
-```
-report_incident(repo, prNumber, description, capabilityTag?)
-```
-
-In `DevtownMcpTools`. Same `PostMergeIncidentHandler` underneath. Returns confirmation with case ID and flagged reviewer entries.
-
-#### End-to-End Closed-Loop Test
-
-`@QuarkusTest` proving the done-when:
-
-1. Seed two agents with different trust scores (agent-A at 0.85, agent-B at 0.55 for `security-review`)
-2. Start a PR review case requiring `security-review`
-3. Assert agent-A is selected (higher trust × blendFactor outscores agent-B)
-4. Submit an incident report against the PR
-5. Assert FLAGGED attestation written against agent-A's review entry
-6. Trigger trust score recompute (`TrustScoreJob` or `IncrementalTrustUpdateObserver`)
-7. Assert agent-A's trust score has decreased
-8. Start a second PR review case
-9. Assert routing has shifted — agent-A's reduced score changes the selection outcome
+| # | Component | Module | Status |
+|---|-----------|--------|--------|
+| 0 | Fix equivalence test failure | review | Needed |
+| 1 | `report_incident` MCP tool | app/mcp | Needed |
+| 2 | End-to-end closed-loop test | app/test | Needed — **primary deliverable** |
+| 3 | File issues | — | Needed |
 
 ---
 
-## Step 0 — Pre-existing Test Fix
+## Step 0 — Equivalence Test Fix
 
 `PrReviewCaseDefinitionEquivalenceTest.dslMatchesYaml` fails: `expected: null but was: "{}"`. Upstream engine-api schema serialization change. Mechanical fix — align the DSL-built definition with the current YAML parsing behaviour.
+
+---
+
+## MCP Tool — `report_incident`
+
+Dual entry point alongside the existing REST endpoint. Same `IncidentFeedbackService` underneath.
+
+```
+report_incident(repository, prNumber, incidentId, severity, description, reviewCapability, caseId?)
+```
+
+In `DevtownMcpTools`. Returns `IncidentFeedbackResult` (caseId, attestationsWritten, flaggedAgents). Maps directly to `IncidentFeedback` record and calls `IncidentFeedbackService.recordFeedback()`.
+
+---
+
+## End-to-End Closed-Loop Test
+
+**Why this test matters:** The routing layer, attestation flow, incident feedback, and trust score computation were built independently across multiple epics and foundation modules. No test has ever exercised them as a single chain. The done-when requires proof that SOUND attestations build trust, FLAGGED attestations degrade it, and the routing layer responds to the shift — automatically, without configuration.
+
+**What the test must prove (and what seeding trust scores would NOT prove):** A test that seeds `ActorTrustScore` rows directly and asserts routing behaviour only proves the routing layer reads scores — already proven in devtown#57's `TrustRoutingActivationTest`. The new thing to prove is that attestations flow through `LedgerWriteService` → `IncrementalTrustUpdateObserver` → materialized trust scores → routing changes.
+
+### Test Structure
+
+```
+@QuarkusTest
+TrustFeedbackClosedLoopTest
+```
+
+**Phase 1 — Build trust from attestations (not seeded scores)**
+
+1. Register two agents (agent-alpha, agent-beta) — both start BOOTSTRAP (no trust history)
+2. Run N review cycles through the qhorus COMMAND→DONE path for `security-review`:
+   - Fire `WorkerDecisionEvent` to record the routing decision (`WorkerDecisionEventCapture` writes `WorkerDecisionEntry`)
+   - Simulate DONE via `LedgerWriteService` attestation path — `StoredCommitmentAttestationPolicy` returns SOUND
+   - Assert `AttestationRecordedEvent` fired → `IncrementalTrustUpdateObserver` ran → trust score materialized
+3. Repeat enough cycles to cross `minimumObservations` (10 for security-review) for both agents
+4. Assert both agents are now QUALIFIED (no longer BOOTSTRAP) with computed capability scores
+
+**Phase 2 — Degrade one agent via incident feedback**
+
+5. Create an APPROVED `MergeDecisionLedgerEntry` for a test PR that agent-alpha reviewed
+6. Call `IncidentFeedbackService.recordFeedback()` with `severity=CRITICAL` (confidence 0.9) targeting agent-alpha's `security-review` capability
+7. Assert FLAGGED attestation written against agent-alpha's `WorkerDecisionEntry`
+8. Assert `IncrementalTrustUpdateObserver` fired — agent-alpha's trust score decreased (not via batch `TrustScoreJob` — the incremental path must fire automatically after `saveAttestation()`)
+
+**Phase 3 — Prove routing shift**
+
+9. Query `TrustGateService.capabilityScore()` for both agents on `security-review`
+10. Assert agent-alpha's score < agent-beta's score (was equal or higher before incident)
+11. Call `TrustWeightedAgentStrategy.select()` with both agents as candidates for `security-review`
+12. Assert agent-beta is selected (agent-alpha's degraded score shifts the blended ranking)
+
+**Test infrastructure notes:**
+- The test needs `IncrementalTrustUpdateObserver` enabled: `casehub.ledger.trust-score.incremental.enabled=true` and `casehub.ledger.trust-score.materialization.enabled=true` in test properties
+- `WorkerDecisionEntry.actorId` must be set to the agent ID (not `"system"`) — this is how `TrustScoreJob` attributes trust
+- The test uses H2 with JPA-backed `LedgerEntryRepository` — same pattern as `IncidentFeedbackServiceTest`
+- Pre-seed via `QuarkusTransaction.requiringNew()` — same pattern as `CodeReviewComplianceServiceTest`
+
+---
+
+## Known Limitations
+
+### Bootstrap attestation inflation window
+
+New agents in Phase 0 (no trust history) are routed by availability and every DONE claim becomes SOUND at 0.7 confidence — building trust from an assumed-honest baseline. If an agent's first N reviews are poor, those SOUND attestations inflate trust before any correction mechanism (retroactive incident report) can fire. The only correction path is manual incident reports.
+
+This is inherent to the trust maturity model: Phase 0 = Gastown parity. Trust routing is additive — it never degrades baseline capability. The system cannot punish agents for not having history. The window closes automatically once `minimumObservations` is reached and the agent transitions from BOOTSTRAP to QUALIFIED. After that point, poor performance is reflected in lower capability scores.
+
+Named here so it's explicit, not left as an implication of the Phase 0 design.
+
+---
+
+## Issues to File
+
+### Qhorus
+
+1. **Add `capabilityTag` to `CommitmentContext`** — `LedgerWriteService.writeAttestation()` extracts the capability tag from the COMMAND's JSON content via `extractCapabilityTag(commandEntry.content)`, but this happens **after** calling `attestationPolicy.attestationFor()`. Move the extraction before the policy call and add `capabilityTag` as a field in `CommitmentContext`. This is the prerequisite for capability-scoped trust-gated attestation verification.
+
+### Devtown
+
+2. **TrustGatedAttestationPolicy** — once qhorus issue #1 ships, implement a `CommitmentAttestationPolicy` override that uses `capabilityScore()` (not `globalScore()`) to gate DONE→SOUND attestations. High-trust agents get presumption of honesty; low-trust agents trigger `EvidentialChecker.checkObligation()`. Per-capability thresholds derived from `DevtownCapabilityRegistry` routing policies. Architecturally sound; blocked on CommitmentContext enrichment.
+
+3. **Trust visibility UI** — trust scores by capability, routing history, incident reports. Brainstorm-first framing — casehub-pages is new and UI strategy is evolving. Data APIs available: `TrustExportService` (ledger), `TrustGateService` query methods, `IncidentFeedbackResource`.
 
 ---
 
@@ -168,41 +156,17 @@ Already implemented in devtown#57. Included for reference:
 
 ---
 
-## Issues to File
-
-### Qhorus (prerequisites for full evidential verification — not blocking this epic)
-
-1. **Extract EvidentialChecker to publishable module** — move from `examples/agent-communication/` to `casehub-qhorus` runtime or new `casehub-qhorus-audit` optional module.
-
-2. **Extend CommitmentAttestationPolicy SPI with CommitmentContext** — current `attestationFor(MessageType, String)` is insufficient for evidential checking. Add `CommitmentContext(correlationId, channelId, taskType)` parameter.
-
-3. **Close RESPONSE-path attestation gap** — RESPONSE fulfilling a COMMAND commitment produces no attestation. Should produce FLAGGED (wrong terminal type for COMMAND obligation).
-
-### Devtown
-
-4. **Trust visibility UI** — trust scores by capability, routing history, incident reports. Brainstorm-first framing — casehub-pages is new and UI strategy is evolving. Data APIs (REST + `TrustExportService`) available from this epic.
-
-5. **Qhorus trust gate configuration** (existing devtown#58) — confirmed still open. Bootstrap exemption design before enabling `casehub.qhorus.commitment.min-obligor-trust`.
-
----
-
-## Build Order
-
-1. Implement and test in qhorus (Phase 1)
-2. Publish qhorus SNAPSHOT
-3. Implement and test in devtown (Phase 2)
-
----
-
 ## Out of Scope
 
-- Evidential verification (awaits qhorus EvidentialChecker extraction)
-- UI/dashboard (brainstorm-first, casehub-pages TBD)
-- Qhorus trust gate configuration (devtown#58)
-- RESPONSE-path attestation fix (qhorus issue)
+- **TrustGatedAttestationPolicy** — blocked on CommitmentContext capabilityTag enrichment (qhorus issue). Deferred.
+- **Evidential verification integration** — EvidentialChecker exists; integration deferred until TrustGatedAttestationPolicy is implemented.
+- **UI/dashboard** — brainstorm-first, casehub-pages TBD.
+- **Qhorus trust gate configuration** (devtown#58) — existing tracked issue.
 
 ---
 
 ## Done-When
 
 Two agents with different trust scores compete for a security review; the higher-trust agent wins. A subsequent production incident reduces the responsible agent's score and shifts all future routing away from it — without human configuration.
+
+The E2E test proves this by exercising every link: COMMAND→DONE→SOUND attestation→trust score materialization→FLAGGED attestation→trust score degradation→routing shift. No seeded scores — trust is built from attestations.
