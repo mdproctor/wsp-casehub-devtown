@@ -133,7 +133,8 @@
       "Skill(write-content)",
       "Skill(publish-blog)",
       "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i upstream/main)",
-      "Skill(project)"
+      "Skill(project)",
+      "Skill(code-review)"
     ]
   }
 }
