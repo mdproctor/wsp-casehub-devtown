@@ -2,7 +2,7 @@
 
 **Issue:** devtown#89
 **Date:** 2026-06-23
-**Status:** Approved (rev 2 — post-review)
+**Status:** Approved (rev 3 — post-review round 2)
 
 ## Problem
 
@@ -142,6 +142,7 @@ Mock `CiStatusClient` alongside the existing mock `PrReviewCaseHub`:
 - `signalCiStatus_githubUnavailable` — returns `Unavailable` → no `ci.status` signal
 - `signalCiStatus_staleSha_returnsStaleEvent` — unchanged, `CiStatusClient` never called
 - `signalCiStatus_noActiveCase_returnsNoActiveCase` — unchanged, `CiStatusClient` never called
+- `signalCiStatus_alwaysRecordsSuiteRegardlessOfCombinedStatus` — call with each `CombinedCiStatus` variant (`Passing`, `Pending`, `Failing`, `Unavailable`) and verify `ci.suites.<suiteId>` is written in all four cases. The audit trail write is unconditional — this test makes that invariant explicit.
 
 Remove tests that depend on the in-memory map (multi-suite aggregation, sticky-failure policy).
 
@@ -154,6 +155,7 @@ Mock `GitHubChecksApi` responses:
 - All completed, one skipped rest success → `Passing` (skipped is non-blocking)
 - All completed, one failure → `Failing` with summary
 - All completed, one cancelled → `Failing` (cancelled is blocking)
+- All completed, one timed_out → `Failing` (timed_out is blocking — makes the design decision visible and reviewable)
 - Some suites in_progress → `Pending` with counts
 - Zero suites → `Pending(0, 0)`
 - `total_count` exceeds returned list size → `Pending` (incomplete view)
