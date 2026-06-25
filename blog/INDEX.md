@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-25-mdp01-the-test-that-was-harder.md](2026-06-25-mdp01-the-test-that-was-harder.md) | 2026-06-25 | The test that was harder than the feature — E2E trust loop proof; SNAPSHOT drift whiplash; JPA L1 cache stale read masking correct trust computation |
 | [2026-06-22-mdp02-the-security-layers-that-dont-talk.md](2026-06-22-mdp02-the-security-layers-that-dont-talk.md) | 2026-06-22 | The security layers that don't talk to each other — Quarkus HTTP permissions and JAX-RS annotations are independent; path-based permit can't override augmented @DenyAll; tenant isolation bypass in REST and MCP |
 | [2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md](2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md) | 2026-06-16 | The feedback loop nobody noticed — 29 stale items across 4 docs; Gastown advantage surface narrowed to 3 operational gaps; v3 rewrite; UI requirements spec; demo critical path is 3 small issues |
 | [2026-06-07-mdp01-the-concrete-class-trap.md](2026-06-07-mdp01-the-concrete-class-trap.md) | 2026-06-07 | The concrete class trap — CaseLedgerEntryRepository extends a concrete JPA class, making CDI displacement impossible; GDPR erasure void return gap; first @RolesAllowed in any CaseHub harness |
