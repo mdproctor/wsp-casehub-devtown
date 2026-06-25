@@ -135,17 +135,29 @@ Named here so it's explicit, not left as an implication of the Phase 0 design.
 
 ---
 
-## Issues to File
+### FLAGGED attestations ignored in capability score computation (discovered during implementation)
+
+`PerActorTrustComputer` computes CAPABILITY scores from SOUND attestations only. FLAGGED attestations are persisted but do not decrease the capability-scoped trust score. This blocks the full negative feedback loop: incident reports write FLAGGED attestations, but the routing layer (which uses `capabilityScore()`) is unaffected.
+
+Tracked: casehubio/ledger#157
+
+---
+
+## Issues Filed
 
 ### Qhorus
 
-1. **Add `capabilityTag` to `CommitmentContext`** — `LedgerWriteService.writeAttestation()` extracts the capability tag from the COMMAND's JSON content via `extractCapabilityTag(commandEntry.content)`, but this happens **after** calling `attestationPolicy.attestationFor()`. Move the extraction before the policy call and add `capabilityTag` as a field in `CommitmentContext`. This is the prerequisite for capability-scoped trust-gated attestation verification.
+1. **qhorus#307 — Add `capabilityTag` to `CommitmentContext`** — `LedgerWriteService.writeAttestation()` extracts the capability tag from the COMMAND's JSON content via `extractCapabilityTag(commandEntry.content)`, but this happens **after** calling `attestationPolicy.attestationFor()`. Move the extraction before the policy call and add `capabilityTag` as a field in `CommitmentContext`.
+
+### Ledger
+
+2. **ledger#157 — FLAGGED attestations must affect capability scores** — `PerActorTrustComputer` ignores FLAGGED verdicts for capability score computation. Discovered during E2E testing. Blocks the full trust feedback loop.
 
 ### Devtown
 
-2. **TrustGatedAttestationPolicy** — once qhorus issue #1 ships, implement a `CommitmentAttestationPolicy` override that uses `capabilityScore()` (not `globalScore()`) to gate DONE→SOUND attestations. High-trust agents get presumption of honesty; low-trust agents trigger `EvidentialChecker.checkObligation()`. Per-capability thresholds derived from `DevtownCapabilityRegistry` routing policies. Architecturally sound; blocked on CommitmentContext enrichment.
+3. **devtown#97 — TrustGatedAttestationPolicy** — once qhorus#307 and ledger#157 ship, implement a `CommitmentAttestationPolicy` override that uses `capabilityScore()` (not `globalScore()`) to gate DONE→SOUND attestations. Blocked on both upstream issues.
 
-3. **Trust visibility UI** — trust scores by capability, routing history, incident reports. Brainstorm-first framing — casehub-pages is new and UI strategy is evolving. Data APIs available: `TrustExportService` (ledger), `TrustGateService` query methods, `IncidentFeedbackResource`.
+4. **devtown#98 — Trust visibility UI** — trust scores by capability, routing history, incident reports. Brainstorm-first framing — casehub-pages is new and UI strategy is evolving.
 
 ---
 
