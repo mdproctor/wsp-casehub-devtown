@@ -132,7 +132,13 @@
       "Bash(awk '/^```mermaid$/,/^```$/')",
       "Skill(write-content)",
       "Skill(publish-blog)",
-      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i upstream/main)"
+      "Bash(GIT_SEQUENCE_EDITOR=\"cp /tmp/rename-todo.txt\" GIT_EDITOR=\"/tmp/reword-editor.sh\" git rebase -i upstream/main)",
+      "Skill(project)",
+      "mcp__intellij-index__ide_file_structure",
+      "Bash(bash *)",
+      "mcp__intellij-index__ide_read_file",
+      "Bash(mkdir -p /tmp/worker-api-extract)",
+      "Read(//tmp/**)"
     ]
   }
 }
