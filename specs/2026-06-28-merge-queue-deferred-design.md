@@ -21,23 +21,29 @@ The merge queue initial implementation (devtown#11) deferred five integration po
 
 ## 2. Module Structure
 
-New `merge/` module for merge queue integration, parallel to `review/`:
+New `merge/` module for merge queue integration ports, parallel to `review/`:
 
 ```
 domain/  → vocabulary, preference keys (pure Java, no Quarkus)
 queue/   → merge queue domain logic (pure Java) — unchanged
-merge/   → NEW: merge queue integration (casehub-work, engine, platform deps)
+merge/   → NEW: merge queue port interfaces and value types (casehub-work-api deps)
 review/  → PR review integration (casehub-work, engine deps)
+github/  → GitHub API clients, webhook handling (unchanged)
 app/     → CDI wiring, JPA entities, MCP tools, REST endpoints
 ```
 
-### 2.1 What moves from `app/` to `merge/`
+### 2.1 What `merge/` contains (new module)
 
-- `MergeQueueService` — queue lifecycle orchestration
-- `MergeBatchCaseHub` — `YamlCaseHub` subclass, worker registration
+- `MergeQueueStore` — port interface for queue persistence
+- `QueueEntry`, `BatchRecord`, `QueueEntryStatus` — value types
+- merge-batch YAML CasePlanModel (`resources/devtown/merge-batch.yaml`)
 
 ### 2.2 What stays in `app/`
 
+- `MergeQueueService` — queue lifecycle orchestration (`@ApplicationScoped`)
+- `MergeBatchCaseHub` — `YamlCaseHub` subclass, worker registration (`@ApplicationScoped`)
+- `PrReviewMergeQueueAdapter` — registers `merge-queue-enqueue` worker on PR review case (`@ApplicationScoped`)
+- `MergeQueueSlaBreachObserver` — CDI observer for `SlaBreachEvent` (`@ApplicationScoped`)
 - `MergeDecisionLedgerEntry` + Flyway migration — JPA entity, persistence unit ownership
 - `MergeDecisionObserver` — enhanced for batch context, stays near the entity it writes
 - `JpaMergeQueueStore` — JPA implementation of the `MergeQueueStore` port
@@ -46,8 +52,8 @@ app/     → CDI wiring, JPA entities, MCP tools, REST endpoints
 
 ### 2.3 Dependencies
 
-- `merge/` depends on `queue/`, `domain/`, `casehub-work-api`, `casehub-engine-api`, `casehub-platform-api`
-- `app/` depends on `merge/`, `review/`, `queue/`, `domain/`
+- `merge/` depends on `queue/`, `domain/`, `casehub-work-api`, `casehub-platform-api`
+- `app/` depends on `merge/`, `review/`, `queue/`, `domain/`, `github/`
 
 ### 2.4 Maven coordinates
 
@@ -73,13 +79,13 @@ New `MergeQueuePreferenceKeys` in `domain/` (follows `SlaPreferenceKeys` pattern
 | `devtown.merge-queue.priority.decay-rate-per-hour` | `IntPreference` | `125` | Starvation prevention coefficient |
 | `devtown.merge-queue.target-branch` | `StringPreference` | `main` | Target branch |
 
-SLA keys — `MultiValuePreference` with priority lane as subKey:
+SLA keys — individual `PreferenceKey<StringPreference>` per lane (follows `SlaPreferenceKeys` pattern — no subKey needed):
 
-| Key | SubKey | Type | Default |
-|-----|--------|------|---------|
-| `devtown.merge-queue.sla` | `CRITICAL` | `StringPreference` | `PT1H` |
-| `devtown.merge-queue.sla` | `HIGH` | `StringPreference` | `PT4H` |
-| `devtown.merge-queue.sla` | `NORMAL` | `StringPreference` | `PT8H` |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `devtown.merge-queue.sla.CRITICAL` | `StringPreference` | `PT1H` | SLA duration for CRITICAL lane |
+| `devtown.merge-queue.sla.HIGH` | `StringPreference` | `PT4H` | SLA duration for HIGH lane |
+| `devtown.merge-queue.sla.NORMAL` | `StringPreference` | `PT8H` | SLA duration for NORMAL lane |
 
 ### 3.2 Scope
 
@@ -96,6 +102,8 @@ int maxBatch = prefs.getOrDefault(MergeQueuePreferenceKeys.MAX_BATCH_SIZE).value
 ```
 
 `BatchFormationContext` receives resolved values instead of hardcoded defaults. The `DEFAULT_*` constants are removed entirely.
+
+**Bug fix:** The current `DEFAULT_DECAY_RATE = 0.1` is incorrect — the parent spec §3.2 defines the decay rate as `125` points/hour. The preference default of `125` is the correct value. `BatchFormationContext.decayRatePerHour` remains `double` for precision in the decay formula; the `IntPreference` value is widened to `double` at context construction.
 
 ### 3.4 YAML config file
 
@@ -114,6 +122,9 @@ entries:
     devtown.merge-queue.sla.CRITICAL: "PT1H"
     devtown.merge-queue.sla.HIGH: "PT4H"
     devtown.merge-queue.sla.NORMAL: "PT8H"
+    devtown.sla.escalation-group: "merge-leads"
+    devtown.sla.escalation-hours: "4"
+    devtown.sla.breach-terminal-reason: "merge-queue-sla-breach"
 ```
 
 ---
@@ -132,24 +143,29 @@ Devtown's first `WorkItemTemplate`. Seeded via Flyway data migration for product
 
 - `name`: `merge-queue-wait`
 - `description`: "PR waiting in merge queue"
-- `candidateGroups`: `repo-maintainers`
-- `outcomes`: `MERGED, DEQUEUED, SLA_BREACH`
+- `candidateGroups`: *(empty — this is a system-managed SLA timer, not a human task)*
+- `outcomes`: *(empty — the WorkItem is always terminated by the system via `obsoleteFromSystem()`)*
 - `scope`: `casehubio/devtown/merge-queue`
+
+This WorkItem exists purely for SLA breach detection. No human claims or completes it. Queue status visibility is exposed through MCP tools and REST endpoints, not the human task inbox.
 
 ### 4.3 SLA duration
 
-Set per PR at WorkItem creation time based on priority lane. The lane's SLA duration is resolved from `MergeQueuePreferenceKeys` (§3.1 SLA keys):
+Set per PR at WorkItem creation time based on priority lane. The lane's SLA duration is resolved from the per-lane `MergeQueuePreferenceKeys`:
 
 ```java
-String slaDuration = prefs.getOrDefault(MergeQueuePreferenceKeys.SLA, lane.name()).value();
+PreferenceKey<StringPreference> slaKey = MergeQueuePreferenceKeys.slaKeyFor(lane);
+String slaDuration = prefs.getOrDefault(slaKey).value();
 Duration expiry = Duration.parse(slaDuration);
 ```
+
+`MergeQueuePreferenceKeys.slaKeyFor(PriorityLane)` returns the corresponding `SLA_CRITICAL`, `SLA_HIGH`, or `SLA_NORMAL` key.
 
 ### 4.4 Breach handling — two layers
 
 **Layer 1 — `DefaultSlaBreachPolicy`** (already exists): Returns standard decisions based on preferences at the WorkItem's scope (`casehubio/devtown/merge-queue`). First breach → `EscalateTo(merge-leads)` with new deadline. Already-escalated → `Fail("sla-breach")`.
 
-**Layer 2 — `MergeQueueSlaBreachObserver`** in `merge/`: Observes `SlaBreachEvent` CDI events. For CRITICAL PRs, calls `MergeQueueService.prioritize()` to force the PR into the next batch as a domain-specific side-effect. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer.
+**Layer 2 — `MergeQueueSlaBreachObserver`** in `app/`: Observes `SlaBreachEvent` CDI events. Filters on scope — only handles events where `context.scope()` matches `casehubio/devtown/merge-queue`; PR review breaches (scope `casehubio/devtown/pr-review`) are ignored. For CRITICAL PRs, calls `MergeQueueService.prioritize()` to force the PR into the next batch as a domain-specific side-effect. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer. The observer lives in `app/` because it injects `MergeQueueService`.
 
 ### 4.5 WorkItem ID tracking
 
@@ -194,7 +210,7 @@ public String batchContextJson;
 
 ### 5.3 Domain content hash
 
-`domainContentBytes()` updated to include all fields. Null fields hash to empty string:
+`domainContentBytes()` updated to include all scalar fields. Null fields hash to empty string. `batchContextJson` is **excluded** — JSON serialization is non-deterministic (key ordering, whitespace, numeric representation vary across serializers), which would violate the `ledger-subclass-extension.md` requirement that `domainContentBytes()` be deterministic. The batch context is supplementary audit metadata; the decision identity is fully captured by the scalar fields.
 
 ```java
 @Override
@@ -208,8 +224,7 @@ protected byte[] domainContentBytes() {
         escapePipe(batchId),
         batchSize != null ? String.valueOf(batchSize) : "",
         bisectionOccurred != null ? String.valueOf(bisectionOccurred) : "",
-        escapePipe(bisectionStrategy),
-        escapePipe(batchContextJson)
+        escapePipe(bisectionStrategy)
     ).getBytes(StandardCharsets.UTF_8);
 }
 ```
@@ -239,6 +254,9 @@ protected byte[] domainContentBytes() {
 2. Each entry carries shared batch metadata: `batchId`, `batchSize`, `bisectionOccurred`, `bisectionStrategy`
 3. `batchContextJson` carries the full PR list, trust scores, CI run IDs
 4. `decision` = APPROVED (if batch merged) or REJECTED (if cancelled)
+5. `subjectId` = deterministic UUID derived from batch caseId + PR number (UUID v5 with `caseId` as namespace, `prNumber` as name). This ensures `findLatestBySubjectId()` returns the specific PR's entry, not an arbitrary entry from the batch.
+6. `actorId` = `"system"` (correct for automated merges)
+7. `ComplianceSupplement.algorithmRef` = `"casehub-devtown:merge-queue-v1"` (distinct from `pr-review-v1`; the merge queue is a different decision algorithm)
 
 Batch context aggregation (walking the bisection tree) is `MergeQueueService`'s responsibility (per original spec §9, decision #9). The observer receives aggregated results, not the raw tree.
 
@@ -302,9 +320,19 @@ The existing `merge` binding in `pr-review.yaml` becomes two bindings:
 
 ### 6.3 Worker function
 
-Registered via a `PrReviewMergeQueueAdapter` in `merge/`. The adapter is an `@ApplicationScoped` bean that registers the `merge-queue-enqueue` worker function on the PR review `CaseDefinition` at `@PostConstruct`. The worker constructs a `QueuedPr` from the case context's PR metadata and trust score, then calls `MergeQueueService.enqueue()`. This keeps the PR-review-to-queue bridge in the `merge/` module where it belongs — `MergeBatchCaseHub` handles only the batch case definition.
+Registered via a `PrReviewMergeQueueAdapter` in `app/`. The adapter is an `@ApplicationScoped` bean that injects both `PrReviewCaseHub` (from `app/`) and `MergeQueueService` (from `app/`), registers the `merge-queue-enqueue` worker function on the PR review `CaseDefinition` at `@PostConstruct`. The worker constructs a `QueuedPr` from the case context's PR metadata and trust score, then calls `MergeQueueService.enqueue()` followed by `MergeQueueService.formAndDispatchBatches()`. The adapter lives in `app/` because it must inject `PrReviewCaseHub` (also in `app/`) — placing it in `merge/` would create a circular dependency (`app/ → merge/ → app/`).
 
-### 6.4 Policy injection
+### 6.4 Batch formation trigger
+
+Batch formation is triggered synchronously after every enqueue operation:
+
+1. **PR review case path**: The `enqueue-for-merge` worker calls `MergeQueueService.enqueue()`, then `MergeQueueService.formAndDispatchBatches()`. The batch formation logic in `BatchCompositionPolicy` decides whether to form batches now (sufficient PRs, compatible lanes) or leave PRs queued.
+2. **MCP `enqueue_pr` tool path**: Same call sequence — `enqueue()` then `formAndDispatchBatches()`.
+3. **GitHub webhook path** (future, devtown#101): Same call sequence when implemented.
+
+No scheduled timer is needed. Batch formation is an eager, idempotent operation — calling it with insufficient PRs queued is a no-op (returns empty list). This avoids polling overhead and ensures PRs are batched immediately when conditions are met.
+
+### 6.5 Policy injection
 
 The PR review case needs `policy.mergeQueueEnabled` in its context. `PrReviewApplicationService` resolves `MergeQueuePreferenceKeys.ENABLED` via `PreferenceProvider` and includes it in the case's initial context alongside the existing `policy.humanApprovalThreshold`. Zero behavior change when `mergeQueueEnabled` is false (default).
 
@@ -394,12 +422,13 @@ Per `harness-workitem-template-test-seeding` protocol: `@BeforeEach @Transaction
 
 ## 9. Out of Scope
 
-These items are natural follow-ups but not part of devtown#100:
+These items are natural follow-ups but not part of devtown#100. Each is tracked as a GitHub issue:
 
-- **GitHub webhook receiver** — `pull_request.labeled` admission path (spec §7.2)
-- **Batch branch management** — git operations for batch testing (spec §7.3, requires Claudony workers)
-- **MCP tool enhancements** — `list_problems` gaining `QUEUE_SLA_BREACH`, `get_merge_queue_metrics`
-- **Adaptive batch sizing feedback loop** — computing `recentFailureRate` from batch outcome history (enabled by persistence but not wired)
+- **GitHub webhook receiver** — `pull_request.labeled` admission path (spec §7.2) — devtown#101
+- **Batch branch management** — git operations for batch testing (spec §7.3, requires Claudony workers) — devtown#104
+- **MCP tool enhancements** — `list_problems` gaining `QUEUE_SLA_BREACH`, `get_merge_queue_metrics` — devtown#102
+- **Adaptive batch sizing feedback loop** — computing `recentFailureRate` from batch outcome history (enabled by persistence but not wired) — devtown#103
+- **PrReviewCaseService preference migration** — migrate remaining `@ConfigProperty` fields to `PreferenceProvider` to eliminate the hybrid config model created by §6.5's `mergeQueueEnabled` injection — devtown#105
 
 ---
 
