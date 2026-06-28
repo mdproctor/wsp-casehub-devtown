@@ -26,7 +26,7 @@ New `merge/` module for merge queue integration ports, parallel to `review/`:
 ```
 domain/  → vocabulary, preference keys (pure Java, no Quarkus)
 queue/   → merge queue domain logic (pure Java) — unchanged
-merge/   → NEW: merge queue port interfaces and value types (casehub-work-api deps)
+merge/   → NEW: merge queue port interfaces and value types (queue/ dep only)
 review/  → PR review integration (casehub-work, engine deps)
 github/  → GitHub API clients, webhook handling (unchanged)
 app/     → CDI wiring, JPA entities, MCP tools, REST endpoints
@@ -170,7 +170,7 @@ Duration expiry = Duration.parse(slaDuration);
 
 **`MergeQueueService.prioritize(int prNumber, String repository)` contract:**
 
-1. Verifies the PR is in state `QUEUED` — no-op if already `IN_BATCH` or absent
+1. Verifies the PR is in state `QUEUED` — no-op if not in state `QUEUED` (covers `IN_BATCH`, `MERGED`, `REJECTED`, `DEQUEUED`, and absent)
 2. Calls `store.markPrioritized(prNumber, repository)` to flag the entry
 3. Calls `formAndDispatchBatches()`, which respects the `PRIORITIZED` flag: any batch containing a prioritized PR uses `minBatchSize = 1`, bypassing the normal minimum-batch-size threshold
 
@@ -385,6 +385,7 @@ public record QueueEntry(
     QueuedPr pr,
     UUID workItemId,
     QueueEntryStatus status,    // QUEUED, IN_BATCH, MERGED, REJECTED, DEQUEUED
+    boolean prioritized,        // true after markPrioritized(); orthogonal to status
     String batchId              // null until batched
 ) {}
 
@@ -392,6 +393,7 @@ public record BatchRecord(
     String batchId,
     UUID caseId,
     List<Integer> prNumbers,
+    String repository,
     Instant dispatchedAt
 ) {}
 
@@ -415,6 +417,17 @@ Flyway migration in `app/src/main/resources/db/devtown/migration/`.
 ### 7.4 MergeQueueService changes
 
 `MergeQueueService` injects `MergeQueueStore` instead of maintaining in-memory fields. All queue mutations go through the store. The service becomes stateless.
+
+**Repository-aware batch formation:** `formAndDispatchBatches()` groups queued entries by `QueuedPr.repository()` before calling `compositionPolicy.formBatches()` for each group. A batch containing PRs from multiple repositories is invalid — the merge executor and batch CI runner target a single repository. The grouping happens at the service level in `app/`, not in the pure-Java `queue/` module; `BatchCompositionPolicy` receives only same-repository PRs.
+
+**queue/ type changes for repository propagation:**
+- `BatchFormationContext` gains `String repository` — the service constructs one context per repository group
+- `Batch` gains `String repository` — `buildBatch()` in `DefaultBatchCompositionPolicy` propagates `ctx.repository()` to the batch
+- `dispatchBatch()` includes `batch.repository()` in the case context map (alongside `batch.targetBranch`, `batch.id`, etc.)
+
+These are tier 1 value type changes — no framework dependencies introduced. Consistent with `QueuedPr` already gaining `repository` (R2-02).
+
+**Prioritized entry handling:** `formAndDispatchBatches()` checks `entries.stream().anyMatch(QueueEntry::prioritized)` per formed batch. If any entry in the batch is prioritized, `minBatchSize = 1` is used for that batch, bypassing the normal minimum threshold.
 
 `formAndDispatchBatches()` calls `store.queuedForUpdate()` (not `store.queued()`) to acquire the `SELECT FOR UPDATE` lock, ensuring serialized batch formation.
 
