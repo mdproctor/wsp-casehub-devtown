@@ -1,26 +1,24 @@
-# HANDOFF — 2026-06-27
+# HANDOFF — 2026-06-28
 
 ## Last Session
 
-Merge queue (Epic 4, devtown#11) — spec through implementation in one session. Spec went through 5 adversarial review rounds (schema alignment, state transitions, humanTask outcomes). Two engine gates filed and closed (engine#573 recursive sub-cases, engine#574 M-of-N YAML + per-child outputMapping). 7-task subagent-driven implementation: domain vocabulary, queue service (priority + dependency + batch composition), 3 bisection strategies, merge-batch.yaml CasePlanModel (11 bindings, 6 goals), CDI wiring, 10 integration tests, 5 MCP tools. Blog entry and v4 analysis document committed. Follow-up issue #100 filed for deferred work.
+Closed out merge queue work-end (#11 pushed, squashed, closed). Fixed all 3 pre-existing flaky tests (#99): HumanApprovalLifecycleTest had a resolution/binding field mismatch (status vs outcome), ComplianceErasureDetectionTest had tenant-scoped erasure receipt leakage between test methods, IncidentFeedbackServiceTest had PR number 42 collision with CodeReviewComplianceServiceTest via shared H2. Also closed #96 (already complete — Worker imports migrated in prior sessions). Garden entry GE-20260628-6599e6 captured GDPR tokenisation gotcha.
 
 ## Immediate Next Step
 
-Push project main to origin — 9 commits ahead of remote. Then squash before pushing to upstream: `git log upstream/main..HEAD --oneline` shows the full range.
+Pick from What's Next — #100 (merge queue deferred work) is the natural continuation, #99 now closed unblocks clean builds.
 
 ## What's Left
 
 - **devtown#100** — merge queue deferred work: SLA WorkItems, PreferenceProvider, ledger integration, pr-review.yaml queue-aware binding, queue persistence · L · Med
-- **devtown#99** — pre-existing test flakiness (3 tests) · S · Med
 - **devtown#97** — TrustGatedAttestationPolicy · M · Med · blocked on qhorus#307
-- **devtown#80** — activate production persistence backend · M · Med
+- **devtown#80** — activate production persistence backend (CiStatusClient, MergeClient CDI — blocks `mvn install`) · M · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #100 | Merge queue deferred work — SLA WorkItems, PreferenceProvider, ledger, pr-review integration | L | Med | Incremental on top of #11 |
-| #99 | Fix pre-existing test flakiness | S | Med | Blocks clean build |
+| #100 | Merge queue deferred work — SLA, preferences, ledger, pr-review integration | L | Med | Incremental on top of #11 |
 | #85 | PR governance dashboard | M | Med | Requires casehub-ui |
 | #12 | Cross-repo coordinated merge | XL | High | Depends on #11 (done) |
 | #81 | Full gt seance with Doltgres | L | High | |
@@ -28,6 +26,5 @@ Push project main to origin — 9 commits ahead of remote. Then squash before pu
 ## References
 
 - `specs/2026-06-26-merge-queue-design.md` — merge queue spec v5 (workspace)
-- `plans/2026-06-27-merge-queue.md` — implementation plan (workspace)
-- `blog/2026-06-26-mdp01-ten-things-beyond-bors.md` — session diary
+- `blog/2026-06-26-mdp01-ten-things-beyond-bors.md` — merge queue diary
 - `docs/gastown-casehub-analysis-v4.md` — updated comparison (project)
