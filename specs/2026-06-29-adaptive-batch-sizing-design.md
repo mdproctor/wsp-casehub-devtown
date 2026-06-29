@@ -24,6 +24,10 @@ Instead of deleting batch records on completion, mark them completed with an out
 
 ### Schema (Flyway `V101__batch_outcome_columns.sql`)
 
+Path: `app/src/main/resources/db/devtown/migration/V101__batch_outcome_columns.sql`
+
+V101 is collision-free across all Flyway-scanned locations (`db/qhorus/migration`, `db/ledger/migration`, `db/engine-ledger/migration`, `db/devtown/migration`). V100 is the only existing devtown domain migration; V2002–V2003 are ledger subclass joins in the V2000+ range.
+
 ```sql
 ALTER TABLE merge_queue_batch ADD COLUMN completed_at TIMESTAMP;
 ALTER TABLE merge_queue_batch ADD COLUMN succeeded BOOLEAN;
@@ -107,12 +111,41 @@ public double recentBatchFailureRate(String repository, int window) {
         .getResultList();
 
     if (recent.isEmpty()) return 0.0;
-    long failed = recent.stream().filter(b -> !b.succeeded).count();
+    long failed = recent.stream().filter(b -> Boolean.FALSE.equals(b.succeeded)).count();
     return (double) failed / recent.size();
 }
 ```
 
-`activeBatches` adds `WHERE b.completedAt IS NULL` filter.
+`activeBatches`:
+```java
+public Map<String, BatchRecord> activeBatches() {
+    List<BatchEntity> entities = em.createQuery(
+        "SELECT b FROM BatchEntity b WHERE b.completedAt IS NULL",
+        BatchEntity.class)
+        .getResultList();
+
+    Map<String, BatchRecord> result = new HashMap<>();
+    for (BatchEntity entity : entities) {
+        result.put(entity.batchId, toBatchRecord(entity));
+    }
+    return result;
+}
+```
+
+`toBatchRecord` — updated for new fields:
+```java
+private BatchRecord toBatchRecord(BatchEntity entity) {
+    return new BatchRecord(
+        entity.batchId,
+        entity.caseId,
+        deserializePrNumbers(entity.prNumbers),
+        entity.repository,
+        entity.dispatchedAt,
+        entity.completedAt,
+        entity.succeeded
+    );
+}
+```
 
 ### Service changes (`MergeQueueService`)
 
@@ -139,6 +172,12 @@ double recentFailureRate = store.recentBatchFailureRate(repository, failureRateW
 
 Inside the per-repository loop — failure rate is per-repository.
 
+### Bisection and failure rate semantics
+
+The failure rate measures root batch outcomes only. When bisection triggers, the root batch is marked `succeeded=false`. Sub-cases created by bisection have no batch records (`findBatchByCaseId` returns empty for sub-case lifecycle events) and are not counted.
+
+This is intentionally conservative. Bisection is a recovery mechanism, not a normal operating mode — each bisection run requires log₂(batchSize) additional CI cycles. The formula's purpose is to find the batch size that avoids triggering bisection, not just to avoid unrecoverable failures. The system self-corrects: smaller batches have lower failure rates, which raises `adaptiveMax` back toward `maxBatchSize`. The equilibrium batch size balances throughput against bisection avoidance.
+
 ## Tests
 
 **Unit (merge module — `BatchRecordTest`):**
@@ -154,12 +193,16 @@ Inside the per-repository loop — failure rate is per-repository.
 - `recentBatchFailureRate` respects window size
 - `recentBatchFailureRate` is per-repository
 
+**Mechanical test updates (constructor breakage — compiler-caught):**
+- `BatchRecordTest`: update 2 existing constructor calls from 5-arg to 7-arg (add `null, null` for active batches)
+- `DevtownMcpToolsTest`: update `BatchRecord` constructor calls in `getMergeQueue_withQueuedPrsAndBatches_returnsCorrectState`, `getBatchStatus_knownBatch_returnsDetail`, and metrics tests (add `null, null`)
+
 **Integration (app module — existing test updates):**
 - `MergeQueueBatchLifecycleTest`: batch completion assertions replace deletion assertions; idempotency test
 - End-to-end wiring: failed batch → smaller next batch via reduced `adaptiveMax`
 
 ## Not in scope
 
-- Retention/expunge policies for completed batch records
-- Dashboard visibility of failure rate trends
-- Alerting on sustained high failure rates
+- Retention/expunge policies for completed batch records (devtown#107)
+- Dashboard visibility of failure rate trends (devtown#108)
+- Alerting on sustained high failure rates (devtown#109)
