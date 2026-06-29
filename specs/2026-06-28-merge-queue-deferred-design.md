@@ -166,15 +166,15 @@ Duration expiry = Duration.parse(slaDuration);
 
 **Layer 1 — `DefaultSlaBreachPolicy`** (already exists): Returns standard decisions based on preferences at the WorkItem's scope (`casehubio/devtown/merge-queue`). First breach → `EscalateTo(merge-leads)` with new deadline. Already-escalated → `Fail("sla-breach")`.
 
-**Layer 2 — `MergeQueueSlaBreachObserver`** in `app/`: Observes `SlaBreachEvent` CDI events. Filters on scope — only handles events where `context.scope()` matches `casehubio/devtown/merge-queue`; PR review breaches (scope `casehubio/devtown/pr-review`) are ignored. For CRITICAL PRs: reads `event.context().task().callerRef()`, parses the `"{repository}#{prNumber}"` convention (set at enqueue time, §4.1) to extract `prNumber` and `repository`, then calls `MergeQueueService.prioritize(prNumber, repository)` to force the PR into the next batch as a domain-specific side-effect. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer. The observer lives in `app/` because it injects `MergeQueueService`.
+**Layer 2 — `MergeQueueSlaBreachObserver`** in `app/`: Observes `SlaBreachEvent` CDI events. Filters on scope — only handles events where `context.scope()` matches `casehubio/devtown/merge-queue`; PR review breaches (scope `casehubio/devtown/pr-review`) are ignored. On any merge-queue SLA breach: reads `event.context().task().callerRef()`, parses the `"{repository}#{prNumber}"` convention (set at enqueue time, §4.1) to extract `prNumber` and `repository`, then calls `MergeQueueService.prioritize(prNumber, repository)` to force the PR into the next batch as a domain-specific side-effect. All breached PRs are prioritized regardless of lane — the SLA durations per lane (CRITICAL: 1h, HIGH: 4h, NORMAL: 8h) already encode the urgency difference. A NORMAL PR that breaches its 8-hour SLA has waited long enough to warrant immediate dispatch. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer. The observer lives in `app/` because it injects `MergeQueueService`.
 
 **`MergeQueueService.prioritize(int prNumber, String repository)` contract:**
 
 1. Verifies the PR is in state `QUEUED` — no-op if not in state `QUEUED` (covers `IN_BATCH`, `MERGED`, `REJECTED`, `DEQUEUED`, and absent)
 2. Calls `store.markPrioritized(prNumber, repository)` to flag the entry
-3. Calls `formAndDispatchBatches()`, which respects the `PRIORITIZED` flag: any batch containing a prioritized PR uses `minBatchSize = 1`, bypassing the normal minimum-batch-size threshold
+3. Calls `formAndDispatchBatches()`, which checks for prioritized entries — see §7.4 dispatch threshold
 
-This ensures a CRITICAL SLA breach forces immediate dispatch — the PR does not wait for more PRs to accumulate. Other QUEUED PRs may be included in the same batch if compatible. The method is idempotent: calling it on an already-prioritized or already-batched PR has no effect.
+This ensures an SLA breach forces immediate dispatch — the PR does not wait for more PRs to accumulate. Other QUEUED PRs may be included in the same batch if compatible. The method is idempotent: calling it on an already-prioritized or already-batched PR has no effect.
 
 ### 4.5 WorkItem ID tracking
 
@@ -258,7 +258,7 @@ protected byte[] domainContentBytes() {
 
 **PR review path** (existing): Case context has `pr.repo`, `pr.id`. Batch columns stay null. Unchanged behavior.
 
-**Merge batch path** (new): Case context has `batch.*`. The observer:
+**Merge batch path** (new): Case context has `batch.*` AND `batch.isRootBatch == true`. The observer skips sub-case completions during bisection — sub-cases receive `{ batch: .splitResult.left }` from the bisection splitter, which does not include `isRootBatch`. Only root batch cases set `batch.isRootBatch = true` at dispatch (§7.4). Without this guard, bisection sub-case completions write duplicate ledger entries (each sub-case has `batch.*` context and fires `CaseLifecycleEvent`). The observer:
 1. Reads `batch.prs` — iterates to write one entry per PR
 2. Each entry carries shared batch metadata: `batchId`, `batchSize`, `bisectionOccurred`, `bisectionStrategy`
 3. `batchContextJson` carries the full PR list, trust scores, CI run IDs
@@ -331,7 +331,21 @@ The existing `merge` binding in `pr-review.yaml` becomes two bindings:
 
 ### 6.3 Worker function
 
-Registered via a `PrReviewMergeQueueAdapter` in `app/`. The adapter is an `@ApplicationScoped` bean that injects both `PrReviewCaseHub` (from `app/`) and `MergeQueueService` (from `app/`), registers the `merge-queue-enqueue` worker function on the PR review `CaseDefinition` at `@PostConstruct`. The worker constructs a `QueuedPr` from the case context's PR metadata and trust score, then calls `MergeQueueService.enqueue()` followed by `MergeQueueService.formAndDispatchBatches()`. The adapter lives in `app/` because it must inject `PrReviewCaseHub` (also in `app/`) — placing it in `merge/` would create a circular dependency (`app/ → merge/ → app/`).
+Registered via a `PrReviewMergeQueueAdapter` in `app/`. The adapter is an `@ApplicationScoped` bean that injects `PrReviewCaseHub`, `MergeQueueService`, and `TrustScoreSource` (all from `app/`). It registers the `merge-queue-enqueue` worker function on the PR review `CaseDefinition` at `@PostConstruct`. The adapter lives in `app/` because it must inject `PrReviewCaseHub` (also in `app/`) — placing it in `merge/` would create a circular dependency (`app/ → merge/ → app/`).
+
+**QueuedPr construction from case context:**
+
+| Field | Source |
+|-------|--------|
+| `number` | `pr.id` (parsed as int) |
+| `headSha` | `pr.headSha` |
+| `author` | `pr.contributor` |
+| `trustScore` | Looked up from `TrustScoreSource.getGlobalScore(contributor)`. If unavailable (new contributor, service error), defaults to `0.5` (neutral trust — avoids penalizing unknown contributors while not granting full trust). |
+| `lane` | `NORMAL` for all automated CasePlanModel enqueues. The MCP `enqueue_pr` tool accepts an explicit `priority` parameter for operator-driven lane selection. |
+| `enqueuedAt` | `Instant.now()` |
+| `dependsOn` | Empty set. PR dependency extraction (from description, labels, or GitHub API) is out of scope — tracked as part of devtown#101 (webhook/label integration). |
+
+The worker calls `MergeQueueService.enqueue()` followed by `MergeQueueService.formAndDispatchBatches()`.
 
 ### 6.4 Batch formation trigger
 
@@ -364,6 +378,7 @@ public interface MergeQueueStore {
     void markInBatch(List<Integer> prNumbers, String repository, String batchId);
     void markCompleted(int prNumber, String repository, String outcome);
     void markPrioritized(int prNumber, String repository);
+    void markQueued(List<Integer> prNumbers, String repository);
 
     void recordBatch(String batchId, UUID caseId, List<Integer> prNumbers, String repository);
     Optional<BatchRecord> findBatchByCaseId(UUID caseId);
@@ -423,13 +438,23 @@ Flyway migration in `app/src/main/resources/db/devtown/migration/`.
 **queue/ type changes for repository propagation:**
 - `BatchFormationContext` gains `String repository` — the service constructs one context per repository group
 - `Batch` gains `String repository` — `buildBatch()` in `DefaultBatchCompositionPolicy` propagates `ctx.repository()` to the batch
-- `dispatchBatch()` includes `batch.repository()` in the case context map (alongside `batch.targetBranch`, `batch.id`, etc.)
+- `dispatchBatch()` includes `batch.repository()` and `batch.isRootBatch = true` in the case context map (alongside `batch.targetBranch`, `batch.id`, etc.). The `isRootBatch` marker is set only at dispatch — bisection sub-cases receive `{ batch: .splitResult.left }` from the splitter output, which does not include this field. This enables `MergeDecisionObserver` to distinguish root batch completions from sub-case completions (§5.5)
 
 These are tier 1 value type changes — no framework dependencies introduced. Consistent with `QueuedPr` already gaining `repository` (R2-02).
 
-**Prioritized entry handling:** `formAndDispatchBatches()` checks `entries.stream().anyMatch(QueueEntry::prioritized)` per formed batch. If any entry in the batch is prioritized, `minBatchSize = 1` is used for that batch, bypassing the normal minimum threshold.
+**Dispatch threshold:** Before calling the composition policy, `formAndDispatchBatches()` applies a per-repository-group pre-check: if the number of QUEUED entries in the group is less than `minBatchSize` AND no entry in the group is prioritized, skip that group — leave entries queued for a future call. This gives `minBatchSize` dispatch-gating semantics: with `minBatchSize = 3`, PRs accumulate until 3 are queued before a batch is formed. Prioritized entries (from SLA breach, §4.4) bypass this threshold, forcing immediate dispatch even for a single PR. Note: `minBatchSize` in `BatchCompositionPolicy` is a separate concern — it is the floor for adaptive batch *sizing* (the maximum batch size never drops below it), not a dispatch gate. The dispatch threshold is a service-level concern in `formAndDispatchBatches()`.
 
 `formAndDispatchBatches()` calls `store.queuedForUpdate()` (not `store.queued()`) to acquire the `SELECT FOR UPDATE` lock, ensuring serialized batch formation.
+
+**Transaction boundary:** `formAndDispatchBatches()` has three phases with distinct transaction requirements:
+
+1. **Batch formation (single transaction):** `queuedForUpdate()` → `formBatches()` → `markInBatch()` per batch. The `SELECT FOR UPDATE` lock, batch formation, and status transition to `IN_BATCH` must be atomic — if any step fails, all entries remain `QUEUED`.
+
+2. **Case start (engine transaction):** `mergeBatchCaseHub.startCase(batchContext)` → returns `caseId`. Runs in the engine's own transaction. If this fails after markInBatch committed, the entries are `IN_BATCH` with no running case — see recovery below.
+
+3. **Batch recording:** `recordBatch(batchId, caseId, prNumbers, repository)`. Links the batch to the running case.
+
+**Failure recovery:** If case start fails (phase 2), a compensating action returns the affected entries to `QUEUED` via `store.markQueued(prNumbers, repository)` — a new store method that reverses `markInBatch`. If batch recording fails (phase 3, rare), the case runs but `handleBatchCompletion()` returns early (R4-02 guard — no batch record found). A startup reconciliation check detects entries stuck in `IN_BATCH` with no corresponding `activeBatch` record or running case and returns them to `QUEUED`.
 
 ### 7.5 Batch completion flow
 
@@ -472,9 +497,9 @@ This ensures:
 | Test | Module | Covers |
 |------|--------|--------|
 | `MergeQueueSlaWorkItemTest` | `app` | Enqueue → WorkItem created with correct SLA. Merge → WorkItem obsoleted. Dequeue → WorkItem obsoleted. |
-| `MergeQueueSlaBreachTest` | `app` | SLA breach → escalation. CRITICAL breach → `prioritize()` marks PRIORITIZED + triggers `formAndDispatchBatches()` with `minBatchSize = 1`. Already-escalated → terminal Fail. |
+| `MergeQueueSlaBreachTest` | `app` | SLA breach → escalation. Any merge-queue breach → `prioritize()` marks PRIORITIZED + triggers `formAndDispatchBatches()` bypassing dispatch threshold. Already-escalated → terminal Fail. |
 | `MergeQueuePreferenceIntegrationTest` | `app` | Preference resolution from YAML. Override per scope. All hardcoded defaults eliminated. |
-| `MergeDecisionObserverBatchTest` | `app` | Batch case completion → N ledger entries (one per PR) with batch metadata. Bisection context in `batchContextJson`. |
+| `MergeDecisionObserverBatchTest` | `app` | Batch case completion → N ledger entries (one per PR) with batch metadata. Bisection context in `batchContextJson`. Sub-case filtering: bisection sub-case completes → no ledger entries written (no `batch.isRootBatch`). Root batch completes → correct number of entries. |
 | `MergeQueuePersistenceTest` | `app` | Enqueue/dequeue survives (simulated) restart. Batch dispatch recorded. Completion callback finds batch by caseId. Concurrent `formAndDispatchBatches()` does not produce overlapping batches. |
 | `MergeBatchCompletionTest` | `app` | Batch case completion → queue entries reach terminal state (MERGED/REJECTED/DEQUEUED). WorkItems obsoleted for all PRs in batch. Cancelled batch → all PRs DEQUEUED. |
 | `MergeQueueIdempotencyTest` | `app` | Duplicate enqueue for same `(prNumber, repository)` is silently ignored. Store-level and binding-level guards both verified. |
