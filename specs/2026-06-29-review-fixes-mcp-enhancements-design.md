@@ -14,7 +14,7 @@
 
 ### Design
 
-Create `DeterministicUuid` in `devtown-domain` (pure Java, no Quarkus dependency).
+Create `DeterministicUuid` in `devtown-domain` (pure Java, no Quarkus dependency). The `v5()` algorithm is RFC 4122 standard and could live in `casehub-platform-api`; it stays in `devtown-domain` because devtown is the only current consumer. If another CaseHub module needs UUID v5, promote the algorithm to the platform and keep only the namespace constant in `devtown-domain`.
 
 ```java
 package io.casehub.devtown.domain;
@@ -63,7 +63,9 @@ Change `"merge"` to `"merge-direct"` at line 114. The test behavior is unaffecte
 
 ### Problem
 
-`MergeQueueService.dequeue()` has a TOCTOU race. It reads queue state via `store.queued()` (returns QUEUED entries only) in one call, then writes via `store.dequeue()` in a separate `@Transactional` call. With `MIN_BATCH_SIZE=1` (the default), `enqueue()` immediately batches the entry (QUEUED → IN_BATCH), so `store.queued()` returns nothing and the WorkItem is never obsoleted.
+Two issues with the current `MergeQueueService.dequeue()`:
+
+**A) Test failure: deterministic state sequencing.** With `MIN_BATCH_SIZE=1` (the default), `enqueue()` synchronously calls `formAndDispatchBatches()` → `formBatchesTransactional()`, which moves the entry from QUEUED to IN_BATCH in the same thread before any external caller can invoke `dequeue()`. This is not a race — it is deterministic state sequencing that causes the test to fail because the entry is never in QUEUED state when `dequeue()` runs.
 
 **Evidence chain:**
 1. `MIN_BATCH_SIZE` default = 1 (`MergeQueuePreferenceKeys:19`)
@@ -72,6 +74,10 @@ Change `"merge"` to `"merge-direct"` at line 114. The test behavior is unaffecte
 4. `DefaultBatchCompositionPolicy`: adaptiveMax=8 for trustScore=0.80, 1 < 8 → remaining entries flushed → one batch
 5. Entry marked IN_BATCH, transaction commits
 6. `dequeue()`: `store.queued()` skips IN_BATCH entries → target=null → obsoleteFromSystem never called
+
+**B) Structural concern: `dequeue()` uses two separate operations.** The current `dequeue()` reads via `store.queued()` in one call to find the WorkItem ID, then writes via `store.dequeue()` in a separate `@Transactional` call. This two-step lookup-then-mutate pattern is fragile — the store already has the entity in hand during `dequeue()` and can return the full entry directly.
+
+**IN_BATCH dequeue semantics:** `dequeue()` for IN_BATCH entries returns false by design. An entry that has been assigned to an active batch cannot be individually dequeued — that would break the batch's PR set. To remove a PR from an active batch, the batch must be completed or cancelled first.
 
 ### Design
 
@@ -124,6 +130,14 @@ public boolean dequeue(int prNumber, String repository) {
 
 This eliminates the separate `store.queued()` lookup entirely.
 
+**Test call sites affected:** The return type change from `boolean` to `Optional<QueueEntry>` breaks 5 existing test call sites:
+
+| Test class | Pattern | Migration |
+|---|---|---|
+| `MergeQueuePersistenceTest` | `boolean removed = store.dequeue(...)` (×2) | `assertThat(store.dequeue(...)).isPresent()` / `.isEmpty()` |
+| `JpaMergeQueueStoreTest` | `boolean dequeued = store.dequeue(...)` (×2) | `assertThat(store.dequeue(...)).isPresent()` / `.isEmpty()` |
+| `MergeQueueIdempotencyTest` | `store.dequeue(...)` (discards return) | No change needed |
+
 **B) Test isolation.**
 
 The test tests enqueue/dequeue lifecycle, not batch formation. Batch formation has its own unit tests (`DefaultBatchCompositionPolicyTest`). Mixing the two is what makes it flaky.
@@ -135,7 +149,19 @@ casehub.platform.preferences.defaults."devtown.merge-queue.min-batch-size"=100
 
 `ConfigFilePreferenceProvider` merges `casehub.platform.preferences.defaults` into resolved preferences with highest priority. `PreferenceKey.qualifiedName()` for `MIN_BATCH_SIZE` is `"devtown.merge-queue.min-batch-size"` (verified: namespace=`devtown.merge-queue`, name=`min-batch-size`). With `MIN_BATCH_SIZE=100`, `formBatchesTransactional()` skips batch formation for groups smaller than 100, so the entry stays QUEUED and `dequeue()` works correctly.
 
-No existing test depends on batch formation via `MergeQueueService.enqueue()` — verified by reading `MergeBatchCaseHubTest` (definition structure only), `DefaultBatchCompositionPolicyTest` (unit test, no CDI), `JpaMergeQueueStoreTest` (store-level only).
+No existing test depends on batch formation via `MergeQueueService.enqueue()` — verified exhaustively:
+
+| Test class | Why unaffected |
+|---|---|
+| `MergeBatchCaseHubTest` | Tests case definition structure only, never calls `enqueue()` |
+| `DefaultBatchCompositionPolicyTest` | Unit test — no CDI, no preference resolution |
+| `JpaMergeQueueStoreTest` | Store-level only — calls `store.enqueue()` not `service.enqueue()` |
+| `MergeQueuePersistenceTest` | Store-level only — calls `store.enqueue()` not `service.enqueue()` |
+| `MergeQueueIdempotencyTest` | Store-level only — calls `store.enqueue()` not `service.enqueue()` |
+| `ReviewOutcomeObserverTest` | Tests observer, not merge queue |
+| `DevtownMcpToolsTest` | Uses mocked `MergeQueueService` |
+
+The global override is intentional: test isolation from batch formation is a default that any test can override via `@TestProfile` if it specifically needs `MIN_BATCH_SIZE=1` behavior.
 
 ---
 
@@ -202,46 +228,83 @@ return WorkerResult.of(Map.of(
 
 **Design:**
 - Remove the `devtown.queue.sla-minutes` ConfigProperty from `DevtownMcpTools`
-- Inject `PreferenceProvider` into `DevtownMcpTools`
-- In `listProblems()`, resolve per-PR SLA:
+- Add `detectSlaBreaches()` to `MergeQueueService` — the service already owns the preference scope, so SLA detection belongs there, not in the MCP presentation layer
+- `DevtownMcpTools.listProblems()` calls the service method; consolidate `now2` into the existing `now`
+
+**New `MergeQueueService` method:**
 
 ```java
-Preferences prefs = preferenceProvider.resolve(
-    SettingsScope.of("casehubio", "devtown", "merge-queue"));
+public record SlaBreach(QueuedPr pr, Duration waited, Duration sla) {}
 
-for (QueuedPr pr : mergeQueueService.queuedPrs()) {
-    String slaDuration = prefs.getOrDefault(
-        MergeQueuePreferenceKeys.slaKeyFor(pr.lane())).value();
-    Duration sla = Duration.parse(slaDuration);
-    Duration waited = Duration.between(pr.enqueuedAt(), now);
-    if (waited.compareTo(sla) > 0) {
-        problems.add(new Problem(
-            "queue_sla_breach", "warning",
-            String.format("PR #%d (%s) has waited %d min — exceeds %s SLA (%d min)",
-                pr.number(), pr.lane(), waited.toMinutes(),
-                pr.lane(), sla.toMinutes()),
-            null, pr.author(), pr.enqueuedAt()));
+public List<SlaBreach> detectSlaBreaches() {
+    Preferences prefs = resolvePreferences();
+    Instant now = Instant.now();
+    List<SlaBreach> breaches = new ArrayList<>();
+    for (QueueEntry entry : store.queued()) {
+        QueuedPr pr = entry.pr();
+        String slaDuration = prefs.getOrDefault(
+            MergeQueuePreferenceKeys.slaKeyFor(pr.lane())).value();
+        Duration sla = Duration.parse(slaDuration);
+        Duration waited = Duration.between(pr.enqueuedAt(), now);
+        if (waited.compareTo(sla) > 0) {
+            breaches.add(new SlaBreach(pr, waited, sla));
+        }
     }
+    return breaches;
+}
+```
+
+**`DevtownMcpTools.listProblems()` change:**
+
+```java
+// Before (flat SLA, uses now2):
+Instant now2 = Instant.now();
+for (QueuedPr pr : mergeQueueService.queuedPrs()) {
+    long waitMinutes = Duration.between(pr.enqueuedAt(), now2).toMinutes();
+    if (waitMinutes > queueSlaMinutes) { ... }
+}
+
+// After (delegates to service, removes now2):
+for (var breach : mergeQueueService.detectSlaBreaches()) {
+    problems.add(new Problem(
+        "queue_sla_breach", "warning",
+        String.format("PR #%d (%s) has waited %d min — exceeds %s SLA (%d min)",
+            breach.pr().number(), breach.pr().lane(), breach.waited().toMinutes(),
+            breach.pr().lane(), breach.sla().toMinutes()),
+        null, breach.pr().author(), breach.pr().enqueuedAt()));
 }
 ```
 
 ### 5.2 Expand `get_merge_queue_metrics`
 
-**New store method:**
+**New store methods on `MergeQueueStore`:**
 
 ```java
-// MergeQueueStore:
 List<BatchRecord> completedBatchesSince(Instant since);
 
-// Aggregate failure rate (no repository filter):
+/**
+ * Aggregate failure rate across all repositories.
+ *
+ * <p>Overload of the existing per-repository method:
+ * {@code recentBatchFailureRate(String repository, int window)}.
+ * The existing method filters by {@code b.repository = :repo};
+ * this overload omits the repository filter for cross-repo aggregate metrics.
+ */
 double recentBatchFailureRate(int window);
 ```
 
-**New service method:**
+**New service methods on `MergeQueueService`:**
 
 ```java
-// MergeQueueService:
-List<BatchRecord> completedBatches(Duration window);
+public List<BatchRecord> completedBatches(Duration window) {
+    return store.completedBatchesSince(Instant.now().minus(window));
+}
+
+public double aggregateFailureRate() {
+    Preferences prefs = resolvePreferences();
+    int window = prefs.getOrDefault(MergeQueuePreferenceKeys.FAILURE_RATE_WINDOW).value();
+    return store.recentBatchFailureRate(window);
+}
 ```
 
 **Expanded `MergeQueueMetrics` record:**
@@ -273,11 +336,8 @@ long avgWait = queued.isEmpty() ? 0 :
 List<BatchRecord> completed = mergeQueueService.completedBatches(Duration.ofHours(24));
 int throughput24h = completed.size();
 
-// Failure rate
-Preferences prefs = preferenceProvider.resolve(
-    SettingsScope.of("casehubio", "devtown", "merge-queue"));
-int window = prefs.getOrDefault(MergeQueuePreferenceKeys.FAILURE_RATE_WINDOW).value();
-double failureRate = mergeQueueService.aggregateFailureRate(window);
+// Failure rate — delegates to service (owns preference resolution)
+double failureRate = mergeQueueService.aggregateFailureRate();
 
 // Batch size distribution
 Map<Integer, Integer> batchSizeDist = new HashMap<>();
@@ -286,8 +346,11 @@ for (BatchRecord batch : completed) {
 }
 ```
 
-**JPA implementation for `completedBatchesSince`:**
+**JPA implementations in `JpaMergeQueueStore`:**
+
 ```java
+// completedBatchesSince — no result limit; batch throughput is inherently
+// bounded by the merge queue's sequential-per-repo processing model
 public List<BatchRecord> completedBatchesSince(Instant since) {
     return em.createQuery(
         "SELECT b FROM BatchEntity b WHERE b.completedAt IS NOT NULL " +
@@ -299,11 +362,80 @@ public List<BatchRecord> completedBatchesSince(Instant since) {
         .map(this::toBatchRecord)
         .toList();
 }
+
+// Aggregate overload — same as existing recentBatchFailureRate(String, int)
+// but without the repository filter
+public double recentBatchFailureRate(int window) {
+    List<BatchEntity> recent = em.createQuery(
+        "SELECT b FROM BatchEntity b WHERE b.completedAt IS NOT NULL " +
+        "ORDER BY b.completedAt DESC",
+        BatchEntity.class)
+        .setMaxResults(window)
+        .getResultList();
+
+    if (recent.isEmpty()) return 0.0;
+    long failed = recent.stream().filter(b -> Boolean.FALSE.equals(b.succeeded)).count();
+    return (double) failed / recent.size();
+}
 ```
 
 ---
 
 ## 6. Out of Scope
 
-- GDPR erasure spec also uses `UUID.nameUUIDFromBytes()` — not live code, spec only. Will file an issue to track updating it when the erasure endpoint is implemented.
-- `get_recent_events` merge queue event types (spec §8.2 line 565) — separate concern from metrics, not in #102.
+- GDPR erasure spec also uses `UUID.nameUUIDFromBytes()` — not live code, spec only. Filed as [devtown#1](https://github.com/mdproctor/wsp-casehub-devtown/issues/1).
+- `get_recent_events` merge queue event types — separate concern from metrics, not in #102. Filed as [devtown#2](https://github.com/mdproctor/wsp-casehub-devtown/issues/2).
+
+---
+
+## 7. Test Plan
+
+### §1 DeterministicUuid
+
+| Test | Verifies |
+|---|---|
+| `v5_deterministic` | Same namespace+name → same UUID |
+| `v5_namespace_isolation` | Different namespace → different UUID for same name |
+| `v5_version_bits` | UUID version nibble = 5 |
+| `v5_variant_bits` | Variant bits = IETF (10xx) |
+| `v5_known_vector` | Match RFC 4122 Appendix B test vector for DNS namespace |
+| `MERGE_DECISION_NS_stable` | Namespace constant is itself a valid v5 UUID derived from DNS namespace |
+
+### §2 Stale binding name
+
+Existing test — change `"merge"` → `"merge-direct"` at `ReviewOutcomeObserverTest:114`. No new test needed; the test already verifies the observer filters infrastructure bindings.
+
+### §3 dequeue() return type + test isolation
+
+| Test | Verifies |
+|---|---|
+| Update `MergeQueuePersistenceTest` | `store.dequeue()` returns `Optional<QueueEntry>` when QUEUED; `.isEmpty()` when absent |
+| Update `JpaMergeQueueStoreTest` | Same as above at store level |
+| `dequeue_inBatch_returnsEmpty` | IN_BATCH entry → `Optional.empty()` (by-design behavior) |
+| `MergeQueueService_dequeue_obsoletesWorkItem` | Service-level: dequeue returns true and obsoletes the WorkItem from the returned entry |
+
+### §4 Enqueue idempotency
+
+| Test | Verifies |
+|---|---|
+| `enqueuePr_returnsAlreadyQueued` | `DevtownMcpTools.enqueuePr()` returns `ALREADY_QUEUED` on duplicate |
+| `enqueue_log_conditional` | INFO log fires only on insert; DEBUG fires on duplicate |
+| `adapter_returnsAlreadyQueued` | `PrReviewMergeQueueAdapter.enqueue()` returns `"already-queued"` status on duplicate |
+
+### §5.1 SLA breach detection
+
+| Test | Verifies |
+|---|---|
+| `detectSlaBreaches_perLane` | CRITICAL flagged at 61 min, NORMAL not flagged at 121 min |
+| `detectSlaBreaches_empty` | No queued PRs → empty list |
+| `listProblems_includesSlaBreaches` | MCP tool delegates to service and formats correctly |
+
+### §5.2 Expanded metrics
+
+| Test | Verifies |
+|---|---|
+| `completedBatchesSince_filtersCorrectly` | Only batches completed after the `since` instant are returned |
+| `recentBatchFailureRate_aggregate` | Aggregate overload computes across all repositories |
+| `recentBatchFailureRate_aggregate_respectsWindow` | Window limits the number of batches considered |
+| `aggregateFailureRate_delegatesToStore` | Service method resolves preferences and delegates |
+| `getMergeQueueMetrics_expanded` | All four new fields populated correctly |
