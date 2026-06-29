@@ -54,7 +54,11 @@ public class MergeQueueService implements MergeQueueAdmissionPort {
 }
 ```
 
-Defaults match the CasePlanModel path (`PrReviewMergeQueueAdapter`: trustScore=0.5, lane=NORMAL). `enqueue()` handles WorkItem creation, persistence, and batch formation. Returns `false` when the entry already exists (idempotent duplicate).
+Defaults match the CasePlanModel path (`PrReviewMergeQueueAdapter`: lane=NORMAL). Trust score uses 0.5 — see §Trust score rationale below. `enqueue()` handles WorkItem creation, persistence, and batch formation. Returns `false` when the entry already exists (idempotent duplicate).
+
+**SPI signature change:** This design changes `MergeQueueStore.enqueue(QueuedPr, UUID)` from `void` to `boolean` — returning `true` when a new entry is persisted, `false` when the call is a no-op (duplicate). This is an SPI change: `JpaMergeQueueStore` must update its implementation (straightforward — the existing idempotency check already distinguishes the two paths). `MergeQueueService.enqueue(QueuedPr)` propagates the result, changing from `void` to `boolean`.
+
+**Orphaned WorkItem on duplicate:** `MergeQueueService.enqueue()` currently creates a WorkItem *before* calling `store.enqueue()`. If the store call is a no-op, the WorkItem is orphaned. This is a pre-existing issue affecting all admission paths — the WorkItem expires naturally via SLA timeout, so there is no correctness concern. With the `boolean` return, the fix is to move WorkItem creation after a confirmed insertion. **Tracked: devtown#115.**
 
 **Latency note:** `enqueue()` calls `formAndDispatchBatches()` synchronously, which acquires a `SELECT FOR UPDATE` lock and may start a `CaseInstance`. For a single PR admission, this typically completes in <1 second. GitHub's 10-second webhook timeout is not at risk. If the handler does time out, GitHub retries — safe because `enqueue()` is idempotent. Async batch formation is a future optimization if latency becomes a measured concern.
 
@@ -166,7 +170,7 @@ The parent merge queue design (§3.1) states the webhook "validates approval + C
 
 - **Label as approval signal:** The `merge-ready` label IS the human approval for this path. Adding it is a deliberate act by someone with repo access — the label is the admission credential. Programmatic GitHub approval checks would duplicate this signal and conflate CaseHub's admission model with GitHub's review model.
 - **Batch tests CI:** The batch tip test validates CI against the merged batch. Pre-checking CI at admission is a point-in-time snapshot that may be stale (CI still running, flaky test about to be fixed). The batch test is definitive.
-- **Parent spec update:** §3.1's "validates approval + CI status" was the initial high-level design. This spec refines it based on implementation analysis. The parent spec will be updated. **Tracked: devtown#102.**
+- **Parent spec update:** §3.1's "validates approval + CI status" was the initial high-level design. This spec refines it based on implementation analysis. The parent spec will be updated. **Tracked: devtown#110.**
 
 ### `unlabeled` action handling — intentional asymmetry
 
@@ -176,8 +180,20 @@ Removing `merge-ready` does not dequeue. This asymmetry is a deliberate design c
 - Queue revocation has cascading effects: SLA WorkItem obsolescence, dependent PR cascade dequeue, author notification. These side effects warrant a deliberate action (MCP `dequeue_pr` tool), not an accidental label change.
 - The webhook path is for teams using GitHub's native flow. Those teams also have access to MCP tools for queue management — the MCP session is for the CI/tooling integration, not the individual developer.
 
-Future enhancement: configurable per-repo `unlabeled → dequeue` behavior via PreferenceProvider. **Tracked: devtown#103.**
+Future enhancement: configurable per-repo `unlabeled → dequeue` behavior via PreferenceProvider. **Tracked: devtown#111.**
 
 ### Configurable label name
 
-Hardcoded `merge-ready` for now. Configurable via PreferenceProvider in a future iteration. **Tracked: devtown#104.**
+Hardcoded `merge-ready` for now. Configurable via PreferenceProvider in a future iteration. **Tracked: devtown#112.**
+
+### Trust score rationale
+
+The `admit()` method uses `trustScore=0.5`. For the CasePlanModel path (`PrReviewMergeQueueAdapter`), 0.5 is bootstrap mode — once `minimumObservations` is reached, computed trust scores from `LedgerAttestation` records will replace it. For webhook-admitted PRs, **0.5 is the permanent value**: these PRs bypass CaseHub review entirely (no case, no bindings, no agent outcomes, no attestation records), so there is no mechanism for trust data to accumulate.
+
+This is acceptable because:
+
+- **The batch tip test is the quality gate.** Trust score affects batch composition (ordering, grouping), but the merged batch is always validated by the tip test. If a webhook PR breaks things, bisection catches it — the same safety net that applies to all PRs.
+- **Webhook PRs are externally reviewed.** They are reviewed via GitHub's native review flow — "unobservable" from CaseHub's perspective is not the same as "unreviewed." 0.5 means "unknown quality to CaseHub," not "zero review."
+- **0.5 is neutral, not permissive.** Batch composition treats 0.5 PRs as neither trusted nor untrusted. They don't get preferential ordering and don't get penalized. This is the correct stance for quality CaseHub cannot measure.
+
+Future enhancement: configurable default trust score per-repo via PreferenceProvider, allowing teams to weight webhook-admitted PRs based on their own assessment of external review quality. **Tracked: devtown#114.**
