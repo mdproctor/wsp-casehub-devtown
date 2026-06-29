@@ -2,29 +2,29 @@
 
 ## Last Session
 
-Implemented all 5 deferred merge queue integration points (#100): PreferenceProvider (typed keys, YAML config), SLA WorkItems (per-PR with lane-based SLA + breach observer), MergeDecisionLedgerEntry enrichment (batch metadata columns), queue persistence (JPA + SELECT FOR UPDATE), PR review case routing (mutually exclusive bindings). Design reviewed via 5-round adversarial review. Code reviewed — 4 findings fixed (nullable workItemId, double batch formation call, batch record cleanup, JSON escaping). Also fixed #80 (CDI @DefaultBean stubs for MergeClient/CiStatusClient + Jandex for github module). Garden entry GE-20260629-500611 captured H2 UUID native query gotcha.
+Implemented #103 (adaptive batch sizing) and #101 (webhook merge queue admission). Batch records now track full lifecycle (completedAt, succeeded) instead of being deleted — failure rate wires into batch formation via FAILURE_RATE_WINDOW preference. Third merge queue admission path via `pull_request.labeled` with `merge-ready` label, using MergeQueueAdmissionPort hexagonal port in `merge/`. Both design-reviewed (adversarial, 4+ rounds each). Code reviewed. Minor findings batched in #116.
 
 ## Immediate Next Step
 
-Pick from What's Next — #103 (adaptive batch sizing) is the natural continuation since persistence now enables history queries.
+Pick from What's Next — #12 (cross-repo coordinated merge) is the natural continuation now that all three admission paths are operational.
 
 ## What's Left
 
 - **devtown#97** — TrustGatedAttestationPolicy · M · Med · blocked on qhorus#307
-- **devtown#106** — minor review findings: UUID v3 vs v5, stale binding name reference, flaky SLA test · S · Low
+- **devtown#106** — minor review findings: UUID v3 vs v5, stale binding name, flaky SLA test · S · Low
+- **devtown#116** — surface enqueue idempotency result in MCP tool and log messages · S · Low
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #103 | Adaptive batch sizing — compute recentFailureRate from history | S | Low | Persistence enables this |
-| #101 | GitHub webhook receiver for merge queue admission | M | Med | Third enqueue path |
+| #12 | Cross-repo coordinated merge | XL | High | All three admission paths now operational |
 | #102 | MCP tool enhancements — SLA breach problems + metrics | M | Med | |
-| #12 | Cross-repo coordinated merge | XL | High | Merge queue is the foundation |
 | #85 | PR governance dashboard | M | Med | Requires casehub-ui |
 | #81 | Full gt seance with Doltgres | L | High | |
 
 ## References
 
-- `specs/2026-06-28-merge-queue-deferred-design.md` — reviewed spec (workspace + project)
-- `adr/casehub-devtown/merge-queue-deferred-20260628-231351/` — adversarial review workspace
+- `specs/2026-06-29-adaptive-batch-sizing-design.md` — reviewed spec (#103)
+- `specs/2026-06-29-webhook-merge-queue-admission-design.md` — reviewed spec (#101)
+- `plans/attic/issue-103-adaptive-batch-webhook/` — implementation plan
