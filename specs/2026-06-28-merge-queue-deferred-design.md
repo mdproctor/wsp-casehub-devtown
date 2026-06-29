@@ -134,7 +134,7 @@ entries:
 
 ### 4.1 Lifecycle
 
-1. `MergeQueueService.enqueue()` → create WorkItem via `WorkItemService.create()`
+1. `MergeQueueService.enqueue()` → create WorkItem via `WorkItemService.create()` with `callerRef` set to `"{repository}#{prNumber}"` (e.g., `"casehubio/devtown#456"`). This encodes the domain identity needed by the SLA breach observer (§4.4) to resolve the PR without a store lookup. The `CallerRef` sealed interface is not used — merge-queue WorkItems are standalone SLA timers, not plan-item-bound (no `caseId` or `planItemId` to encode).
 2. PR exits queue (merged / rejected / dequeued) → `WorkItemService.obsoleteFromSystem()`
 3. SLA breach → `SlaBreachEvent` CDI event fired by casehub-work
 
@@ -166,7 +166,7 @@ Duration expiry = Duration.parse(slaDuration);
 
 **Layer 1 — `DefaultSlaBreachPolicy`** (already exists): Returns standard decisions based on preferences at the WorkItem's scope (`casehubio/devtown/merge-queue`). First breach → `EscalateTo(merge-leads)` with new deadline. Already-escalated → `Fail("sla-breach")`.
 
-**Layer 2 — `MergeQueueSlaBreachObserver`** in `app/`: Observes `SlaBreachEvent` CDI events. Filters on scope — only handles events where `context.scope()` matches `casehubio/devtown/merge-queue`; PR review breaches (scope `casehubio/devtown/pr-review`) are ignored. For CRITICAL PRs, calls `MergeQueueService.prioritize(prNumber, repository)` to force the PR into the next batch as a domain-specific side-effect. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer. The observer lives in `app/` because it injects `MergeQueueService`.
+**Layer 2 — `MergeQueueSlaBreachObserver`** in `app/`: Observes `SlaBreachEvent` CDI events. Filters on scope — only handles events where `context.scope()` matches `casehubio/devtown/merge-queue`; PR review breaches (scope `casehubio/devtown/pr-review`) are ignored. For CRITICAL PRs: reads `event.context().task().callerRef()`, parses the `"{repository}#{prNumber}"` convention (set at enqueue time, §4.1) to extract `prNumber` and `repository`, then calls `MergeQueueService.prioritize(prNumber, repository)` to force the PR into the next batch as a domain-specific side-effect. The breach policy stays within its foundation contract (return a decision); the domain action is an event observer. The observer lives in `app/` because it injects `MergeQueueService`.
 
 **`MergeQueueService.prioritize(int prNumber, String repository)` contract:**
 
@@ -437,15 +437,18 @@ When a merge-batch case reaches a terminal state, the queue must be cleaned up a
 
 **`MergeBatchCompletionObserver`** (new, in `app/`):
 1. Observes `CaseLifecycleEvent` via `@ObservesAsync` (same pattern as `MergeDecisionObserver`)
-2. Looks up `CaseInstance` and reads case context
+2. Looks up `CaseInstance` via `CrossTenantCaseInstanceRepository` and reads case context
 3. Filters: only acts on batch cases (context has `batch.*` key, not `pr.*`)
-4. Maps case status: `COMPLETED` → batch succeeded, `CANCELLED` → batch failed/aborted
-5. Calls `MergeQueueService.handleBatchCompletion(caseId)`
+4. Maps case status: `COMPLETED` → `batchSucceeded = true`, `CANCELLED` → `batchSucceeded = false`
+5. Extracts `rejectedPrs` from case context — the set of PR numbers rejected during bisection (may be empty if the batch merged cleanly or was cancelled before bisection)
+6. Calls `MergeQueueService.handleBatchCompletion(caseId, batchSucceeded, rejectedPrNumbers)`
 
-**`MergeQueueService.handleBatchCompletion(UUID caseId)`**:
-1. `store.findBatchByCaseId(caseId)` → `BatchRecord`
+The observer is the adapter between engine events and domain operations — it owns the `CaseInstance` lookup and context extraction, keeping the service free of engine dependencies. This matches the existing pattern in `MergeDecisionObserver`.
+
+**`MergeQueueService.handleBatchCompletion(UUID caseId, boolean batchSucceeded, Set<Integer> rejectedPrNumbers)`**:
+1. `store.findBatchByCaseId(caseId)` → `Optional<BatchRecord>`. If empty, return — sub-case lifecycle events are expected during bisection (the `merge-batch` YAML uses recursive sub-cases for `bisect-left`/`bisect-right`) and have no batch record. Only root batch cases are registered via `recordBatch()`, so only root completions trigger queue cleanup.
 2. `store.findEntriesByBatchId(batchRecord.batchId())` → list of `QueueEntry`
-3. For each entry: `store.markCompleted(entry.pr().number(), entry.pr().repository(), outcome)` where outcome is derived from the batch case context (PRs in `rejectedPrs` → `REJECTED`, all others → `MERGED` for successful batches, `DEQUEUED` for cancelled batches)
+3. For each entry: determine outcome — if PR number in `rejectedPrNumbers` → `REJECTED`; else if `batchSucceeded` → `MERGED`; else → `DEQUEUED`. Call `store.markCompleted(entry.pr().number(), entry.pr().repository(), outcome)`.
 4. For each entry: `workItemService.obsoleteFromSystem(entry.workItemId(), "system", "batch-" + outcome.toLowerCase())`
 
 This ensures:
@@ -475,6 +478,7 @@ This ensures:
 | `MergeQueuePersistenceTest` | `app` | Enqueue/dequeue survives (simulated) restart. Batch dispatch recorded. Completion callback finds batch by caseId. Concurrent `formAndDispatchBatches()` does not produce overlapping batches. |
 | `MergeBatchCompletionTest` | `app` | Batch case completion → queue entries reach terminal state (MERGED/REJECTED/DEQUEUED). WorkItems obsoleted for all PRs in batch. Cancelled batch → all PRs DEQUEUED. |
 | `MergeQueueIdempotencyTest` | `app` | Duplicate enqueue for same `(prNumber, repository)` is silently ignored. Store-level and binding-level guards both verified. |
+| `MergeQueueMultiRepoBatchTest` | `app` | Enqueue PRs from repo A and repo B → `formAndDispatchBatches()` → two separate batches, one per repo. No cross-repo contamination. Verifies §7.4 repository-aware grouping. |
 | `PrReviewMergeQueueRoutingTest` | `app` | `mergeQueueEnabled=true` → `enqueue-for-merge` fires. `mergeQueueEnabled=false` → `merge-direct` fires. |
 
 ### 8.3 WorkItemTemplate test seeding
