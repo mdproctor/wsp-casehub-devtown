@@ -39,7 +39,16 @@ Existing active batch rows keep `completed_at = NULL, succeeded = NULL`.
 
 ### Entity rename: `ActiveBatchEntity` → `BatchEntity`
 
-Same `@Table(name = "merge_queue_batch")`. Two new nullable fields:
+Same `@Table(name = "merge_queue_batch")`. Updated `@Table.indexes` to include the new composite index (mirrors V101 migration, consistent with V100 pattern):
+
+```java
+@Table(name = "merge_queue_batch", indexes = {
+    @Index(name = "idx_merge_queue_batch_case_id", columnList = "case_id"),
+    @Index(name = "idx_merge_queue_batch_repo_completed", columnList = "repository, completed_at")
+})
+```
+
+Two new nullable fields:
 
 ```java
 @Column(name = "completed_at")
