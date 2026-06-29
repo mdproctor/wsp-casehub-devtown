@@ -206,6 +206,11 @@ This is intentionally conservative. Bisection is a recovery mechanism, not a nor
 - `BatchRecordTest`: update 2 existing constructor calls from 5-arg to 7-arg (add `null, null` for active batches)
 - `DevtownMcpToolsTest`: update `BatchRecord` constructor calls in `getMergeQueue_withQueuedPrsAndBatches_returnsCorrectState`, `getBatchStatus_knownBatch_returnsDetail`, and metrics tests (add `null, null`)
 
+**Mechanical test updates (JPQL entity name — runtime-caught):**
+- `MergeQueuePersistenceTest` (line 50): `@BeforeEach` cleanup `"DELETE FROM ActiveBatchEntity"` → `"DELETE FROM BatchEntity"`
+- `MergeQueueMultiRepoBatchTest` (line 50): `@BeforeEach` cleanup `"DELETE FROM ActiveBatchEntity"` → `"DELETE FROM BatchEntity"`
+- `MergeQueueIdempotencyTest` (line 41): `@BeforeEach` cleanup `"DELETE FROM ActiveBatchEntity"` → `"DELETE FROM BatchEntity"`
+
 **Integration (app module — existing test updates):**
 - `MergeQueueBatchLifecycleTest`: batch completion assertions replace deletion assertions; idempotency test
 - End-to-end wiring: failed batch → smaller next batch via reduced `adaptiveMax`
