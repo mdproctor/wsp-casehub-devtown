@@ -43,6 +43,9 @@ Methods:
 - `problems(thresholdMinutes)` → stalled cases, expired commitments, worker failures, queue SLA breaches
 - `reviewDetail(caseId)` → timeline from `CaseHubRuntime.eventLog()`, capability progress from case context
 - `triageItems()` → pending human decisions filtered by `category` (see §Triage Filtering below)
+- `mergeQueue()` → queued PRs and active batches from `MergeQueueService`
+- `mergeQueueMetrics()` → queue depth, throughput, failure rate, failure rate timeseries (bucketed by hour from `MergeQueueStore.completedBatchesSince()`), adaptive sizing (`adaptiveMax` vs `maxBatchSize` per repository)
+- `batchStatus(batchId)` → batch detail from `MergeQueueService`
 
 Fleet enumeration uses `TrustExportService.exportAll(0.0)` — already proven in the MCP tools' `getSystemHealth()`. Maturity phase is computed in `GovernanceQueryService`, not the view: compare `TrustGateService.decisionCount(actorId, capability)` against `RoutingPolicy.minimumObservations()` to derive Bootstrap/Emerging/Active/Adaptive.
 
@@ -60,9 +63,9 @@ Thin JAX-RS layer delegating to `GovernanceQueryService`. The MCP tool methods i
 | `GET /api/governance/reviews/{caseId}` | `GovernanceQueryService` | `inspect_review` |
 | `GET /api/governance/reviewers` | `GovernanceQueryService` | (fleet-wide) |
 | `GET /api/governance/reviewers/{actorId}` | `GovernanceQueryService` | `get_reviewer_health` |
-| `GET /api/governance/merge-queue` | `MergeQueueService` | `get_merge_queue` |
-| `GET /api/governance/merge-queue/metrics` | `MergeQueueService` | `get_merge_queue_metrics` |
-| `GET /api/governance/merge-queue/batch/{batchId}` | `MergeQueueService` | `get_batch_status` |
+| `GET /api/governance/merge-queue` | `GovernanceQueryService` | `get_merge_queue` |
+| `GET /api/governance/merge-queue/metrics` | `GovernanceQueryService` | `get_merge_queue_metrics` |
+| `GET /api/governance/merge-queue/batch/{batchId}` | `GovernanceQueryService` | `get_batch_status` |
 | `GET /api/governance/triage` | `GovernanceQueryService` | (pending human decisions) |
 
 **Security:** All REST endpoints `@RolesAllowed(ADMIN)` initially. Contributor-scoped endpoints (filtered by PR author) are a future concern.
@@ -79,11 +82,17 @@ Thin JAX-RS layer delegating to `GovernanceQueryService`. The MCP tool methods i
 
 | CDI Event | WebSocket Topic | Source |
 |-----------|----------------|--------|
-| `CaseLifecycleEvent` | `case.state` | `casehub-engine` — case state transitions |
-| `WorkItemLifecycleEvent` | `commitment.lifecycle` | `casehub-work` — work item state changes |
-| `TrustScoreUpdatedEvent` | `trust.update` | `casehub-ledger` — trust score materialisation |
-| `SlaBreachEvent` | `sla.breach` | `casehub-work` — SLA expiry |
-| `MergeQueueEvent` | `queue.state` | `MergeQueueService` — enqueue/dequeue/batch events |
+| `CaseLifecycleEvent` | `case.state` | `casehub-engine` (`io.casehub.engine.common.spi.event`) — case state transitions |
+| `WorkItemLifecycleEvent` | `workitem.lifecycle` | `casehub-work` (`io.casehub.work.runtime.event`) — work item state changes (PENDING → CLAIMED → COMPLETED) |
+| `CommitmentDeclinedEvent` | `commitment.lifecycle` | `casehub-qhorus` (`io.casehub.qhorus.api.message`) — agent DECLINED a commitment |
+| `CommitmentExpiredEvent` | `commitment.lifecycle` | `casehub-qhorus` (`io.casehub.qhorus.api.message`) — commitment expired without fulfilment |
+| `TrustScoreActorUpdatedEvent` | `trust.update` | `casehub-ledger` (`io.casehub.ledger.runtime.service.routing`) — trust score materialisation |
+| `SlaBreachEvent` | `sla.breach` | `casehub-work` (`io.casehub.work.runtime.event`) — SLA expiry |
+| `MergeQueueStateEvent` (new) | `queue.state` | `MergeQueueService` — enqueue/dequeue/batch events (devtown#126) |
+
+**Note on commitment events:** Qhorus publishes CDI events only for terminal/failure commitment transitions (`CommitmentDeclinedEvent`, `CommitmentExpiredEvent`). Happy-path transitions (ACKNOWLEDGED, FULFILLED) are reflected in `CaseLifecycleEvent` via case context updates. The bridge observes both topics — commitment failures are surfaced immediately; happy-path commitment progress is visible through case state changes.
+
+**Note on merge queue events:** `MergeQueueService` currently uses imperative calls without CDI event publishing. `MergeQueueStateEvent` is a new CDI event to be fired on enqueue, dequeue, batch formation, and batch completion. Filed as devtown#126 — required for live merge queue updates in the Operations and Queue views.
 
 **Message format:** JSON envelope compatible with casehub-pages `WebSocketSource` event dispatch:
 
@@ -113,7 +122,7 @@ The durable source of truth is `casehub-engine` (case instances, event log) and 
 
 Six top-level views, navigated via topbar. Each view picks the layout that suits it — workbench or web page.
 
-**Navigation model:** `loadSite()` composes all views under a shared `topbar()` element with route entries for each view (`/ops`, `/reviews`, `/queue`, `/reviewers`, `/triage`, `/system`). URL hash routing determines which view's component tree is mounted in the content area. The `dockBar()` (Operations) and `page()` (other views) are different component trees rendered under the same `topbar()` container — switching between them is a component swap, not a page load. `loadSite()` manages the lifecycle: unmount the current view tree, mount the new one. No multi-page loads, no iframe isolation.
+**Navigation model:** `loadSite()` composes all views under a shared `topbar()` element with route entries for each view (`/ops`, `/reviews`, `/queue`, `/reviewers`, `/triage`, `/system`). Clean URL routing via History API — `quarkus.quinoa.enable-spa-routing=true` ensures the server returns `index.html` for all unmatched paths, and the client-side router resolves the view. The `dockBar()` (Operations) and `page()` (other views) are different component trees rendered under the same `topbar()` container — switching between them is a component swap, not a page load. `loadSite()` manages the lifecycle: unmount the current view tree, mount the new one. No multi-page loads, no iframe isolation.
 
 ### 1. Operations (`/ops`)
 
@@ -261,6 +270,7 @@ Follows the casehub-pages quinoa-convention exactly:
    ```properties
    quarkus.quinoa.build-dir=dist
    quarkus.quinoa.package-manager-install=true
+   quarkus.quinoa.enable-spa-routing=true
    ```
 5. `package.json` dependencies:
    - `@casehubio/pages-runtime` (transitively provides pages-viz, pages-component, pages-data)
