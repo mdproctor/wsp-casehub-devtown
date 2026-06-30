@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-06-30-mdp01-roots-under-three-cleanup-issues.md](2026-06-30-mdp01-roots-under-three-cleanup-issues.md) | 2026-06-30 | The roots under three cleanup issues — UUID v3→v5 migration; deterministic dequeue failure traced through batch formation defaults; lane-specific SLA breach detection replaces flat config; expanded merge queue metrics |
 | [2026-06-26-mdp01-ten-things-beyond-bors.md](2026-06-26-mdp01-ten-things-beyond-bors.md) | 2026-06-26 | Ten things beyond Bors — merge queue spec (Epic 4, devtown#11); two-tier architecture; trust-weighted bisection; schema alignment against CaseDefinition.yaml; 15 terminal paths verified; engine#573 + engine#574 filed |
 | [2026-06-22-mdp02-the-security-layers-that-dont-talk.md](2026-06-22-mdp02-the-security-layers-that-dont-talk.md) | 2026-06-22 | The security layers that don't talk to each other — Quarkus HTTP permissions and JAX-RS annotations are independent; path-based permit can't override augmented @DenyAll; tenant isolation bypass in REST and MCP |
 | [2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md](2026-06-16-mdp01-the-feedback-loop-nobody-noticed.md) | 2026-06-16 | The feedback loop nobody noticed — 29 stale items across 4 docs; Gastown advantage surface narrowed to 3 operational gaps; v3 rewrite; UI requirements spec; demo critical path is 3 small issues |
