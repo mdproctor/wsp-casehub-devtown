@@ -343,6 +343,7 @@ The workbench turns the demo from "watch curl output" into "watch the system ope
 | casehub-pages#64 (workbench primitives) | ✅ Closed | `split()`, `dockBar()`, `hostPanel()`, event bus |
 | casehub-pages#81 (Wire eventTarget from loadSite to WebSocketSource) | ⚠️ Open (XS/Low) | WebSocket event dispatch to DOM — required for live event stream panels |
 | devtown#92 (Quinoa adoption) | ⚠️ Open | Foundational wiring for any UI |
+| devtown#126 (CDI events from MergeQueueService) | ⚠️ Open (S/Low) | Required for live merge queue updates via WebSocket bridge |
 
 ## Scope Boundaries
 
