@@ -31,42 +31,89 @@ A governance workbench for devtown — the operational UI for PR review coordina
 
 ## Data Architecture
 
+### Service Layer — GovernanceQueryService
+
+The aggregation logic currently inline in `DevtownMcpTools` (queue status assembly, system health aggregation, reviewer health, problem detection) is extracted into `GovernanceQueryService` in `devtown-app`. This is the first implementation step — both MCP tools and REST endpoints consume the same service.
+
+Methods:
+- `queueStatus()` → builds `QueueStatus` from `PrReviewCaseTracker.activeCases()` with status counts
+- `systemHealth()` → aggregates fleet size via `TrustExportService.exportAll()`, average trust per capability via `TrustGateService.allCapabilityScores()`, commitment count, work item count
+- `reviewerHealth(actorId)` → open commitments, trust by capability/dimension, decision count, recent outcomes
+- `reviewerFleet()` → all actors via `TrustExportService.exportAll()`, per-actor capability scores and maturity phase (derived from `minimumObservations` and decision count per `RoutingPolicy`)
+- `problems(thresholdMinutes)` → stalled cases, expired commitments, worker failures, queue SLA breaches
+- `reviewDetail(caseId)` → timeline from `CaseHubRuntime.eventLog()`, capability progress from case context
+- `triageItems()` → pending human decisions filtered by `category` (see §Triage Filtering below)
+
+Fleet enumeration uses `TrustExportService.exportAll(0.0)` — already proven in the MCP tools' `getSystemHealth()`. Maturity phase is computed in `GovernanceQueryService`, not the view: compare `TrustGateService.decisionCount(actorId, capability)` against `RoutingPolicy.minimumObservations()` to derive Bootstrap/Emerging/Active/Adaptive.
+
 ### REST Endpoints — GovernanceResource
 
-Thin JAX-RS layer calling the same backing services as MCP tools. No bridge — shared service layer, two access protocols.
+Thin JAX-RS layer delegating to `GovernanceQueryService`. The MCP tool methods in `DevtownMcpTools` are refactored to delegate to the same service.
 
 | Endpoint | Backing Service | MCP Equivalent |
 |----------|----------------|----------------|
-| `GET /api/governance/queue-status` | `PrReviewCaseTracker` | `get_queue_status` |
-| `GET /api/governance/recent-events` | `PrReviewCaseTracker` | `get_recent_events` |
-| `GET /api/governance/system-health` | Multiple (aggregation) | `get_system_health` |
-| `GET /api/governance/problems` | `PrReviewCaseTracker` | `list_problems` |
-| `GET /api/governance/reviews/{caseId}` | `PrReviewCaseTracker` | `inspect_review` |
-| `GET /api/governance/reviewers` | `TrustGateService` + aggregation | New (fleet-wide) |
-| `GET /api/governance/reviewers/{actorId}` | `TrustGateService` | `get_reviewer_health` |
+| `GET /api/governance/queue-status` | `GovernanceQueryService` | `get_queue_status` |
+| `GET /api/governance/recent-events` | `GovernanceQueryService` | `get_recent_events` |
+| `GET /api/governance/system-health` | `GovernanceQueryService` | `get_system_health` |
+| `GET /api/governance/problems` | `GovernanceQueryService` | `list_problems` |
+| `GET /api/governance/reviews` | `GovernanceQueryService` | (list) |
+| `GET /api/governance/reviews/{caseId}` | `GovernanceQueryService` | `inspect_review` |
+| `GET /api/governance/reviewers` | `GovernanceQueryService` | (fleet-wide) |
+| `GET /api/governance/reviewers/{actorId}` | `GovernanceQueryService` | `get_reviewer_health` |
 | `GET /api/governance/merge-queue` | `MergeQueueService` | `get_merge_queue` |
 | `GET /api/governance/merge-queue/metrics` | `MergeQueueService` | `get_merge_queue_metrics` |
 | `GET /api/governance/merge-queue/batch/{batchId}` | `MergeQueueService` | `get_batch_status` |
-| `GET /api/governance/triage` | `WorkItemService` | New (pending human decisions) |
+| `GET /api/governance/triage` | `GovernanceQueryService` | (pending human decisions) |
 
-All endpoints `@RolesAllowed(ADMIN)` initially. Contributor-scoped endpoints (filtered by PR author) are a future concern.
+**Security:** All REST endpoints `@RolesAllowed(ADMIN)` initially. Contributor-scoped endpoints (filtered by PR author) are a future concern.
+
+**Pagination:** List endpoints (`/reviews`, `/reviewers`, `/triage`, `/merge-queue`, `/problems`) use cursor-based pagination: `?cursor={opaqueToken}&limit={n}` (default limit 50, max 200). Response includes `nextCursor` (null when exhausted). Consistent with casehub-work's `WorkItemBulkResource` pagination convention.
 
 ### WebSocket Endpoint
 
-`ws://host/api/governance/events` — live stream of:
-- Case state changes (RUNNING → WAITING → COMPLETED)
-- Commitment lifecycle events (COMMAND → ACKNOWLEDGED → DONE)
-- Trust score updates (agent, capability, old score, new score)
-- SLA breach notifications
-- Merge queue state changes
+`ws://host/api/governance/events` — live stream of governance events.
 
-The WebSocket connection feeds a casehub-pages WebSocket dataset. Multiple panels subscribe to the same connection via the pages data pipeline — no duplicate connections.
+**Security:** WebSocket auth uses Quarkus HTTP path-based permissions — `quarkus.http.auth.permission.governance-ws.paths=/api/governance/events` with `policy=authenticated`. Auth happens at the HTTP upgrade handshake; `@RolesAllowed` (JAX-RS) does not apply to `@ServerEndpoint` classes.
+
+**Bridge component:** `GovernanceEventBridge` (`@ApplicationScoped @ServerEndpoint("/api/governance/events")`) observes CDI events and forwards them as JSON to connected WebSocket sessions:
+
+| CDI Event | WebSocket Topic | Source |
+|-----------|----------------|--------|
+| `CaseLifecycleEvent` | `case.state` | `casehub-engine` — case state transitions |
+| `WorkItemLifecycleEvent` | `commitment.lifecycle` | `casehub-work` — work item state changes |
+| `TrustScoreUpdatedEvent` | `trust.update` | `casehub-ledger` — trust score materialisation |
+| `SlaBreachEvent` | `sla.breach` | `casehub-work` — SLA expiry |
+| `MergeQueueEvent` | `queue.state` | `MergeQueueService` — enqueue/dequeue/batch events |
+
+**Message format:** JSON envelope compatible with casehub-pages `WebSocketSource` event dispatch:
+
+```json
+{ "op": "event", "topic": "case.state", "payload": { "caseId": "...", "status": "COMPLETED", "timestamp": "..." } }
+```
+
+The `op: "event"` field routes through the pages `processMessage` handler, which dispatches a `pages-event` DOM custom event on the container's `eventTarget`. Panels subscribe via the pages data pipeline — no duplicate connections.
+
+**Session management:** `GovernanceEventBridge` maintains a `Set<Session>` (Quarkus WebSocket sessions). `@OnOpen` adds, `@OnClose`/`@OnError` removes. CDI observer methods (`@ObservesAsync`) iterate the session set and send JSON; failed sends trigger session removal. No backpressure beyond Quarkus WebSocket's built-in send buffering.
+
+**Prerequisite:** casehub-pages#81 (Wire eventTarget from loadSite to WebSocketSource) must be closed for the `event` op to dispatch DOM events in production. The WebSocket endpoint and bridge work independently of #81 — the gap is on the pages consumer side. pages#81 is XS/Low complexity (one-line wiring fix).
+
+### Data Durability
+
+`PrReviewCaseTracker` is an in-memory materialised view (`ConcurrentHashMap` + bounded `Deque`). It loses state on restart. This is acceptable for the MCP tool use case but not for an operational dashboard.
+
+**Startup hydration:** On application startup, `PrReviewCaseTracker` rebuilds from durable state:
+- Active cases: query `CaseHubRuntime` for non-terminal `CaseInstance` records, reconstruct `CaseInfo` from each instance's `CaseContext` (contains `pr.*` fields)
+- Event history: query `CaseLedgerEntry` records for recent cases to populate the event buffer
+
+The durable source of truth is `casehub-engine` (case instances, event log) and `casehub-ledger` (audit entries). `PrReviewCaseTracker` is a read-optimised cache, not a persistence layer. Rebuilding from durable state is a `@Startup` CDI observer — no manual intervention needed.
 
 ---
 
 ## Views
 
 Six top-level views, navigated via topbar. Each view picks the layout that suits it — workbench or web page.
+
+**Navigation model:** `loadSite()` composes all views under a shared `topbar()` element with route entries for each view (`/ops`, `/reviews`, `/queue`, `/reviewers`, `/triage`, `/system`). URL hash routing determines which view's component tree is mounted in the content area. The `dockBar()` (Operations) and `page()` (other views) are different component trees rendered under the same `topbar()` container — switching between them is a component swap, not a page load. `loadSite()` manages the lifecycle: unmount the current view tree, mount the new one. No multi-page loads, no iframe isolation.
 
 ### 1. Operations (`/ops`)
 
@@ -129,11 +176,15 @@ This page is where all three demo paths converge.
 
 **Layout:** Web page — metrics, charts, tables.
 
-**Metrics row:** `metric()` cards — queue depth, active batches, 24h throughput, failure rate.
+**Metrics row:** `metric()` cards — queue depth, active batches, 24h throughput, failure rate, adaptive max vs max batch size (per repository).
 
 **Charts row:** `columns([50, 50], ...)`
 - Left: `barChart()` — wait time distribution by lane (NORMAL/HIGH/CRITICAL)
 - Right: `timeseries()` — merge throughput over 24h
+
+**Failure rate trend:** `timeseries()` — batch failure rate over time (computed from `MergeQueueStore.completedBatchesSince()` bucketed by hour). Fulfils #108 requirement for time-series failure rate visibility.
+
+**Adaptive sizing:** `metric()` cards per repository — current `adaptiveMax` (from `recentBatchFailureRate` × decay) vs configured `maxBatchSize`. Shows how the system is auto-tuning batch sizes based on failure history.
 
 **Queued PRs:** `table()` — lane-styled rows (CRITICAL red, HIGH amber). Columns: PR, author, lane, trust score, wait time, depends on.
 
@@ -151,7 +202,7 @@ This page is where all three demo paths converge.
 **List page:**
 - `table()` — one row per reviewer agent
 - Columns: agent ID, open commitments, trust score per capability (colour-coded: green above threshold, amber borderline, red below, grey bootstrap), total decisions, maturity phase
-- Data: `GET /api/governance/reviewers` (new fleet-wide endpoint)
+- Data: `GET /api/governance/reviewers` — fleet enumeration via `GovernanceQueryService.reviewerFleet()` (backed by `TrustExportService.exportAll()`; maturity phase derived from decision count vs `RoutingPolicy.minimumObservations()`)
 
 **Profile page (`/reviewers/{actorId}`):**
 
@@ -175,10 +226,13 @@ This page is the Demo Path A money shot — watch Agent B's trust score cross th
 - Columns: PR, decision type (PR approval / action gate / routing oversight), candidate group, SLA remaining (colour-coded: red breached, amber <25%, green), escalation stage (Tier 1 / Tier 2 / —), age
 - Click → navigates to `/reviews/{caseId}`
 
-Decision types shown:
-- `human-decision:pr-approval` — formal PR approval gate
-- Action gates — `ActionRiskClassifier` flagged consequential action
-- `human-oversight:routing-review` — low-trust/borderline routing flagged for human confirmation
+**Triage filtering:** Agent work is dispatched via qhorus COMMAND, not through `WorkItemStore` — scanning for `PENDING` work items already excludes agent tasks by design. The three decision types are distinguished by `WorkItem.category`:
+
+- `human-decision` → `human-decision:pr-approval` — formal PR approval gate. Created by `HumanTaskScheduleHandler` with `category = "human-decision"`.
+- `human-oversight` → `human-oversight:routing-review` — low-trust/borderline routing flagged for human confirmation. Created by the routing policy with `category = "human-oversight"`.
+- `action-gate` → `ActionRiskClassifier`-flagged consequential actions. These are engine-level gates (`pendingActionGate` in-memory state, engine#433); the triage endpoint queries them via `GovernanceQueryService.pendingActionGates()` alongside WorkItem results and merges both into the triage list. Action gates are NOT WorkItems — they are engine state with a different lifecycle.
+
+`GovernanceQueryService.triageItems()` combines: `WorkItemStore.scan(status=PENDING, category IN ("human-decision", "human-oversight"))` + engine pending action gates → unified triage list sorted by SLA urgency.
 
 Demo Path B drives this view — SLA countdown, breach, escalation, resolution.
 
@@ -271,6 +325,35 @@ The three demo paths from gastown-casehub-analysis-v4.md §8 drive the workbench
 The workbench turns the demo from "watch curl output" into "watch the system operate."
 
 ---
+
+## Prerequisites
+
+| Dependency | Status | Impact |
+|-----------|--------|--------|
+| casehub-pages#64 (workbench primitives) | ✅ Closed | `split()`, `dockBar()`, `hostPanel()`, event bus |
+| casehub-pages#81 (Wire eventTarget from loadSite to WebSocketSource) | ⚠️ Open (XS/Low) | WebSocket event dispatch to DOM — required for live event stream panels |
+| devtown#92 (Quinoa adoption) | ⚠️ Open | Foundational wiring for any UI |
+
+## Scope Boundaries
+
+**Supersede/relink (from #85):** Issue #85 has two requirements: (1) supersede/relink actions — backend case state transitions, audit trail links, and (2) dashboard visibility — case lifecycle views. This spec addresses requirement 2. Supersede/relink is a backend concern (new case state transition `SUPERSEDED`, `supersededBy`/`supersedes` audit trail links, new REST endpoint or MCP tool) that belongs in its own spec. Filed as devtown#124. The Reviews list and detail views are designed to display supersede/relink relationships when the backend supports them — the `predecessor` column and linked-case navigation are additive. Issue #85 cannot be fully closed without the backend work.
+
+**GitHub integration (#15):** Listed as a prerequisite in #85. The governance workbench does not depend on #15 — it shows cases, not raw PRs. The "raw PR list" gap is noted in the Gastown Parity table and deferred to #15.
+
+## Relationship to devtown-ui-requirements.md
+
+`docs/devtown-ui-requirements.md` defines a four-phase panel taxonomy (Phase 1: demo-ready, Phase 2: operational depth, Phase 3: parity + depth, Phase 4: beyond Gastown). This spec implements the concrete design for Phases 1–2 and parts of Phase 3:
+
+| This spec's view | UI requirements phase | Corresponding panels |
+|------------------|----------------------|---------------------|
+| Operations | Phase 1 + 2 | PR review timeline, trust score card, routing explanation, commitment timeline |
+| Reviews | Phase 1 + 3 | PR review case, compliance report, PROV-DM provenance |
+| Merge Queue | Phase 3 | Batch progress |
+| Reviewers | Phase 2 | Reviewer profile, trust score card |
+| Human Triage | Phase 2 | WorkItem inbox, action gate |
+| System | Phase 2 + 3 | Fleet overview, fleet review capacity |
+
+Issues #119–#123 (in the Extensibility section below) are Phase 2–3 features per that document. The two documents are complementary: the UI requirements doc defines the panel taxonomy and phasing; this spec is the concrete design for the first delivery.
 
 ## Extensibility
 
