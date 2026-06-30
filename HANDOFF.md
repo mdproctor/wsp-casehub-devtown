@@ -10,7 +10,7 @@ Pick from What's Next — #12 (cross-repo coordinated merge) is the natural cont
 
 ## What's Left
 
-- **devtown#97** — TrustGatedAttestationPolicy · M · Med · blocked on qhorus#307
+- **devtown#97** — TrustGatedAttestationPolicy · M · Med · unblocked (qhorus#307 closed)
 - **devtown#118** — orphaned WorkItem on duplicate enqueue (pre-existing, filed this session) · S · Low
 
 ## What's Next
