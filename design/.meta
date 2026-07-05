@@ -1,0 +1,9 @@
+branch: issue-094-housekeeping-batch
+project-sha: d505851e377a7cf039b6bac58597a79aafa7da6c
+date: 2026-07-05
+issue: 94
+issue-repo: casehubio/devtown
+covers: 94,93,125,118
+flyway-next-v: none
+design-repo: workspace
+design-section-hashes: 
