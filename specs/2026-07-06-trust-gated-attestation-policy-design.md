@@ -93,13 +93,18 @@ attestationFor(terminalType, resolvedActorId, context):
 
   All DONE outcomes return verdict = SOUND,
   attestorId = resolvedActorId, attestorType = AGENT
+
+  Phase classification mirrors TrustCandidateClassifier.classify() — same order,
+  same boundary methods (isBootstrap, isBorderline, passesThresholdCheck). Phase 3
+  quality floors are intentionally omitted: quality floors gate routing eligibility,
+  not attestation confidence.
 ```
 
 ### Confidence modulation rationale
 
 - **BOOTSTRAP** — no track record. Base confidence is the neutral starting point. Neither boosted nor penalised.
 - **BORDERLINE** — score within `borderlineMargin` of threshold (above or below). In the routing model, borderline agents trigger human oversight escalation. For attestation, they're in the uncertainty zone — not enough signal to boost or penalise. Base confidence, same as bootstrap.
-- **QUALIFIED** — agent has proven reliable above threshold and not borderline. Confidence boosted proportionally to how far above threshold. An agent at 0.9 with threshold 0.7 gets `0.7 × 1.2 = 0.84`. Capped at 1.0.
+- **QUALIFIED** — agent has proven reliable above threshold and not borderline. Confidence boosted proportionally to distance above `threshold` (not `threshold + borderlineMargin`). This deliberately creates a qualification bonus at the BORDERLINE→QUALIFIED boundary — crossing from "uncertain" to "proven" is a categorical transition, not a smooth interpolation. The BELOW_THRESHOLD→BORDERLINE boundary has the same step-function character. An agent at 0.81 (just past borderline with defaults) gets `0.7 × 1.11 = 0.777`; at 0.9 gets `0.7 × 1.2 = 0.84`. Capped at 1.0.
 - **BELOW_THRESHOLD** — agent has track record but it's poor. Confidence scaled by capability score, floored at `MIN_CONFIDENCE_FLOOR` (0.05). An agent at 0.5 gets `0.7 × 0.5 = 0.35`. An agent at 0.01 gets `max(0.05, 0.7 × 0.01) = 0.05` — the floor ensures attestations always carry some evidential weight and prevents trust from becoming unrecoverable. (`OutcomeRecord` rejects confidence ≤ 0.0, so the floor also guards against validation failures.) Their DONE still counts, but carries less conviction.
 
 ### Constants
@@ -138,6 +143,7 @@ Mock `TrustScoreSource` and `TrustRoutingPolicyProvider`. Pure unit tests:
 |------|--------------|-------------|----------|
 | DONE + BOOTSTRAP | DONE | No history | SOUND @ 0.7, attestor = resolvedActorId/AGENT |
 | DONE + QUALIFIED (0.9, threshold 0.7) | DONE | Above threshold | SOUND @ 0.84, attestor = resolvedActorId/AGENT |
+| DONE + QUALIFIED boundary (0.81, threshold 0.7, margin 0.1) | DONE | Just past borderline | SOUND @ 0.777, attestor = resolvedActorId/AGENT |
 | DONE + BORDERLINE above (0.75, threshold 0.7, margin 0.1) | DONE | Borderline | SOUND @ 0.7, attestor = resolvedActorId/AGENT |
 | DONE + BORDERLINE below (0.65, threshold 0.7, margin 0.1) | DONE | Borderline | SOUND @ 0.7, attestor = resolvedActorId/AGENT |
 | DONE + BELOW_THRESHOLD (0.5) | DONE | Below threshold | SOUND @ 0.35, attestor = resolvedActorId/AGENT |
