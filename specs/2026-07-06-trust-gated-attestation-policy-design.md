@@ -100,12 +100,20 @@ attestationFor(terminalType, resolvedActorId, context):
   not attestation confidence.
 ```
 
+### Defensive behavior
+
+The trust-lookup path (steps 4–5 for DONE) is wrapped in a try/catch. If `TrustScoreSource.capabilityScore()`, `TrustRoutingPolicyProvider.forCapability()`, or the confidence formula throws, the policy falls back to `SOUND @ BASE_DONE_CONFIDENCE` with `attestorId = resolvedActorId`, `attestorType = AGENT` — identical to `StoredCommitmentAttestationPolicy`'s DONE behavior. The exception is logged at WARN level.
+
+This is critical because `LedgerWriteService.writeAttestation()` calls `attestationFor()` outside its try/catch — the try/catch only wraps `saveAttestation()` inside the `ifPresent` lambda. If `attestationFor()` throws, the exception propagates to `record()` which runs under `@Transactional(REQUIRES_NEW)`, rolling back the entire transaction including the message ledger entry. A transient trust-cache failure must not compromise the tamper-evident audit trail.
+
+Caller-side defence-in-depth: qhorus#324 wraps the `attestationPolicy.attestationFor()` call in `LedgerWriteService.writeAttestation()` in its own try/catch. The policy should be defensive, AND the caller should tolerate policy failure.
+
 ### Confidence modulation rationale
 
 - **BOOTSTRAP** — no track record. Base confidence is the neutral starting point. Neither boosted nor penalised.
 - **BORDERLINE** — score within `borderlineMargin` of threshold (above or below). In the routing model, borderline agents trigger human oversight escalation. For attestation, they're in the uncertainty zone — not enough signal to boost or penalise. Base confidence, same as bootstrap.
 - **QUALIFIED** — agent has proven reliable above threshold and not borderline. Confidence boosted proportionally to distance above `threshold` (not `threshold + borderlineMargin`). This deliberately creates a qualification bonus at the BORDERLINE→QUALIFIED boundary — crossing from "uncertain" to "proven" is a categorical transition, not a smooth interpolation. The BELOW_THRESHOLD→BORDERLINE boundary has the same step-function character. An agent at 0.81 (just past borderline with defaults) gets `0.7 × 1.11 = 0.777`; at 0.9 gets `0.7 × 1.2 = 0.84`. Capped at 1.0.
-- **BELOW_THRESHOLD** — agent has track record but it's poor. Confidence scaled by capability score, floored at `MIN_CONFIDENCE_FLOOR` (0.05). An agent at 0.5 gets `0.7 × 0.5 = 0.35`. An agent at 0.01 gets `max(0.05, 0.7 × 0.01) = 0.05` — the floor ensures attestations always carry some evidential weight and prevents trust from becoming unrecoverable. (`OutcomeRecord` rejects confidence ≤ 0.0, so the floor also guards against validation failures.) Their DONE still counts, but carries less conviction.
+- **BELOW_THRESHOLD** — agent has track record but it's poor. Confidence scaled by capability score, floored at `MIN_CONFIDENCE_FLOOR` (0.05). An agent at 0.5 gets `0.7 × 0.5 = 0.35`. An agent at 0.01 gets `max(0.05, 0.7 × 0.01) = 0.05` — the floor ensures attestations always carry some evidential weight and prevents trust from becoming unrecoverable. (`OutcomeRecord` rejects confidence ≤ 0.0 during trust score computation, so the floor also guards against downstream validation failures.) Their DONE still counts, but carries less conviction.
 
 ### Constants
 
@@ -156,6 +164,7 @@ Mock `TrustScoreSource` and `TrustRoutingPolicyProvider`. Pure unit tests:
 | RESPONSE (wrong vocab) | RESPONSE | Any | FLAGGED @ 0.3, attestor = "system"/SYSTEM |
 | QUERY (non-discharge) | QUERY | Any | Optional.empty() |
 | STATUS (non-discharge) | STATUS | Any | Optional.empty() |
+| DONE + TrustScoreSource throws | DONE | Source error | SOUND @ 0.7 (defensive fallback), attestor = resolvedActorId/AGENT |
 
 ### devtown: integration test
 
