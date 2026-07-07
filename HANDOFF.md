@@ -2,11 +2,11 @@
 
 ## Last Session
 
-Fixed all 20 ledger-enabled `@QuarkusTest` failures (#139 SNAPSHOT drift + #142 stale schema). Root cause of #142: V2003 Flyway migration explicitly dropped `tenancy_id` from `merge_decision_ledger_entry`. Secondary fixes: V2002 FK removed (standalone entity), `@Transactional` → `QuarkusTransaction.requiringNew()` on `@ObservesAsync` observer, supplemental JPQL query for standalone `MergeDecisionLedgerEntry` in ComplianceService. 333/333 tests pass. Squashed 3→1, pushed to origin/main.
+Closed #97 (TrustGatedAttestationPolicy). Policy already implemented in engine-ledger — devtown contributed an integration test proving CDI activation and trust-modulated confidence. Found and fixed a spec-implementation gap: missing defensive try/catch in `attestDone()` (engine#679). Fixed SNAPSHOT drift: engine's new reactive SPIs needed 4 `@ApplicationScoped` wrappers (`InMemoryReactive*` satisfies both standard and cross-tenant interfaces). Fixed `DevtownReactiveSubCaseGroupRepositoryIn` typo. Also closed engine#668 (stale branch, work already on main). Committed orphaned spec for engine#678.
 
 ## Immediate Next Step
 
-Start #97 (TrustGatedAttestationPolicy) — now unblocked by the ledger test fixes. Run `/work` to begin.
+Pick next work from What's Next. Run `/work` to begin.
 
 ## What's Left
 
@@ -14,20 +14,26 @@ Start #97 (TrustGatedAttestationPolicy) — now unblocked by the ledger test fix
 - **devtown#128** — cursor-based pagination for governance REST endpoints · S · Low
 - **devtown#124** — supersede/relink backend (scoped out of #85) · M · Med
 
+## Cross-Module
+
+**Engine:**
+- `engine#678` (S/XS backlog sweep) — active epic, spec committed, no implementation yet. 12 engine-only issues.
+- `engine#679` — closed this session (defensive try/catch for TrustGatedAttestationPolicy)
+
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #97 | TrustGatedAttestationPolicy — capability-scoped evidential verification | M | Med | Unblocked by #142 fix |
+| #141 | EvidentialChecker for below-threshold agents | M | Med | Unblocked by #97 |
 | #129 | Epic 11: Case-Based Reasoning (9 child issues) | XL | High | Phase 1: #130 + #131 |
 | #12 | Cross-repo coordinated merge | XL | High | All three admission paths operational |
 | #119 | CasePlanModel browser view | M | Med | Blocked on engine REST API |
 
 ## Known Limitation
 
-`MergeDecisionLedgerEntry` extends `@MappedSuperclass` (not `JpaLedgerEntry` JOINED). Consequences: not in Merkle hash chain (compliance PARTIAL), not in `findBySubjectId()` queries (needs supplemental JPQL), supplement hydration requires `supplementJson` parsing. Migrating to `JpaLedgerEntry` needs investigation (#142 notes the attempt in #139 broke the async observer).
+`MergeDecisionLedgerEntry` extends `@MappedSuperclass` (not `JpaLedgerEntry` JOINED). Not in Merkle hash chain, not in `findBySubjectId()`. See previous handover for details.
 
 ## References
 
-- Garden: GE-20260707-649b02 (Flyway DROP COLUMN gotcha), GE-20260707-4e41c3 (schema-management override)
-- Garden: GE-20260429-da95ec REVISED — added QuarkusTransaction.requiringNew() alternative
+- Garden: GE-20260707-9b1b4d (mvn test vs mvn install CDI augmentation gap)
+- Garden: GE-20260707-649b02, GE-20260707-4e41c3 (from previous session)
