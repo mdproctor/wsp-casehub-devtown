@@ -1,3 +1,6 @@
 - branch: issue-100-merge-queue-deferred
   issue: 100
   paused: 2026-06-28T18:05:26Z
+- branch: issue-97-trust-gated-attestation
+  issue: 97
+  paused: 2026-07-07T01:53:28Z
