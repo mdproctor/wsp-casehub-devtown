@@ -1,39 +1,36 @@
-# HANDOFF — 2026-07-07
+# HANDOFF — 2026-07-08
 
 ## Last Session
 
-Closed #97 (TrustGatedAttestationPolicy). Policy already implemented in engine-ledger — devtown contributed an integration test proving CDI activation and trust-modulated confidence. Found and fixed a spec-implementation gap: missing defensive try/catch in `attestDone()` (engine#679). Fixed SNAPSHOT drift: engine's new reactive SPIs needed 4 `@ApplicationScoped` wrappers (`InMemoryReactive*` satisfies both standard and cross-tenant interfaces). Fixed `DevtownReactiveSubCaseGroupRepositoryIn` typo. Also closed engine#668 (stale branch, work already on main). Committed orphaned spec for engine#678.
+UI focus session. Reviewed blocks-ui ecosystem — filed devtown child epic (blocks-ui#41) and updated parent epic (#35) with devtown's contribution plan. Got `quarkus:dev` running for the first time (5 cascading config fixes). Confirmed current UI views render layout but have no working data binding — raw pages-ui DSL needs blocks-ui migration.
 
 ## Immediate Next Step
 
-Pick next work from What's Next. Run `/work` to begin.
+Commit the dev-mode fixes (application.properties, DevCurrentPrincipal, esbuild/index.html changes) — they're uncommitted on main. Then pick next work: blocks-ui Phase 1 migration (#41) or other priority.
 
 ## What's Left
 
-- **devtown#127** — PrReviewCaseTracker startup hydration (depends on engine query API) · S · Med
-- **devtown#128** — cursor-based pagination for governance REST endpoints · S · Low
-- **devtown#124** — supersede/relink backend (scoped out of #85) · M · Med
+*Unchanged — `git show HEAD~1:HANDOFF.md`*
 
 ## Cross-Module
 
-**Engine:**
-- `engine#678` (S/XS backlog sweep) — active epic, spec committed, no implementation yet. 12 engine-only issues.
-- `engine#679` — closed this session (defensive try/catch for TrustGatedAttestationPolicy)
+**blocks-ui:**
+- blocks-ui#41 — devtown child epic filed. Phase 1: consume shipped components. Phase 2: build and promote `<case-timeline>` (#10), `<trust-score-panel>` (#11), `<routing-rationale>`, `<commitment-lifecycle>`.
+- blocks-ui#35 — parent epic updated with devtown row and cross-repo overlap watch entries.
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
+| blocks-ui#41 | blocks-ui Phase 1 — consume shipped components | L | Med | Replace raw DSL with pages-data-table, kpi-metric-row, work-item-inbox, etc. |
 | #141 | EvidentialChecker for below-threshold agents | M | Med | Unblocked by #97 |
 | #129 | Epic 11: Case-Based Reasoning (9 child issues) | XL | High | Phase 1: #130 + #131 |
-| #12 | Cross-repo coordinated merge | XL | High | All three admission paths operational |
-| #119 | CasePlanModel browser view | M | Med | Blocked on engine REST API |
 
 ## Known Limitation
 
-`MergeDecisionLedgerEntry` extends `@MappedSuperclass` (not `JpaLedgerEntry` JOINED). Not in Merkle hash chain, not in `findBySubjectId()`. See previous handover for details.
+*Unchanged — `git show HEAD~1:HANDOFF.md`*
 
 ## References
 
-- Garden: GE-20260707-9b1b4d (mvn test vs mvn install CDI augmentation gap)
-- Garden: GE-20260707-649b02, GE-20260707-4e41c3 (from previous session)
+- Garden: GE-20260708-4b4f09 (devtown quarkus:dev startup cascade — five sequential blockers)
+- Spec: `specs/2026-06-30-governance-workbench-design.md` (governance workbench — 6 views)
