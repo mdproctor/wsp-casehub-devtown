@@ -25,9 +25,20 @@ The feature vector is stored as a `case-vector:<caseId>` memory fact in `CaseMem
 
 ### Emission at case open, not review completion
 
-`CaseMemoryEmitter` fires on `ReviewCompletedEvent` — per capability review, multiple times per case. The feature vector describes the PR's structure (immutable once submitted), not a review outcome. Emitted once at case open time in `PrReviewCaseService.startReview()`, before `caseHub.startCase()`.
+The existing `CaseMemoryEmitter` fires on `ReviewCompletedEvent` — per capability review, multiple times per case. The feature vector describes the PR's structure (immutable once submitted), not a review outcome. Emitted once at case open time in the `PrReviewApplicationService` implementation's `startReview()`, before `caseHub.startCase()`.
 
-Outcomes are already captured by existing contributor/reviewer/module facts. At retrieval time, the `Precedent` joins the feature vector with outcome facts for the same caseId.
+Outcomes are already captured by existing contributor/reviewer/module facts (via `CaseMemoryEmitter` → `ReviewOutcomeObserver`). At retrieval time, the `Precedent` joins the feature vector with outcome facts for the same caseId.
+
+### Why `CaseMemoryStore` not `CbrCaseMemoryStore` for Phase 1
+
+The platform's `CbrCaseMemoryStore` (neocortex) provides structured CBR infrastructure with `FeatureVectorCbrCase`, `CbrQuery`, `CbrFeatureSchema`, and multiple implementations (`InMemory`, `Qdrant`, `Reranking`). This spec uses the general-purpose `CaseMemoryStore` instead because of four platform gaps:
+
+1. **No set-valued feature type.** `FeatureField` supports `Categorical`, `Numeric`, and `Text`. Three of five similarity dimensions (`changedPaths`, `modules`, `languages`) require Jaccard on `Set<String>`. No existing field type handles this.
+2. **No custom similarity passthrough.** `CbrSimilarityScorer.score()` accepts `LocalSimilarityFunction` overrides, but `InMemoryCbrCaseMemoryStore.retrieveSimilar()` passes `Map.of()`. Custom similarity functions cannot be injected per-query.
+3. **`FeatureVectorCbrCase` requires non-blank `solution`.** The feature vector is stored at case-open time, before any review runs — there is no solution yet. The CBR case model assumes a complete problem→solution→outcome tuple.
+4. **No per-dimension breakdown.** `ScoredCbrCase` returns a single `double score`. The spec requires per-dimension breakdown (`SimilarityScore.breakdown`) for ledger auditability.
+
+**Platform extension needed:** `FeatureField.SetValued` with Jaccard as default similarity (a single sealed-interface case + `CbrSimilarityScorer` switch branch). When neocortex gains this, devtown migrates to `CbrCaseMemoryStore` — see §7.
 
 ### Weighted linear combination for similarity scoring
 
@@ -55,14 +66,22 @@ public record PrFeatureVector(
 )
 ```
 
-**`PrFeatureVector.from(PrPayload)`** — static factory extracting features:
+**`PrFeatureVector.from(String repo, int prNumber, String contributor, int linesChanged, List<String> changedPaths)`** — static factory extracting features from primitive parameters (no `PrPayload` dependency — keeps `devtown-domain` independent of `review/`):
 - `modules` — via existing `ModulePathNormalizer.normalize()`, converted to `Set`
-- `languages` — file extension mapping (`.java` → `java`, `.ts`/`.tsx` → `typescript`, `.kt` → `kotlin`, `.py` → `python`, `.go` → `go`, `.rs` → `rust`, `.xml`/`.yaml`/`.yml`/`.json`/`.properties` → `config`). No-extension files ignored.
-- `hasTests` — any path contains `/test/`, `/tests/`, or matches `*Test.java`, `*.test.ts`, `*.spec.ts`, `*_test.go`, `*_test.py`
-- `touchedConfigs` — any path matches `pom.xml`, `build.gradle`, `build.gradle.kts`, `*.properties`, `*.yaml`, `*.yml`, `*.json`, `Dockerfile`, `.github/*`
+- `languages` — file extension mapping:
+  - `.java` → `java`, `.kt` → `kotlin`
+  - `.ts`/`.tsx` → `typescript`, `.js`/`.jsx` → `javascript`
+  - `.py` → `python`, `.go` → `go`, `.rs` → `rust`
+  - `.rb` → `ruby`, `.scala` → `scala`
+  - `.c`/`.cpp`/`.h` → `c`, `.cs` → `csharp`
+  - `.swift` → `swift`, `.sh` → `shell`
+  - `.xml`/`.yaml`/`.yml`/`.json`/`.properties` → `config`
+  - No-extension files ignored (no-extension build files like `Makefile` are handled by `touchedConfigs`)
+- `hasTests` — any path contains `/test/`, `/tests/`, `__tests__/`, or matches `*Test.java`, `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx`, `*_test.go`, `*_test.py`, `test_*.py`
+- `touchedConfigs` — any path matches `pom.xml`, `build.gradle`, `build.gradle.kts`, `settings.gradle`, `gradle.properties`, `*.properties`, `*.yaml`, `*.yml`, `*.json`, `package.json`, `tsconfig.json`, `requirements.txt`, `setup.py`, `setup.cfg`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `go.sum`, `Dockerfile`, `Makefile`, `Jenkinsfile`, `Rakefile`, `.eslintrc.*`, `.prettierrc`, `.github/*`
 
 **`PrFeatureVector.toAttributes()`** — serialises to `Map<String, String>` for memory storage:
-- Sets serialised as comma-separated strings
+- Sets serialised as JSON arrays (e.g., `["src/main/Foo.java","src/test/FooTest.java"]`) — handles paths containing commas
 - Booleans as `"true"`/`"false"`
 - Integers as string values
 
@@ -96,12 +115,12 @@ Implements `SimilarityMetric`. Constructor takes 5 weights:
 | `file-paths` | Jaccard on `changedPaths` sets | 1.0 | Fine-grained overlap; meaningful but noisy for large PRs |
 | `modules` | Jaccard on `modules` sets | 1.5 | Strongest structural signal; same modules → most relevant precedent |
 | `languages` | Jaccard on `languages` sets | 0.5 | Coarse signal; most repos are dominated by one language |
-| `change-size` | `1.0 - |a - b| / max(a, b)` | 1.0 | Similar scale → similar review dynamics |
+| `change-size` | `1.0 - |a - b| / max(a, b)` (when both are 0: 1.0) | 1.0 | Similar scale → similar review dynamics |
 | `contributor` | 1.0 if same, 0.0 otherwise | 0.5 | Relevant but shouldn't dominate; trust routing handles per-reviewer quality |
 
 Final score: `Σ(weight × dimensionScore) / Σ(weight)`. Zero-weight dimensions excluded from both numerator and denominator. All weights zero → score 0.0.
 
-Jaccard on empty sets: returns 0.0 (two empty sets have no overlap, not perfect similarity).
+Jaccard on empty sets: returns 1.0 (standard mathematical convention — identical sets, including both empty). Two PRs that both lack a feature are alike on that dimension.
 
 ---
 
@@ -119,14 +138,18 @@ public class FeatureVectorEmitter {
 ```
 
 **Memory fact shape:**
-- `entityId`: `"case-vector:" + caseId`
+- `entityId`: `"case-vector:" + repo + ":" + caseId` — prefix enables server-side filtering by repo
 - `domain`: `DevtownMemoryDomain.SOFTWARE_REVIEW`
 - `tenantId`: from `CurrentPrincipal`
 - `caseId`: the case UUID as string
 - `text`: `"PR #%d in %s: %d lines, %d modules, %s"` (human-readable summary)
 - `attributes`: all fields from `vector.toAttributes()` plus `DevtownMemoryKeys.ENTITY_TYPE = "case-vector"`
 
-**Emission point:** `PrReviewCaseService.startReview()`, after `memoryRecaller.recall()`, before `caseHub.startCase()`. The caseId is generated before emission (UUID.randomUUID or from caseHub).
+**Emission point:** Production implementation of `PrReviewApplicationService.startReview()`, after `memoryRecaller.recall()`, before `caseHub.startCase()`. Sequence:
+
+1. `caseId = UUID.randomUUID()` — generated before both emission and case start
+2. `featureVectorEmitter.emit(caseId, tenantId, vector)` — stores the vector with the pre-generated caseId
+3. `caseHub.startCase(caseId, caseType, initialContext)` — starts the case with the same ID
 
 **Fail-open:** emission failure is logged and swallowed. Case proceeds without stored vector.
 
@@ -183,11 +206,17 @@ Returns precedents ranked by similarity score descending. Empty list if no prece
 
 CDI implementation. Pipeline:
 
-1. **Scan** — `MemoryScanRequest` with `tenantId`, `domain="software-review"`, `attributeKey="entity-type"`, `attributeValue="case-vector"`, paginated via `afterMemoryId`.
-2. **Filter** — `pr-repo` attribute matches `repo`. `createdAt` within time window.
+1. **Scan** — `MemoryScanRequest` with `tenantId`, `domain="software-review"`, entity ID prefix `"case-vector:" + repo + ":"`, paginated via `afterMemoryId`. Server-side prefix filtering avoids loading vectors from other repos.
+2. **Filter** — `createdAt` within time window (configurable, default 180 days).
 3. **Score** — `PrFeatureVector.fromAttributes(memory.attributes())` for each stored vector. `SimilarityMetric.compute(query, stored)`.
 4. **Rank** — sort by score descending, filter below minimum threshold, take top K.
-5. **Enrich** — for top-K case IDs, query outcome facts. Scan by caseId attribute across contributor/reviewer/module entity types. Derive per-capability outcomes and aggregate outcome.
+5. **Enrich** — for each top-K caseId, query outcome facts from `CaseMemoryStore`:
+   - Query with `MemoryQuery.forEntity()` using `withCaseId(caseId)` filter across `software-review` domain
+   - Facts matching the caseId are returned across all entity types (contributor, reviewer, module)
+   - Group returned facts by `DevtownMemoryKeys.CAPABILITY` attribute to get per-capability outcomes
+   - Each capability's outcome is read from `MemoryAttributeKeys.OUTCOME` attribute (`"approved"`, `"failed"`, `"flagged"`)
+   - Aggregate case outcome: all capabilities approved → `"approved"`, any failed → `"failed"`, otherwise → `"flagged"`
+   - If no outcome facts found for a caseId (case still in progress), exclude from results
 
 Configurable parameters via `PreferenceProvider`:
 
@@ -221,7 +250,19 @@ public record MemoryContext(
 - Passes results into `MemoryContext`
 - CBR failure is independent of contributor/module recall — either can fail without affecting the other
 
-`MemoryContext.toContextMap()` extended to include precedents as a serialised list.
+`MemoryContext.toContextMap()` extended to include precedents:
+
+```java
+"precedents", precedents.stream().map(p -> Map.<String, Object>of(
+    "caseId", p.caseId().toString(),
+    "similarity", p.similarity().score(),
+    "breakdown", p.similarity().breakdown(),
+    "outcome", p.outcome(),
+    "capabilityOutcomes", p.capabilityOutcomes()
+)).toList()
+```
+
+Return type remains `Map<String, Object>` — nested maps/lists consistent with existing contributor/codeArea entries.
 
 `MemoryContext.hasRiskSignals()` extended: also returns true if any precedent has `outcome = "failed"`.
 
@@ -271,7 +312,7 @@ public final class CbrPreferenceKeys {
 - Zero-weight dimension excluded from scoring
 - All weights zero → score 0.0 (no division by zero)
 - Breakdown map contains all 5 dimensions with correct individual scores
-- Empty sets: Jaccard returns 0.0
+- Empty sets: Jaccard returns 1.0 (both lack the feature → identical on that dimension)
 
 ### Integration tests (`app/`)
 
@@ -314,3 +355,14 @@ Follows the three-tier rule: domain = pure Java, review = integration logic (por
 - **#132** — CBR-enhanced capability activation (Phase 2 — consumes `Precedent`)
 - **#133** — CBR-enhanced reviewer matching (Phase 2 — consumes `Precedent`)
 - **#138** — Similarity weight refinement from outcome feedback (Phase 4 — adjusts `CbrPreferenceKeys` weights)
+
+### Migration to `CbrCaseMemoryStore`
+
+When neocortex gains `FeatureField.SetValued` (with Jaccard as default similarity), devtown migrates:
+
+1. **Storage:** `FeatureVectorEmitter` stores via `CbrCaseMemoryStore.store(FeatureVectorCbrCase)` instead of `CaseMemoryStore`. Schema registered with `CbrFeatureSchema` defining set-valued fields for `changedPaths`, `modules`, `languages`.
+2. **Retrieval:** `DefaultCbrRetrievalService` calls `CbrCaseMemoryStore.retrieveSimilar(CbrQuery)` instead of manual scan+score. `CbrQuery` carries weights, topK, minSimilarity, notBefore — same parameters currently resolved from preferences.
+3. **Scoring:** `WeightedJaccardSimilarity` logic moves into `LocalSimilarityFunction` overrides passed via `CbrQuery`. Per-dimension breakdown requires `ScoredCbrCase` extension or post-hoc recomputation.
+4. **Production backend:** `QdrantCbrCaseMemoryStore` provides indexed retrieval, replacing the O(n) scan.
+
+This migration is mechanical — the domain model (`PrFeatureVector`, `SimilarityScore`, `Precedent`) is unaffected. Only the storage and retrieval adapters in `app/` change.
