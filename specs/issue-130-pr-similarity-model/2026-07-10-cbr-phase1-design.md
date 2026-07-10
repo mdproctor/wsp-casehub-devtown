@@ -69,7 +69,7 @@ public record PrFeatureVector(
 **`PrFeatureVector.from(String repo, int prNumber, String contributor, int linesChanged, List<String> changedPaths)`** — static factory extracting features from primitive parameters (no `PrPayload` dependency — keeps `devtown-domain` independent of `review/`):
 - `modules` — via existing `ModulePathNormalizer.normalize()`, converted to `Set`
 - `languages` — file extension mapping:
-  - `.java` → `java`, `.kt` → `kotlin`
+  - `.java` → `java`, `.kt`/`.kts` → `kotlin`
   - `.ts`/`.tsx` → `typescript`, `.js`/`.jsx` → `javascript`
   - `.py` → `python`, `.go` → `go`, `.rs` → `rust`
   - `.rb` → `ruby`, `.scala` → `scala`
