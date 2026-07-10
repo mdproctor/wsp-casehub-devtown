@@ -138,12 +138,14 @@ public class FeatureVectorEmitter {
 ```
 
 **Memory fact shape:**
-- `entityId`: `"case-vector:" + repo + ":" + caseId` — prefix enables server-side filtering by repo
+- `entityId`: `"case-vector:" + repo + ":" + caseId`
 - `domain`: `DevtownMemoryDomain.SOFTWARE_REVIEW`
 - `tenantId`: from `CurrentPrincipal`
 - `caseId`: the case UUID as string
 - `text`: `"PR #%d in %s: %d lines, %d modules, %s"` (human-readable summary)
-- `attributes`: all fields from `vector.toAttributes()` plus `DevtownMemoryKeys.ENTITY_TYPE = "case-vector"`
+- `attributes`: all fields from `vector.toAttributes()` plus:
+  - `DevtownMemoryKeys.ENTITY_TYPE = "case-vector"`
+  - `DevtownMemoryKeys.PR_REPO = vector.repo()` — enables attribute-based scan filtering by repo (matches existing outcome fact convention from `CaseMemoryEmitter`)
 
 **Emission point:** Production implementation of `PrReviewApplicationService.startReview()`, after `memoryRecaller.recall()`, before `caseHub.startCase()`. Sequence:
 
@@ -206,16 +208,16 @@ Returns precedents ranked by similarity score descending. Empty list if no prece
 
 CDI implementation. Pipeline:
 
-1. **Scan** — `MemoryScanRequest` with `tenantId`, `domain="software-review"`, entity ID prefix `"case-vector:" + repo + ":"`, paginated via `afterMemoryId`. Server-side prefix filtering avoids loading vectors from other repos.
-2. **Filter** — `createdAt` within time window (configurable, default 180 days).
+1. **Scan** — `CaseMemoryStore.scan(MemoryScanRequest)` with `tenantId`, `domain="software-review"`, `attributeKey="entity-type"`, `attributeValue="case-vector"`, paginated via `afterMemoryId`. Server-side attribute filtering returns only case-vector facts.
+2. **Filter** — Client-side: `memory.attributes().get("pr-repo")` matches target `repo`. `memory.createdAt()` within time window (configurable, default 180 days).
 3. **Score** — `PrFeatureVector.fromAttributes(memory.attributes())` for each stored vector. `SimilarityMetric.compute(query, stored)`.
 4. **Rank** — sort by score descending, filter below minimum threshold, take top K.
-5. **Enrich** — for each top-K caseId, query outcome facts from `CaseMemoryStore`:
-   - Query with `MemoryQuery.forEntity()` using `withCaseId(caseId)` filter across `software-review` domain
-   - Facts matching the caseId are returned across all entity types (contributor, reviewer, module)
-   - Group returned facts by `DevtownMemoryKeys.CAPABILITY` attribute to get per-capability outcomes
-   - Each capability's outcome is read from `MemoryAttributeKeys.OUTCOME` attribute (`"approved"`, `"failed"`, `"flagged"`)
-   - Aggregate case outcome: all capabilities approved → `"approved"`, any failed → `"failed"`, otherwise → `"flagged"`
+5. **Enrich** — for each top-K result, query contributor outcome facts using the same `MemoryQuery` pattern as `CaseMemoryRecaller`:
+   - Extract `contributor` from the stored `PrFeatureVector`
+   - `MemoryQuery.forEntity("contributor:" + contributor, SOFTWARE_REVIEW, tenantId).withCaseId(caseId.toString())` — returns facts for that contributor in that case (one per capability review, following the `CaseMemoryEmitter` storage pattern)
+   - Group returned facts by `DevtownMemoryKeys.CAPABILITY` attribute
+   - Each capability's outcome from `MemoryAttributeKeys.OUTCOME` attribute
+   - Aggregate case outcome: all approved → `"approved"`, any failed → `"failed"`, otherwise → `"flagged"`
    - If no outcome facts found for a caseId (case still in progress), exclude from results
 
 Configurable parameters via `PreferenceProvider`:
@@ -297,7 +299,7 @@ public final class CbrPreferenceKeys {
 ### Unit tests (`devtown-domain`)
 
 **`PrFeatureVectorTest`:**
-- Extraction from `PrPayload` — correct modules, languages, hasTests, touchedConfigs
+- Extraction from primitive parameters — correct modules, languages, hasTests, touchedConfigs
 - Empty file list → empty sets, hasTests=false, touchedConfigs=false
 - Single-file PR → single module or `(root)`
 - Language edge cases: `.tsx` → `typescript`, `.gradle.kts` → `kotlin`, no extension → ignored
@@ -357,6 +359,8 @@ Follows the three-tier rule: domain = pure Java, review = integration logic (por
 - **#138** — Similarity weight refinement from outcome feedback (Phase 4 — adjusts `CbrPreferenceKeys` weights)
 
 ### Migration to `CbrCaseMemoryStore`
+
+**Prerequisite:** Platform issue required in `casehubio/neocortex` for `FeatureField.SetValued` with Jaccard similarity — a single sealed-interface case + `CbrSimilarityScorer` switch branch. A devtown tracking issue must be filed to track this dependency before Phase 1 implementation begins.
 
 When neocortex gains `FeatureField.SetValued` (with Jaccard as default similarity), devtown migrates:
 
