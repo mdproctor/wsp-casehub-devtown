@@ -1,36 +1,40 @@
-# HANDOFF — 2026-07-08
+# HANDOFF — 2026-07-11
 
 ## Last Session
 
-UI focus session. Reviewed blocks-ui ecosystem — filed devtown child epic (blocks-ui#41) and updated parent epic (#35) with devtown's contribution plan. Got `quarkus:dev` running for the first time (5 cascading config fixes). Confirmed current UI views render layout but have no working data binding — raw pages-ui DSL needs blocks-ui migration.
+CBR Phase 1 complete (#130, #131). PR similarity model (PrFeatureVector, WeightedJaccardSimilarity) and retrieval service (DefaultCbrRetrievalService, FeatureVectorEmitter) landed on main as 5 squashed commits. Design review ran 4 rounds (21 issues, all resolved). Also filed blocks-ui#41 (devtown UI migration epic) and fixed quarkus:dev startup cascade (5 config fixes).
 
 ## Immediate Next Step
 
-Commit the dev-mode fixes (application.properties, DevCurrentPrincipal, esbuild/index.html changes) — they're uncommitted on main. Then pick next work: blocks-ui Phase 1 migration (#41) or other priority.
+Pick next work. Top candidates: CBR Phase 2 (#132 capability activation, #133 reviewer matching) or blocks-ui Phase 1 (#41 — consume shipped components).
 
 ## What's Left
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+- **devtown#127** — PrReviewCaseTracker startup hydration (depends on engine query API) · S · Med
+- **devtown#128** — cursor-based pagination for governance REST endpoints · S · Low
+- **devtown#124** — supersede/relink backend (scoped out of #85) · M · Med
+- **parent#361** — docs: sync casehub-devtown.md for CBR Phase 1 · XS · Low
 
 ## Cross-Module
 
 **blocks-ui:**
-- blocks-ui#41 — devtown child epic filed. Phase 1: consume shipped components. Phase 2: build and promote `<case-timeline>` (#10), `<trust-score-panel>` (#11), `<routing-rationale>`, `<commitment-lifecycle>`.
-- blocks-ui#35 — parent epic updated with devtown row and cross-repo overlap watch entries.
+- blocks-ui#41 — devtown child epic filed. Phase 1: consume shipped components. Phase 2: build and promote `<case-timeline>` (#10), `<trust-score-panel>` (#11).
+
+**neocortex:**
+- Platform gap: `FeatureField.SetValued` with Jaccard similarity needed for CbrCaseMemoryStore migration. Issue to be filed on casehubio/neocortex.
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| blocks-ui#41 | blocks-ui Phase 1 — consume shipped components | L | Med | Replace raw DSL with pages-data-table, kpi-metric-row, work-item-inbox, etc. |
+| #132 | CBR-enhanced capability activation | M | Med | Unblocked by #130 |
+| #133 | CBR-enhanced reviewer matching | M | Med | Unblocked by #130 |
+| blocks-ui#41 | blocks-ui Phase 1 — consume shipped components | L | Med | Waiting on blocks-ui progress |
 | #141 | EvidentialChecker for below-threshold agents | M | Med | Unblocked by #97 |
-| #129 | Epic 11: Case-Based Reasoning (9 child issues) | XL | High | Phase 1: #130 + #131 |
-
-## Known Limitation
-
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
 
 ## References
 
-- Garden: GE-20260708-4b4f09 (devtown quarkus:dev startup cascade — five sequential blockers)
-- Spec: `specs/2026-06-30-governance-workbench-design.md` (governance workbench — 6 views)
+- Garden: GE-20260708-4b4f09 (devtown quarkus:dev startup cascade)
+- Garden: GE-20260612-bd3b4d (degenerate CBR — the motivation for this work)
+- Spec: `docs/specs/issue-130-pr-similarity-model/2026-07-10-cbr-phase1-design.md`
+- Blog: `blog/2026-07-10-mdp01-the-missing-step.md`
