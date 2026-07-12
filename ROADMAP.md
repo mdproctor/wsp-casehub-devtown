@@ -27,21 +27,19 @@ Foundation repo sessions: check this to know what devtown needs from you.
 | # | Repo | Description | Blocks |
 |---|---|---|---|
 | engine#711 | engine | TrustPhase enum + evidentialCheckPhases | devtown#141 |
-
-### Docs
-
-| # | Repo | Description |
-|---|---|---|
-| parent#361 | parent | Sync casehub-devtown.md for CBR Phase 1 |
+| ledger#175 | ledger | `@Transactional(REQUIRES_NEW)` for saveAttestation() | Attestation transaction safety for #141 |
+| parent#361 | parent | Sync casehub-devtown.md for CBR Phase 1 | Docs only |
 
 ### Phase 1 critical path
 
 ```
-engine#711 → devtown#141 (EvidentialChecker)
-                                              ↘
-devtown#132 (CBR activation) ──────────────────→ devtown#98 (Trust UI)
-devtown#133 (CBR matching)   ──────────────────↗
+engine#711 ──→ devtown#141 (EvidentialChecker)
+ledger#175 ─↗                                 ↘
+                                                devtown#98 (Trust UI)
+devtown#132 (CBR activation) ─────────────────↗
+devtown#133 (CBR matching)   ─────────────────↗
 devtown#144 (test fix) — independent, do first
+parent#361 (doc sync) — independent
 ```
 
 ---
@@ -67,15 +65,22 @@ devtown#144 (test fix) — independent, do first
 | # | Repo | Description | Blocks |
 |---|---|---|---|
 | engine#548 | engine | Composed GoalExpression — nested anyOf(allOf(...)) | Complex PR review goals |
+| blocks#32 | blocks | Plan composition matching for CBR-based routing | devtown#134, #135 |
+| blocks#34 | blocks | Signal enrichment SPI for non-LLM routing | Routing signal pipeline |
+| blocks#37 | blocks | Feature weight support for CbrQuery routing | CBR weight tuning |
+| ledger#172 | ledger | OutcomeRecord supplementary data — routing rationale in audit | Trust UI enrichment |
+| work#288 | work | Queue summary REST endpoint for blocks-ui dashboard | Merge queue UI cards |
 
 ### Phase 2 critical path
 
 ```
 engine#548 (composed goals) ─→ devtown#104 (batch git ops) ─→ devtown#134 (CBR risk scoring)
-                                                             ↘
-devtown#124 (supersede/relink) ──────────────────────────────→ devtown#119 (case browser)
-devtown#127 (startup hydration)                                devtown#120 (dependency graph)
-devtown#135 (bisection heuristics) — independent
+blocks#32, #34, #37 (CBR routing signals) ─────────────────↗       ↓
+                                                            devtown#135 (bisection heuristics)
+ledger#172 (routing rationale) ─→ devtown#119 (case browser)
+work#288 (queue summary) ───────↗ devtown#120 (dependency graph)
+devtown#124 (supersede/relink)
+devtown#127 (startup hydration)
 ```
 
 ---
@@ -103,6 +108,10 @@ devtown#135 (bisection heuristics) — independent
 |---|---|---|---|
 | engine#510 | engine | Case-level SLA — time-triggered binding | Overall PR review deadline |
 | engine#327 | engine | HumanTaskTarget runtime-evaluated expiresIn | Per-case SLA variation |
+| claudony#85 | claudony | Agent onboarding template from CaseDefinition | Worker session lifecycle |
+| worker#3 | worker | Worker execution model — async, timeout, context | Agent coordination foundation |
+| worker#10 | worker | Engine SyncAgentWorkerFunctionHandler delegation | Worker API integration |
+| platform#134 | platform | Shared embedding similarity utility | CBR weight refinement |
 
 ### Phase 3 critical path
 
@@ -110,9 +119,12 @@ devtown#135 (bisection heuristics) — independent
 engine#510 (case SLA) ──→ devtown#136 (SLA calibration)
 engine#327 (runtime expiresIn) ─↗
 
+worker#3 (exec model) ──→ claudony#85 (agent onboarding) ──→ devtown#123 (worker management)
+worker#10 (handler delegation) ─↗
+platform#134 (embedding similarity) ──→ devtown#138 (weight refinement)
+
 devtown#91 (RBAC) ──→ devtown#122 (message inbox)
-                   ──→ devtown#123 (worker management)
-devtown#138, #114, #137, #121 — independent
+devtown#114, #137, #121 — independent
 ```
 
 ---
@@ -136,6 +148,48 @@ devtown#138, #114, #137, #121 — independent
 | engine#501 | engine | Semantic failure routing — DECLINED/FAILED handling | Failure cascade recovery |
 | engine#571 | engine | Enrich CaseLifecycleEvent with context snapshot | Richer failure signals |
 | P1.5 | engine | Doltgres backend | devtown#81 (gt seance) |
+
+---
+
+## Cross-Cutting: UI Pipeline
+
+Devtown UI features in every phase depend on the blocks-ui component pipeline. This is the shared dependency chain:
+
+```
+pages#111 (blocks-ui hosting foundation)
+pages#129 (data-table component)           ──→ blocks-ui components mature
+pages#139 (modal/dialog)                   ──→ blocks-ui#41 (devtown governance workbench migration)
+pages#138 (action button)                  ──→ devtown UI features in Phases 1-3
+pages#154 (wire pages-table into runtime)
+```
+
+### blocks-ui — devtown-specific
+
+| # | Repo | Description | Blocks |
+|---|---|---|---|
+| blocks-ui#41 | blocks-ui | Devtown governance workbench — migration plan | All devtown UI (#98, #119, #120, etc.) |
+| blocks-ui#35 | blocks-ui | Cross-repo component migration tracking | Visibility into pipeline |
+| blocks-ui#47 | blocks-ui | Audit-trail-viewer row expand/collapse fix | Trust visibility (#98) |
+| blocks-ui#49 | blocks-ui | Lit components consume TypedDataSet natively | Data-driven UI |
+| blocks-ui#50 | blocks-ui | Recover PagesTable tests for TypedDataSet | Test coverage |
+
+### pages — infrastructure
+
+| # | Repo | Description | Blocks |
+|---|---|---|---|
+| pages#111 | pages | Foundation for blocks-ui component hosting | blocks-ui components |
+| pages#129 | pages | pages-data-table component | blocks-ui tables |
+| pages#154 | pages | Wire pages-table into runtime | blocks-ui migration |
+| pages#139 | pages | Modal/dialog component | blocks-ui overlays |
+| pages#138 | pages | Action button component | blocks-ui interactions |
+
+### connectors — agent observation
+
+| # | Repo | Description | Blocks |
+|---|---|---|---|
+| connectors#69 | connectors | Embed qhorus workbench for live agent observation | Agent UI in Phase 3 |
+
+**Priority signal for pages/blocks-ui sessions:** devtown's UI phases depend on blocks-ui#41 landing. The pages infrastructure issues above are the critical path to making that possible.
 
 ---
 
@@ -186,11 +240,66 @@ devtown#138, #114, #137, #121 — independent
 | P3 (Phase 4) | engine#501, engine#571 | Failure routing, lifecycle events |
 | Defer | engine#635 | Namespace rename — schedule when quiet |
 
+**For ledger sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P0 (Phase 1) | ledger#175 | Attestation transaction safety for #141 |
+| P1 (Phase 2) | ledger#172 | Routing rationale in audit trail → trust UI |
+| Defer | ledger#137 | Artifact trust scoring |
+
 **For qhorus sessions:**
 
 | Priority | Issue | What it unblocks |
 |---|---|---|
 | P2 (after #141) | qhorus#342 | V1/V4 evidential checks |
+
+**For blocks sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P1 (Phase 2) | blocks#32, #34, #37 | CBR routing signal pipeline |
+
+**For blocks-ui sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P0 (all phases) | blocks-ui#41 | Devtown governance workbench — gates all devtown UI |
+| P1 | blocks-ui#47 | Audit-trail-viewer fix |
+| P1 | blocks-ui#49, #50 | TypedDataSet integration |
+
+**For pages sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P0 (gates blocks-ui) | pages#111 | Foundation for blocks-ui hosting |
+| P1 | pages#129, #154 | Data table components |
+| P1 | pages#138, #139 | Action button, modal/dialog |
+
+**For worker sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P2 (Phase 3) | worker#3, worker#10 | Worker execution model, handler delegation |
+
+**For claudony sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P2 (Phase 3) | claudony#85 | Agent onboarding from CaseDefinition |
+
+**For platform sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P2 (Phase 3) | platform#134 | Shared embedding similarity for CBR |
+| Defer | platform#147, #146 | Notification system (gates devtown#16) |
+
+**For connectors sessions:**
+
+| Priority | Issue | What it unblocks |
+|---|---|---|
+| P2 (Phase 3) | connectors#69 | Qhorus workbench for agent observation |
 
 **For parent sessions:**
 
