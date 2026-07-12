@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-12-mdp01-the-view-from-forty-thousand-feet.md](2026-07-12-mdp01-the-view-from-forty-thousand-feet.md) | 2026-07-12 | The View from Forty Thousand Feet — EvidentialChecker design, cross-repo roadmap reveals UI pipeline as critical path |
 | [2026-07-10-mdp01-the-missing-step.md](2026-07-10-mdp01-the-missing-step.md) | 2026-07-10 | The Missing Step — CBR Phase 1: structured PR similarity model and precedent retrieval |
 | [2026-07-07-mdp01-trust-closes-the-loop.md](2026-07-07-mdp01-trust-closes-the-loop.md) | 2026-07-07 | Trust closes the loop — trust-modulated attestation confidence via engine-ledger TrustGatedAttestationPolicy; CDI augmentation gap between mvn test and mvn install; defensive try/catch for audit trail protection |
 | [2026-06-30-mdp01-a-governance-surface-for-casehub.md](2026-06-30-mdp01-a-governance-surface-for-casehub.md) | 2026-06-30 | A governance surface for CaseHub — six-view governance workbench; GovernanceQueryService extraction; WebSocket CDI event bridge; Quinoa + casehub-pages frontend |
