@@ -461,7 +461,7 @@ EventLog captures which binding fired, including activation source.
 
 ## Out of scope
 
-- Per-capability precedent activation thresholds (global is sufficient for v1) — casehubio/devtown#TBD
-- Similarity-weighted evidence accumulation (count-based is sufficient for v1) — casehubio/devtown#TBD
-- Adding `activationSource: "content-analysis"` to existing bindings (minor symmetry enhancement) — casehubio/devtown#TBD
-- Precedent activation for currently-unconditional capabilities (they already fire) — casehubio/devtown#TBD
+- Per-capability precedent activation thresholds (global is sufficient for v1) — casehubio/devtown#146
+- Similarity-weighted evidence accumulation (count-based is sufficient for v1) — casehubio/devtown#147
+- Adding `activationSource: "content-analysis"` to existing bindings (minor symmetry enhancement) — casehubio/devtown#148
+- Precedent activation for currently-unconditional capabilities (they already fire) — casehubio/devtown#149
