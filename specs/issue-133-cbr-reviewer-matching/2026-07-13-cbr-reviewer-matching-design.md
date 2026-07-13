@@ -15,11 +15,13 @@ CBR retrieval already delivers per-worker, per-capability outcome data from simi
 
 Enhance `TrustWeightedAgentStrategy` to incorporate a similarity-weighted success rate bonus from CBR experiences. When similar past cases exist and a `cbrWeight` is configured, agents that performed well on those cases receive a scoring boost. When no experiences exist or `cbrWeight` is zero, behavior is identical to today.
 
+**Approach divergence from issue #133:** The issue describes a `PrecedentWeightedStrategy` that wraps `TrustWeightedAgentStrategy`. This design modifies `TrustWeightedAgentStrategy` directly instead — no wrapper, no CDI priority conflict, no dual-strategy coordination. When `cbrWeight` is 0.0, the behavior is identical to today.
+
 Three deliverables across two repos plus devtown integration:
 
 1. **`ExperienceAnalyser`** (engine-api) — shared static utility for computing per-worker success rates from plan trace data
 2. **Enhanced `TrustWeightedAgentStrategy`** (engine-ledger) — incorporates CBR bonus using the shared utility
-3. **Devtown integration** — CBR config, feature extractor, policy configuration
+3. **Devtown integration** — CBR config, feature provider, policy configuration
 
 ## Architecture
 
@@ -58,9 +60,9 @@ public final class ExperienceAnalyser {
 
     public static final Map<RoutingOutcome, Double> DEFAULT_OUTCOME_WEIGHTS = Map.of(
             RoutingOutcome.SUCCESS, 1.0,
-            RoutingOutcome.FAILURE, 0.0,
-            RoutingOutcome.GATE_REJECTED, 0.0,
-            RoutingOutcome.GATE_EXPIRED, 0.0);
+            RoutingOutcome.GATE_EXPIRED, 0.5,
+            RoutingOutcome.GATE_REJECTED, 0.25,
+            RoutingOutcome.FAILURE, 0.0);
 
     public static Map<String, Double> workerSuccessRates(
             List<RetrievedExperience> experiences,
@@ -81,16 +83,18 @@ For each experience where `similarityScore > 0.0`:
 
 Returns `Map<workerId, score>` with scores in [0.0, 1.0]. Empty map when no experiences match.
 
+Negative similarity scores (range [-1.0, 0.0]) are skipped: a dissimilar past case provides no signal about the current one. Outcomes from dissimilar cases are irrelevant, not anti-correlated — a worker performing well on a very different PR says nothing about their performance here.
+
 ### Default outcome weights
 
 | RoutingOutcome | Weight | Rationale |
 |---|---|---|
 | SUCCESS | 1.0 | Full positive signal |
+| GATE_EXPIRED | 0.5 | Partial evidence — assignment made, no explicit rejection |
+| GATE_REJECTED | 0.25 | Weak signal — worker attempted, human intervened |
 | FAILURE | 0.0 | No positive signal |
-| GATE_REJECTED | 0.0 | Human rejected the agent's action |
-| GATE_EXPIRED | 0.0 | No evidence of quality |
 
-Matches blocks' `CbrOutcomeWeights.DEFAULT`. Consumers can override via the `outcomeWeights` parameter.
+Matches blocks' `DefaultCbrOutcomeWeights.DEFAULTS`. Consumers can override via the `outcomeWeights` parameter.
 
 ## Component 2: Enhanced `TrustWeightedAgentStrategy` (engine-ledger)
 
@@ -118,6 +122,26 @@ Default `0.0` means no behavioral change for any app that doesn't configure it. 
 
 New preference key: `cbr-weight` under the trust routing scope. `TrustRoutingPolicyResolver.resolve()` reads it alongside the existing keys.
 
+### Modified `select()` flow
+
+The existing `select()` method gains a CBR pre-computation step before the per-candidate scoring loop:
+
+```
+1. Classify candidates (unchanged)
+2. Bootstrap guard (unchanged)
+3. CBR pre-computation (new):
+     if policy.cbrWeight > 0.0 AND context.experiences() is non-empty:
+       workerIds = eligible QUALIFIED candidates' worker IDs
+       cbrScores = ExperienceAnalyser.workerSuccessRates(
+           context.experiences(), workerIds, capabilityName, DEFAULT_OUTCOME_WEIGHTS)
+     else:
+       cbrScores = empty map
+4. Per-candidate scoring: score(cc, policy, cbrScores)
+5. classifier.decide() (unchanged)
+```
+
+`score()` gains a third parameter (`Map<String, Double> cbrScores`). `buildRationale()` gains the same parameter for attribution.
+
 ### Scoring formula
 
 ```
@@ -127,16 +151,21 @@ BOOTSTRAP:
 QUALIFIED:
   trustBlend = trustScore × blendFactor + workload × (1 - blendFactor)
 
-  if cbrWeight == 0.0 OR experiences empty OR no matching worker data:
+  if cbrWeight == 0.0 OR cbrScores is empty:
       finalScore = trustBlend                   // identical to today
 
+  else if workerId NOT in cbrScores:
+      finalScore = trustBlend                   // no CBR data for this candidate — pure trust
+
   else:
-      cbrBonus = ExperienceAnalyser.workerSuccessRates(...).getOrDefault(workerId, 0.0)
+      cbrBonus = cbrScores.get(workerId)
       finalScore = trustBlend × (1 - cbrWeight) + cbrBonus × cbrWeight
 
 BORDERLINE / EXCLUDED:
   finalScore = 0.0                              // unchanged — CBR cannot rescue
 ```
+
+The per-candidate `NOT in cbrScores` check ensures workers without CBR history retain their pure trust score. Without this, `getOrDefault(workerId, 0.0)` would penalize unknown workers by 20% (at cbrWeight=0.2).
 
 ### Rationale string
 
@@ -152,7 +181,7 @@ When CBR is inactive (cbrWeight == 0 or no experiences):
 
 ### Strategy constraints (from issue)
 
-- Zero precedents = identical result to pure trust routing ✓ (cbrBonus defaults to 0.0)
+- Zero precedents = identical result to pure trust routing ✓ (per-candidate fallback to trustBlend when worker absent from CBR scores map)
 - Bootstrap phase ignores similarity bonus ✓ (BOOTSTRAP branch unchanged)
 - Bonus bounded — cannot override a below-threshold trust score ✓ (BORDERLINE/EXCLUDED score 0.0 regardless)
 - Routing decision log includes precedent attribution ✓ (rationale string)
@@ -175,30 +204,52 @@ cbr:
 
 `timing: CASE_LIFETIME` retrieves once at case open and caches — PR features don't change during a review.
 
-### 3b. `DevtownRoutingFeatureExtractor`
+### 3b. `DevtownCbrFeatureProvider`
 
-**Package:** `io.casehub.devtown.app.routing`
-**Implements:** `RoutingFeatureExtractor` (blocks SPI, available via engine-api)
+**Package:** `io.casehub.devtown.app.cbr`
 
-Extracts PR feature vector fields from the case context and maps them to `FeatureValue` entries for CBR queries:
+CDI bean providing the `Function<CaseContext, Map<String, Object>>` consumed by `LambdaFeatureExtractor` (`io.casehub.api.model.cbr`, sealed `FeatureExtractor` hierarchy) when `featureExtractor: type: lambda` is configured in the case definition YAML.
 
-| Case context field | Feature key | FeatureValue type |
+`FeatureExtractor` is a sealed interface (`permits JqFeatureExtractor, LambdaFeatureExtractor`) — no new implementations needed. The `LambdaFeatureExtractor` takes a `Function<CaseContext, Map<String, Object>>` at construction time. The engine's `DefaultCaseDefinitionRegistry.LambdaFeatureExtractorMixIn` wires the CDI-provided function into the `LambdaFeatureExtractor` during deserialization.
+
+Extracted features:
+
+| Case context field | Feature key | Value type |
 |---|---|---|
-| `.pr.repo` | `repo` | string |
-| `.pr.linesChanged` | `lines-changed` | numeric |
-| `.pr.changedPaths` | `changed-paths` | set |
-| derived from `.pr.changedPaths` via `ModulePathNormalizer` | `modules` | set |
-| derived from `.pr.changedPaths` via extension mapping | `languages` | set |
+| `.pr.repo` | `repo` | String |
+| `.pr.linesChanged` | `lines-changed` | int |
+| `.pr.changedPaths` | `changed-paths` | Set\<String\> |
+| derived from `.pr.changedPaths` via `ModulePathNormalizer` | `modules` | Set\<String\> |
+| derived from `.pr.changedPaths` via extension mapping | `languages` | Set\<String\> |
 | derived from `.pr.changedPaths` via test path pattern | `has-tests` | boolean |
 | derived from `.pr.changedPaths` via config pattern | `touched-configs` | boolean |
 
-The feature extractor applies the same derivation logic as `PrFeatureVector.from()` — modules, languages, hasTests, and touchedConfigs are computed from changed paths, not stored directly in the case context.
-
-`@ApplicationScoped` — displaces the `@DefaultBean` `TextOnlyFeatureExtractor`.
+Delegates to `PrFeatureVector.from()` for module/language/test/config derivation, then builds a typed `Map<String, Object>` from the record fields. This avoids duplicating the derivation logic in `PrFeatureVector` (extension-to-language mapping, `ModulePathNormalizer`, test path patterns, config file detection).
 
 ### 3c. Policy configuration
 
-`DevtownTrustRoutingPolicyProvider.forCapability()` adds `cbrWeight` to the returned `TrustRoutingPolicy`:
+#### `TrustRoutingPolicyKeys` change (engine-api)
+
+New method `cbrWeight()` returning `PreferenceKey<DoublePreference>` for key `cbr-weight` under the scope prefix. Follows the same pattern as `blendFactor()`, `threshold()`, etc.
+
+#### `TrustRoutingPolicyResolver` change (engine-api)
+
+`resolve()` reads the new `cbrWeight` key and passes it as the 9th `TrustRoutingPolicy` constructor argument. Default: `0.0` (from `TrustRoutingPolicy.DEFAULT.cbrWeight()`).
+
+#### `DevtownTrustRoutingPolicyProvider` change
+
+`KEYS` declaration unchanged — `cbrWeight()` is inherited from `TrustRoutingPolicyKeys`.
+
+`forCapability()` resolves `cbrWeight` following the same pattern as `blendFactor`:
+
+```java
+final DoublePreference cbrWeightPref = prefs.get(KEYS.cbrWeight());
+final double cbrWeight = cbrWeightPref != null
+                         ? cbrWeightPref.value()
+                         : CBR_WEIGHT_DEFAULTS.getOrDefault(capabilityName, 0.0);
+```
+
+Per-capability hardcoded defaults (used when no preference is set):
 
 | Capability | cbrWeight | Rationale |
 |---|---|---|
@@ -211,7 +262,7 @@ The feature extractor applies the same derivation logic as `PrFeatureVector.from
 | `merge-executor` | 0.0 | Irreversible — pure trust, no CBR boost |
 | `ci-runner` | 0.0 | Deterministic execution |
 
-`cbrWeight` reads from preferences (scope: `casehubio.devtown.trust-routing.<capability>.cbr-weight`) so operators can tune per-capability without code changes.
+Preference scope: `casehubio.devtown.trust-routing.<capability>.cbr-weight` — operators can tune per-capability without code changes. Preference overrides the hardcoded default.
 
 ## Component 4: Deferred — blocks#55
 
@@ -243,6 +294,7 @@ Refactor `CbrAgentRoutingStrategy.analyseExperiences()` to delegate to the share
 | `cbrWeight = 0.2`, one agent with CBR bonus | Score = trust × 0.8 + cbrBonus × 0.2 |
 | Agent with lower trust but higher CBR bonus wins | Issue acceptance criterion |
 | Zero precedents = same result as pure trust | Issue constraint |
+| Asymmetric CBR: agent A has history, agent B has none — B's score = pure trustBlend | Zero-precedent constraint per-candidate |
 | BOOTSTRAP candidates get no CBR bonus | Issue constraint |
 | BORDERLINE agent not rescued by CBR | Issue constraint |
 | Rationale includes `cbr_bonus` when active | Transparent attribution |
@@ -252,14 +304,17 @@ Refactor `CbrAgentRoutingStrategy.analyseExperiences()` to delegate to the share
 
 | Test | What it verifies |
 |---|---|
-| `DevtownRoutingFeatureExtractor` maps PR fields correctly | Feature extraction |
+| `DevtownCbrFeatureProvider` maps PR fields correctly | Feature extraction |
 | `DevtownTrustRoutingPolicyProvider` returns `cbrWeight = 0.2` for review caps | Policy config |
 | `DevtownTrustRoutingPolicyProvider` returns `cbrWeight = 0.0` for merge-executor | Policy config |
 | Integration: agent selection shifts with CBR data | End-to-end acceptance |
 
 ## Cross-repo dependency order
 
-1. **engine-api** — `ExperienceAnalyser` utility (no deps on other changes)
-2. **engine-ledger** — `TrustRoutingPolicy.cbrWeight` + strategy enhancement (depends on 1)
-3. **devtown** — feature extractor, policy config, YAML config (depends on 2)
-4. **blocks#55** — deferred refactoring (depends on 1, independent of 2-3)
+1. **engine-api** — `ExperienceAnalyser` utility + `TrustRoutingPolicy.cbrWeight` field + `TrustRoutingPolicyKeys.cbrWeight()` key + `TrustRoutingPolicyResolver` 9th-arg update (no deps on other changes)
+2. **engine-ledger** — `TrustWeightedAgentStrategy` CBR enhancement (depends on 1). Test-only: add `0.0` as 9th `TrustRoutingPolicy` constructor arg to all test instances.
+3. **engine-ai** — test-only: add `0.0` as 9th `TrustRoutingPolicy` constructor arg to `SemanticAgentRoutingStrategyTest` instances (depends on 1, independent of 2)
+4. **devtown** — feature provider, policy config, YAML config (depends on 2)
+5. **blocks#55** — deferred refactoring (depends on 1, independent of 2-4)
+
+Adding `cbrWeight` as a 9th field to the `TrustRoutingPolicy` record is a breaking change — every constructor call across engine-api, engine-ledger, engine-ai, and devtown must be updated. The migration is mechanical: add `0.0` as the 9th argument at every non-devtown call site. Devtown call sites use the per-capability cbrWeight from §3c.
