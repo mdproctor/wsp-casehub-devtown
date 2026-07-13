@@ -1,0 +1,15 @@
+# Teaching routing to remember
+
+Trust-weighted routing picks the best reviewer by accumulated trust scores. Two agents both QUALIFIED for security review, one with 0.85 trust, the other with 0.87 — the higher number wins. Every time, regardless of context. The routing engine knows these agents' track records across all past work, but has no concept of *this kind of work*. A security specialist who consistently catches auth vulnerabilities in similar PRs scores the same as a generalist who's never seen one.
+
+The CBR pipeline already delivers exactly this signal. When a PR arrives, the engine retrieves similar past cases with plan traces recording which agent handled which capability and what happened. That data was flowing into `AgentRoutingContext.experiences()` and being ignored by `TrustWeightedAgentStrategy`.
+
+I wanted to close that gap without adding another strategy class. The trust strategy already receives the experience data — making it use the data is completing its implementation, not adding domain-specific logic. When `cbrWeight` is zero (the default for every app that doesn't configure it), the formula collapses to exactly what it was before. When it's 0.2, the scoring becomes `trustBlend * 0.8 + cbrBonus * 0.2` — enough for a specialist with slightly lower trust to beat a generalist with no relevant history.
+
+The interesting design question was where the shared computation belongs. The `ExperienceAnalyser` utility — which computes per-worker success rates from plan trace data, weighted by case similarity — sits in engine-api alongside the types it operates on. Both `TrustWeightedAgentStrategy` in engine-ledger and `CbrAgentRoutingStrategy` in blocks need this computation. Blocks already had its own copy in `analyseExperiences()`. We put the shared version in engine-api and filed blocks#55 to refactor the duplicate away later.
+
+The design review earned its cost. Claude caught that the original scoring formula would silently penalise workers with no CBR history — `getOrDefault(workerId, 0.0)` hands a zero to the blend, dragging the effective score down by 20% compared to pure trust. The fix is a per-candidate check: if a worker has no CBR data, they keep their pure trustBlend. Only workers *with* history get the blend applied. The review also caught that the spec's outcome weights didn't match the production values in blocks, and that three types referenced in the feature extractor design didn't exist in the engine API.
+
+The devtown side is straightforward. `DevtownTrustRoutingPolicyProvider` now returns `cbrWeight=0.2` for security, architecture, and style review — the capabilities where reviewer history matters. Merge execution and CI stay at zero: those are deterministic, and CBR signals add noise. The case definition picks up a `cbr:` block with JQ feature extraction so the engine's retrieval pipeline populates the experience data that feeds the scoring formula.
+
+Three engine commits, two devtown commits, one shared utility, zero new classes in devtown. The routing engine remembers now.
