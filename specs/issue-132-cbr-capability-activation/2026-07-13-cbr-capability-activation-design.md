@@ -47,6 +47,46 @@ public record CapabilityOutcome(String outcome, String detail) {
 
 **Change `Precedent.capabilityOutcomes`** from `Map<String, String>` to `Map<String, CapabilityOutcome>`.
 
+#### Consolidation: MemoryContext.hasRisk()
+
+`MemoryContext.hasRisk()` contains the same "is this a finding" logic as `CapabilityOutcome.hadFindings()`, operating on raw `Memory` attributes with its own `SAFE_OUTCOMES = Set.of("approved", "passed")`. This is the same business rule in two places — they will drift independently.
+
+Refactor `hasRisk()` to delegate to `CapabilityOutcome.hadFindings()` for the COMPLETED-with-detail evaluation. The FAILED check stays separate — it is a different business rule (operational failure is a risk signal, not a domain finding):
+
+```java
+private static boolean hasRisk(List<Memory> memories) {
+    return memories.stream().anyMatch(m -> {
+        String outcome = m.attributes().get(MemoryAttributeKeys.OUTCOME);
+        if (ReviewOutcome.FAILED.name().equals(outcome)) return true;
+        String detail = m.attributes().get(DevtownMemoryKeys.OUTCOME_DETAIL);
+        return new CapabilityOutcome(outcome, detail).hadFindings();
+    });
+}
+```
+
+Remove the now-unused `SAFE_OUTCOMES` constant from `MemoryContext`.
+
+#### Serialization in toContextMap()
+
+`CapabilityOutcome` serializes as `Map<String, String>` with keys `outcome` and `detail`:
+
+```java
+"capabilityOutcomes", p.capabilityOutcomes().entrySet().stream()
+    .collect(Collectors.toMap(
+        Map.Entry::getKey,
+        e -> {
+            var co = e.getValue();
+            var m = new LinkedHashMap<String, String>();
+            m.put("outcome", co.outcome());
+            if (co.detail() != null) m.put("detail", co.detail());
+            return m;
+        }))
+```
+
+Produces: `{"security-review": {"outcome": "COMPLETED", "detail": "approved"}, ...}`.
+
+Null `detail` is omitted (not serialized as null) to keep the context lean.
+
 ### Move Precedent to domain/cbr/
 
 `Precedent` is currently in `review/` but depends only on domain types (`SimilarityScore`, `PrFeatureVector`, `UUID`, and now `CapabilityOutcome`). It belongs in `domain/cbr/` alongside the other CBR vocabulary types. Moving it lets `PrecedentActivationPolicy` work with typed `List<Precedent>` without introducing a dependency from `domain/` on `review/`.
@@ -55,9 +95,7 @@ Callers in `review/` (`CbrRetrievalService`, `MemoryContext`) and `app/` (`Defau
 
 ### PrecedentActivationPolicy
 
-Pure Java class in `devtown-domain/cbr/`. Stateless evaluation. Two methods:
-
-**Typed method** — for direct use and unit testing:
+Pure Java class in `devtown-domain/cbr/`. Stateless evaluation. Single typed method:
 
 ```java
 public final class PrecedentActivationPolicy {
@@ -77,37 +115,153 @@ public final class PrecedentActivationPolicy {
         }
         return Set.copyOf(result);
     }
+
+    private static Map<String, Long> countFindings(List<Precedent> precedents) {
+        // For each precedent, for each capability with hadFindings() == true,
+        // increment the count for that capability.
+    }
 }
 ```
 
-**Serialized-form method** — for use inside binding conditions (reads from the case context's serialized `Map<String, Object>` representation, no `CaseContext` engine API dependency):
+**No engine API dependency.** `devtown-domain` does not depend on `casehub-api`. Binding conditions consume the pre-computed result (see below).
+
+### Pre-computation at recall time
+
+Precedent data is immutable during the case lifecycle — it's set once at case creation via `CaseMemoryRecaller.recall()` and never changes (even on `revisePr()`, which invalidates analysis but preserves memory context). Evaluating activation thresholds once at recall time is semantically equivalent to evaluating on every context change, but architecturally simpler.
+
+`CaseMemoryRecaller.recall()` evaluates `PrecedentActivationPolicy.evaluate()` after retrieving precedents and passes the result into `MemoryContext`:
 
 ```java
-public static boolean shouldActivateFromContext(
-        List<Map<String, Object>> serializedPrecedents,
-        String capability,
-        int minFindings, double minFraction) {
-    // Extracts capabilityOutcomes from each serialized precedent map,
-    // constructs CapabilityOutcome to reuse hadFindings() logic,
-    // applies threshold. Returns true if capability should activate.
+// In CaseMemoryRecaller.recall():
+List<Precedent> precedents = retrievePrecedents(pr, tenantId);
+Set<String> activations = evaluateActivations(precedents);
+return new MemoryContext(contributorHistory, codeAreaHistory, precedents, activations);
+```
+
+```java
+private Set<String> evaluateActivations(List<Precedent> precedents) {
+    if (precedents.isEmpty()) return Set.of();
+    Preferences cbrPrefs = preferenceProvider.resolve(
+        SettingsScope.of("casehubio", "devtown", "cbr"));
+    int minFindings = cbrPrefs.getOrDefault(
+        CbrPreferenceKeys.PRECEDENT_ACTIVATION_MIN_FINDINGS).value();
+    double minFraction = cbrPrefs.getOrDefault(
+        CbrPreferenceKeys.PRECEDENT_ACTIVATION_MIN_FRACTION).value();
+    return PrecedentActivationPolicy.evaluate(precedents, minFindings, minFraction);
 }
 ```
 
-Both methods use `CapabilityOutcome.hadFindings()` as the single source of truth for what constitutes a "finding."
+`MemoryContext` gains a `Set<String> precedentActivations` field:
 
-**No engine API dependency.** `devtown-domain` does not depend on `casehub-api`. The binding condition lambda in `PrReviewCaseDefinition` (in `review/`, which does depend on the engine API) extracts `memory.precedents` from `CaseContext` as `List<Map<String, Object>>` and passes it to `shouldActivateFromContext`.
+```java
+public record MemoryContext(
+    List<Memory> contributorHistory,
+    List<Memory> codeAreaHistory,
+    List<Precedent> precedents,
+    Set<String> precedentActivations
+) {
+    public static final MemoryContext EMPTY =
+        new MemoryContext(List.of(), List.of(), List.of(), Set.of());
+    // ...
+}
+```
+
+`toContextMap()` serializes it:
+
+```java
+"precedentActivations", List.copyOf(precedentActivations)
+```
+
+This eliminates the need for a serialized-form evaluation method in `PrecedentActivationPolicy`. The policy has one method (`evaluate`) that works on typed `List<Precedent>` — clean and testable. Binding conditions check the pre-computed result.
+
+### Goal and merge binding condition updates
+
+**Critical fix:** existing goal conditions and merge binding conditions use the pattern:
+
+```
+(securitySensitive == false) OR (securityReview.outcome == "APPROVED")
+```
+
+When `securitySensitive == false` (the precondition for the precedent binding), the first branch evaluates `true` immediately. The precedent-triggered security review runs but nothing gates on it — the case can complete and merge while the review is still running.
+
+**Updated condition:**
+
+```
+(securitySensitive == false AND securityReview == null) OR (securityReview.outcome == "APPROVED")
+```
+
+"Security is not needed" only when no security review exists (neither content-triggered nor precedent-triggered). Once any binding creates `securityReview`, the case gates on its outcome.
+
+**All affected sites — Java DSL:**
+
+`pr-approved` goal:
+```java
+var prApproved = Goal.builder()
+    .name("pr-approved").kind(GoalKind.SUCCESS)
+    .condition(ctx ->
+        ((Boolean.FALSE.equals(ctx.getPath("codeAnalysis.securitySensitive")) &&
+            ctx.get("securityReview") == null) ||
+            "APPROVED".equals(ctx.getPath("securityReview.outcome"))) &&
+        ((Boolean.FALSE.equals(ctx.getPath("codeAnalysis.architectureCrossing")) &&
+            ctx.get("architectureReview") == null) ||
+            "APPROVED".equals(ctx.getPath("architectureReview.outcome"))) &&
+        "APPROVED".equals(ctx.getPath("styleCheck.outcome")) &&
+        "APPROVED".equals(ctx.getPath("testCoverage.outcome")) &&
+        "APPROVED".equals(ctx.getPath("performanceAnalysis.outcome")))
+    .build();
+```
+
+`security-verified` goal:
+```java
+var securityVerified = Goal.builder()
+    .name("security-verified").kind(GoalKind.SUCCESS)
+    .condition(ctx ->
+        (Boolean.FALSE.equals(ctx.getPath("codeAnalysis.securitySensitive")) &&
+            ctx.get("securityReview") == null) ||
+        "APPROVED".equals(ctx.getPath("securityReview.outcome")))
+    .build();
+```
+
+`enqueue-for-merge` and `merge-direct` bindings: same pattern applied to the security and architecture conditions within their `when` lambdas.
+
+**All affected sites — YAML:**
+
+`pr-approved` goal:
+```yaml
+condition: >-
+  .pr.status == "merged" or
+  (((.codeAnalysis.securitySensitive == false and .securityReview == null) or
+    .securityReview.outcome == "APPROVED") and
+   ((.codeAnalysis.architectureCrossing == false and .architectureReview == null) or
+    .architectureReview.outcome == "APPROVED") and
+   .styleCheck.outcome == "APPROVED" and
+   .testCoverage.outcome == "APPROVED" and
+   .performanceAnalysis.outcome == "APPROVED")
+```
+
+`security-verified` goal:
+```yaml
+condition: >-
+  .pr.status == "merged" or
+  (.codeAnalysis.securitySensitive == false and .securityReview == null) or
+  .securityReview.outcome == "APPROVED"
+```
+
+`enqueue-for-merge` and `merge-direct` bindings: same pattern applied to the security and architecture conditions within their `when` expressions.
+
+**Total: 7 condition sites × 2 representations (Java DSL + YAML) = 14 updates.**
 
 ### Binding additions in PrReviewCaseDefinition
 
-Two new bindings. Pattern for `precedent-security-review`:
+Two new bindings in both Java DSL and YAML. Pattern for `precedent-security-review`:
 
+**Java DSL:**
 ```java
 def.getBindings().add(Binding.builder().name("precedent-security-review").on(trigger)
     .when(new LambdaExpressionEvaluator(ctx ->
         Boolean.TRUE.equals(ctx.getPath("codeAnalysis.complete")) &&
         !Boolean.TRUE.equals(ctx.getPath("codeAnalysis.securitySensitive")) &&
-        precedentActivates(ctx, ReviewDomain.SECURITY_REVIEW,
-            precedentMinFindings, precedentMinFraction) &&
+        precedentActivates(ctx, ReviewDomain.SECURITY_REVIEW) &&
         ctx.get("securityReview") == null))
     .contextWrite(Map.of("securityReview", Map.of("activationSource", "precedent")))
     .capability(securityReviewCap)
@@ -115,22 +269,41 @@ def.getBindings().add(Binding.builder().name("precedent-security-review").on(tri
     .outcomePolicy(REROUTE_POLICY)
     .build());
 
-// Helper in PrReviewCaseDefinition (review module — has CaseContext access):
+// Helper — no threshold parameters, just list membership:
 @SuppressWarnings("unchecked")
-private static boolean precedentActivates(CaseContext ctx, String capability,
-        int minFindings, double minFraction) {
-    var precedents = (List<Map<String, Object>>) ctx.getPath("memory.precedents");
-    return PrecedentActivationPolicy.shouldActivateFromContext(
-        precedents, capability, minFindings, minFraction);
+private static boolean precedentActivates(CaseContext ctx, String capability) {
+    var activations = (List<String>) ctx.getPath("memory.precedentActivations");
+    return activations != null && activations.contains(capability);
 }
 ```
 
-Same shape for `precedent-architecture-review` (checks `!codeAnalysis.architectureCrossing`, writes to `architectureReview`).
+**YAML:**
+```yaml
+- name: precedent-security-review
+  on: { contextChange: {} }
+  when: >-
+    .codeAnalysis.complete == true and
+    .codeAnalysis.securitySensitive == false and
+    (.memory.precedentActivations // [] | any(. == "security-review")) and
+    .securityReview == null
+  contextWrite:
+    securityReview:
+      activationSource: precedent
+  capability: security-review
+  conflictResolverStrategy: DEEP_MERGE
+  outcomePolicy:
+    onDecline: REROUTE
+    onFailure: REROUTE
+    onExpired: REROUTE
+    maxRerouteAttempts: 2
+```
+
+Same shape for `precedent-architecture-review` (checks `!codeAnalysis.architectureCrossing`, writes to `architectureReview`, YAML uses `.memory.precedentActivations // [] | any(. == "architecture-review")`).
 
 **Condition logic:**
 1. `codeAnalysis.complete` — wait for content analysis first
 2. `!codeAnalysis.securitySensitive` — only fire when content analysis didn't already trigger
-3. `PrecedentActivationPolicy.shouldActivate(...)` — threshold check against precedent data
+3. `precedentActivates(...)` — check pre-computed activation result
 4. `securityReview == null` — standard double-dispatch guard
 
 **Audit trail:** `contextWrite` writes `activationSource: "precedent"` before capability dispatch. DEEP_MERGE preserves it when capability output merges on top. Final context: `{securityReview: {activationSource: "precedent", outcome: "APPROVED"}}`.
@@ -154,21 +327,57 @@ Global thresholds. Per-capability thresholds can be added later without interfac
 
 ### Parameter passing
 
-`PrReviewCaseDefinition.build()` gains two parameters (`precedentMinFindings`, `precedentMinFraction`) captured in binding condition closures. The caller resolves them from preferences at case definition build time.
+No new parameters for `PrReviewCaseDefinition.build()`. The threshold values are resolved from preferences at recall time in `CaseMemoryRecaller`, not at case definition build time. Binding conditions check the pre-computed `memory.precedentActivations` list — no threshold parameters in closures.
+
+### DefaultCbrRetrievalService changes
+
+`enrichOutcomes()` retrieves `OUTCOME_DETAIL` alongside `OUTCOME`:
+
+```java
+private Map<String, CapabilityOutcome> enrichOutcomes(UUID caseId, String contributor, String tenantId) {
+    // ... existing query logic ...
+    var outcomes = new LinkedHashMap<String, CapabilityOutcome>();
+    for (var fact : outcomeFacts) {
+        String capability = fact.attributes().get(DevtownMemoryKeys.CAPABILITY);
+        String outcome = fact.attributes().get(MemoryAttributeKeys.OUTCOME);
+        String detail = fact.attributes().get(DevtownMemoryKeys.OUTCOME_DETAIL);
+        if (capability != null && outcome != null) {
+            outcomes.put(capability, new CapabilityOutcome(outcome, detail));
+        }
+    }
+    return outcomes;
+}
+```
+
+`aggregateOutcome()` updated to work with `CapabilityOutcome`:
+
+```java
+private String aggregateOutcome(Map<String, CapabilityOutcome> capabilityOutcomes) {
+    boolean anyFailed = capabilityOutcomes.values().stream()
+        .anyMatch(co -> "FAILED".equals(co.outcome()));
+    if (anyFailed) return "failed";
+    boolean anyFindings = capabilityOutcomes.values().stream()
+        .anyMatch(CapabilityOutcome::hadFindings);
+    return anyFindings ? "flagged" : "approved";
+}
+```
+
+Key semantic improvement: old code checked `allApproved` against raw `"COMPLETED"` which doesn't distinguish approval from findings. New code uses `hadFindings()` — if any capability had findings, the aggregate is "flagged"; otherwise "approved".
 
 ## Change scope
 
 | File | Module | Change |
 |------|--------|--------|
 | `CapabilityOutcome.java` | domain/cbr | New record |
-| `PrecedentActivationPolicy.java` | domain/cbr | New class (typed + serialized-form methods) |
+| `PrecedentActivationPolicy.java` | domain/cbr | New class (typed `evaluate` method only) |
 | `CbrPreferenceKeys.java` | domain/cbr | Two new preference keys |
 | `Precedent.java` | review → domain/cbr | Move to domain + change `capabilityOutcomes` type |
-| `MemoryContext.java` | review | Update `toContextMap()` serialization, update Precedent import |
+| `MemoryContext.java` | review | Add `precedentActivations` field, update `toContextMap()` serialization, refactor `hasRisk()` to use `CapabilityOutcome`, remove `SAFE_OUTCOMES` constant |
 | `CbrRetrievalService.java` | review | Update Precedent import |
-| `PrReviewCaseDefinition.java` | review | Two new bindings, new build parameters |
-| `DefaultCbrRetrievalService.java` | app | `enrichOutcomes()` retrieves OUTCOME_DETAIL |
-| `DefaultCbrRetrievalService.java` | app | `aggregateOutcome()` works with CapabilityOutcome |
+| `PrReviewCaseDefinition.java` | review | Two new bindings, updated goal conditions and merge binding conditions (7 sites), new `precedentActivates` helper |
+| `pr-review.yaml` | review/resources | Two new bindings, updated goal conditions and merge binding conditions (7 sites) |
+| `DefaultCbrRetrievalService.java` | app | `enrichOutcomes()` retrieves OUTCOME_DETAIL, returns `Map<String, CapabilityOutcome>`. `aggregateOutcome()` uses `CapabilityOutcome` and `hadFindings()` |
+| `CaseMemoryRecaller.java` | app | `evaluateActivations()` calls `PrecedentActivationPolicy.evaluate()` at recall time, passes result to `MemoryContext` |
 
 ## Testing
 
@@ -194,9 +403,12 @@ Global thresholds. Per-capability thresholds can be added later without interfac
 
 ### Integration / wiring updates
 
-- `DefaultCbrRetrievalServiceTest` — enrichOutcomes returns CapabilityOutcome with detail
-- `MemoryContextTest` — serialization with richer type
-- Binding integration test — precedent binding fires when content analysis doesn't trigger but threshold met; doesn't fire when content analysis already triggers; `activationSource: "precedent"` in context
+- `DefaultCbrRetrievalServiceTest` — enrichOutcomes returns CapabilityOutcome with detail; aggregateOutcome uses hadFindings for flagged/approved distinction
+- `MemoryContextTest` — serialization with richer type; `precedentActivations` field serialized; `hasRisk()` delegates to CapabilityOutcome
+- `CaseMemoryRecallerTest` — `evaluateActivations()` calls policy with threshold preferences; result passed into MemoryContext; empty precedents produce empty activations
+- `PrReviewCaseDefinitionEquivalenceTest` — verify two new bindings exist in both YAML and DSL; verify updated goal/binding count matches
+- Binding integration test — precedent binding fires when content analysis doesn't trigger but activation is pre-computed; doesn't fire when content analysis already triggers; `activationSource: "precedent"` in context
+- Goal integration test — `pr-approved` and `security-verified` goals gate on `securityReview.outcome == "APPROVED"` when `securityReview` context key exists (even with `securitySensitive == false`); goals pass immediately when no `securityReview` key exists and `securitySensitive == false`
 
 ## End-to-end data flow
 
@@ -206,8 +418,14 @@ PR arrives
     → DefaultCbrRetrievalService.findSimilar()
       → enrichOutcomes() retrieves OUTCOME + OUTCOME_DETAIL
       → returns List<Precedent> with Map<String, CapabilityOutcome>
-  → MemoryContext.toContextMap() serializes with outcome + detail
-  → Case created with memory.precedents in initial context
+    → evaluateActivations(precedents)
+      → PrecedentActivationPolicy.evaluate(precedents, minFindings, minFraction)
+      → returns Set<String> e.g. {"security-review"}
+    → MemoryContext(contributorHistory, codeAreaHistory, precedents, activations)
+  → MemoryContext.toContextMap() serializes:
+      memory.precedents (with outcome + detail)
+      memory.precedentActivations: ["security-review"]
+  → Case created with memory in initial context
 
 Engine evaluates bindings on context change:
   → initial-analysis fires → produces codeAnalysis
@@ -215,18 +433,23 @@ Engine evaluates bindings on context change:
   Path A (content-triggered):
     → codeAnalysis.securitySensitive == true
     → security-review binding fires (existing, unchanged)
+    → Goal condition: securitySensitive==true → first branch false → gates on outcome
 
   Path B (precedent-triggered):
     → codeAnalysis.securitySensitive == false
-    → precedent-security-review evaluates memory.precedents
-    → PrecedentActivationPolicy: 3/5 precedents had security findings → activate
+    → precedent-security-review checks memory.precedentActivations
+    → "security-review" present → binding fires
     → contextWrite: {securityReview: {activationSource: "precedent"}}
     → dispatches security-review capability
+    → Goal condition: securitySensitive==false but securityReview!=null
+      → first branch false → gates on securityReview.outcome == "APPROVED"
 
   Path C (no activation):
     → codeAnalysis.securitySensitive == false
-    → PrecedentActivationPolicy: 0/5 precedents had findings → skip
-    → security-review never fires
+    → "security-review" NOT in memory.precedentActivations → skip
+    → securityReview remains null
+    → Goal condition: securitySensitive==false and securityReview==null
+      → first branch true → goal satisfied immediately
 
 EventLog captures which binding fired, including activation source.
 ```
@@ -238,7 +461,7 @@ EventLog captures which binding fired, including activation source.
 
 ## Out of scope
 
-- Per-capability precedent activation thresholds (global is sufficient for v1)
-- Similarity-weighted evidence accumulation (count-based is sufficient for v1)
-- Adding `activationSource: "content-analysis"` to existing bindings (minor symmetry enhancement)
-- Precedent activation for currently-unconditional capabilities (they already fire)
+- Per-capability precedent activation thresholds (global is sufficient for v1) — casehubio/devtown#TBD
+- Similarity-weighted evidence accumulation (count-based is sufficient for v1) — casehubio/devtown#TBD
+- Adding `activationSource: "content-analysis"` to existing bindings (minor symmetry enhancement) — casehubio/devtown#TBD
+- Precedent activation for currently-unconditional capabilities (they already fire) — casehubio/devtown#TBD
