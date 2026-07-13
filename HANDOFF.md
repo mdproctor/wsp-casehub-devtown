@@ -1,3 +1,5 @@
+*Updated: #144 closed — removed from backlog.*
+
 # HANDOFF — 2026-07-13
 
 ## Last Session
@@ -10,7 +12,6 @@ Pick next work. CBR Phase 2 (#132, #133) or #124 (supersede/relink) are candidat
 
 ## What's Left
 
-- **#144** — TrustFeedbackClosedLoopTest broken (engine SNAPSHOT drift, `PlanItemStatus` rename in work-adapter) · XS · Low
 - **#124** — supersede/relink backend · M · Med
 - **parent#361** — docs: sync casehub-devtown.md for CBR Phase 1 · XS · Low
 
