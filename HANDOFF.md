@@ -1,17 +1,18 @@
-# HANDOFF — 2026-07-13
+# HANDOFF — 2026-07-14
 
 ## Last Session
 
-#132 CBR-enhanced capability activation implemented and closed. `PrecedentActivationPolicy` evaluates findings-based evidence from similar past cases against dual thresholds (minFindings=2, minFraction=0.4). Pre-computed at recall time by `CaseMemoryRecaller`, serialized as `memory.precedentActivations`. Two precedent-triggered bindings in both Java DSL and YAML case definitions with `activationSource: "precedent"` audit trail. Critical goal gating fix ensures cases gate on precedent-triggered review outcomes. Design review caught the gating flaw ($13.22, 3 rounds). `Precedent` moved to `domain/cbr/`, `CapabilityOutcome` consolidates findings logic. Landed as `28026e0` on main.
+#133 CBR-enhanced reviewer matching shipped. `ExperienceAnalyser` shared utility in engine-api, `TrustWeightedAgentStrategy` enhanced with `cbrWeight` scoring in engine-ledger, `DevtownTrustRoutingPolicyProvider` wired with per-capability cbrWeight defaults (0.2 for review capabilities), `pr-review.yaml` gains CBR config with JQ feature extraction. Design review caught scoring formula penalty bug, phantom types, and outcome weight mismatch ($10.83, 2 rounds). Engine branch `issue-133-cbr-experience-analyser` (3 commits, not yet merged to engine main). Devtown landed as `27c03ce` on main.
 
 ## Immediate Next Step
 
-Pick next work. CBR Phase 2 continues with #133 (reviewer matching), or #124 (supersede/relink) is independent.
+Engine branch `issue-133-cbr-experience-analyser` in casehub-engine needs merging to engine main (3 commits: ExperienceAnalyser, TrustRoutingPolicy.cbrWeight, TrustWeightedAgentStrategy enhancement). Run `work-end` on that branch or merge manually.
 
 ## What's Left
 
-- **#124** — supersede/relink backend · M · Med
+- **Engine branch** — `issue-133-cbr-experience-analyser` in casehub-engine: 3 commits not yet on engine main · S · Low
 - **parent#361** — docs: sync casehub-devtown.md for CBR Phase 1+2 · XS · Low
+- **blocks#55** — refactor CbrAgentRoutingStrategy to use shared ExperienceAnalyser · S · Low (blocked on engine merge)
 
 ## Cross-Module
 
@@ -22,7 +23,6 @@ Pick next work. CBR Phase 2 continues with #133 (reviewer matching), or #124 (su
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #133 | CBR-enhanced reviewer matching | M | Med | Engine #505 closed, unblocked |
 | #124 | PR supersede/relink backend | M | Med | Independent |
 | #146 | Per-capability precedent activation thresholds | S | Low | Extends #132 |
 | #147 | Similarity-weighted evidence accumulation | S | Med | Extends #132 |
@@ -30,6 +30,6 @@ Pick next work. CBR Phase 2 continues with #133 (reviewer matching), or #124 (su
 
 ## References
 
-- Spec: `specs/issue-132-cbr-capability-activation/2026-07-13-cbr-capability-activation-design.md`
-- Blog: `blog/2026-07-13-mdp03-learning-from-your-own-history.md`
-- Roadmap: `ROADMAP.md` (workspace root)
+- Spec: `specs/issue-133-cbr-reviewer-matching/2026-07-13-cbr-reviewer-matching-design.md`
+- Blog: `blog/2026-07-14-mdp01-teaching-routing-to-remember.md`
+- Design review: `~/adr/casehub-devtown/cbr-reviewer-matching-20260713-215946/`
