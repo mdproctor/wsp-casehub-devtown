@@ -85,6 +85,10 @@ Returns `Map<workerId, score>` with scores in [0.0, 1.0]. Empty map when no expe
 
 Negative similarity scores (range [-1.0, 0.0]) are skipped: a dissimilar past case provides no signal about the current one. Outcomes from dissimilar cases are irrelevant, not anti-correlated — a worker performing well on a very different PR says nothing about their performance here.
 
+### Worker identifier consistency
+
+`eligibleWorkerIds` (from `AgentCandidate.workerId()`) and `ExperiencePlanStep.workerName()` must use the same identifier — the agent binding name declared in the case definition YAML. The plan trace recording mechanism stores the binding name from the routing decision, so these are the same identifier space by construction. A mismatch would cause silent failure (empty CBR scores map, CBR has no effect). The integration test in §Testing strategy, devtown ("agent selection shifts with CBR data") verifies end-to-end that recorded plan trace identifiers match routing candidate identifiers.
+
 ### Default outcome weights
 
 | RoutingOutcome | Weight | Rationale |
@@ -208,9 +212,24 @@ cbr:
 
 **Package:** `io.casehub.devtown.app.cbr`
 
-CDI bean providing the `Function<CaseContext, Map<String, Object>>` consumed by `LambdaFeatureExtractor` (`io.casehub.api.model.cbr`, sealed `FeatureExtractor` hierarchy) when `featureExtractor: type: lambda` is configured in the case definition YAML.
+CDI bean implementing `CbrFeatureFunction` (`io.casehub.api.model.cbr`, engine-api) — a `@FunctionalInterface` extending `Function<CaseContext, Map<String, Object>>`:
 
-`FeatureExtractor` is a sealed interface (`permits JqFeatureExtractor, LambdaFeatureExtractor`) — no new implementations needed. The `LambdaFeatureExtractor` takes a `Function<CaseContext, Map<String, Object>>` at construction time. The engine's `DefaultCaseDefinitionRegistry.LambdaFeatureExtractorMixIn` wires the CDI-provided function into the `LambdaFeatureExtractor` during deserialization.
+```java
+@FunctionalInterface
+public interface CbrFeatureFunction extends Function<CaseContext, Map<String, Object>> {}
+```
+
+The typed interface avoids CDI type erasure: `CDI.current().select(CbrFeatureFunction.class)` resolves unambiguously, whereas raw `Function.class` would match any `Function` bean in the container.
+
+`FeatureExtractor` is a sealed interface (`permits JqFeatureExtractor, LambdaFeatureExtractor`) — no new implementations needed. The `LambdaFeatureExtractor` takes `Function<CaseContext, Map<String, Object>>` at construction time. When `featureExtractor: type: lambda` is configured in the case definition YAML, `DefaultCaseDefinitionRegistry.LambdaFeatureExtractorMixIn` discovers the CDI `CbrFeatureFunction` bean and passes it to the `LambdaFeatureExtractor` constructor.
+
+```java
+@ApplicationScoped
+public class DevtownCbrFeatureProvider implements CbrFeatureFunction {
+    @Override
+    public Map<String, Object> apply(CaseContext context) { ... }
+}
+```
 
 Extracted features:
 
@@ -311,7 +330,7 @@ Refactor `CbrAgentRoutingStrategy.analyseExperiences()` to delegate to the share
 
 ## Cross-repo dependency order
 
-1. **engine-api** — `ExperienceAnalyser` utility + `TrustRoutingPolicy.cbrWeight` field + `TrustRoutingPolicyKeys.cbrWeight()` key + `TrustRoutingPolicyResolver` 9th-arg update (no deps on other changes)
+1. **engine-api** — `ExperienceAnalyser` utility + `CbrFeatureFunction` interface + `TrustRoutingPolicy.cbrWeight` field + `TrustRoutingPolicyKeys.cbrWeight()` key + `TrustRoutingPolicyResolver` 9th-arg update (no deps on other changes)
 2. **engine-ledger** — `TrustWeightedAgentStrategy` CBR enhancement (depends on 1). Test-only: add `0.0` as 9th `TrustRoutingPolicy` constructor arg to all test instances.
 3. **engine-ai** — test-only: add `0.0` as 9th `TrustRoutingPolicy` constructor arg to `SemanticAgentRoutingStrategyTest` instances (depends on 1, independent of 2)
 4. **devtown** — feature provider, policy config, YAML config (depends on 2)
