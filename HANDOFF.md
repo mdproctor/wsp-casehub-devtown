@@ -8,7 +8,7 @@ Second batch sweep — 4 commits on `feat/unblocked-batch` covering #124, #134, 
 
 ## Immediate Next Step
 
-Pick from remaining Tier 1. #150 (CaseMemoryEmitter migration) is S/Low and depends on neocortex#64. Otherwise Tier 2 blockers need foundation work first.
+Pick from Tier 1. #127 (startup hydration) is S/Med and now unblocked — query API already exists in engine. #150 (CaseMemoryEmitter migration) is S/Low, depends on neocortex#64.
 
 ## Cross-Module
 
@@ -20,11 +20,15 @@ Pick from remaining Tier 1. #150 (CaseMemoryEmitter migration) is S/Low and depe
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
+| #127 | PrReviewCaseTracker startup hydration | S | Med | Unblocked — engine query API exists |
 | #150 | Migrate CaseMemoryEmitter to MemoryEmitter | S | Low | Depends on neocortex#64 |
 
 **Tier 2 — Blocked on foundation:**
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+| # | Description | Scale | Complexity | Blocker |
+|---|-------------|-------|------------|---------|
+| #104 | Batch branch git ops | M | Med | claudony workers |
+| #136 | SLA calibration from past assignments | S | Low | Timing data in neocortex + engine |
 
 **Tier 3 — Blocked on blocks-ui#41:**
 
