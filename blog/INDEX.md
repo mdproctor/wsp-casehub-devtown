@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-14-mdp03-supersede-score-split.md](2026-07-14-mdp03-supersede-score-split.md) | 2026-07-14 | Supersede, Score, Split — PR supersede lifecycle state, CBR batch risk scoring, typed bisection with precedent-guided candidate ranking |
 | [2026-07-14-mdp02-small-issues-structural-gaps.md](2026-07-14-mdp02-small-issues-structural-gaps.md) | 2026-07-14 | Small Issues, Structural Gaps — CBR Phase 2 refinements, evidential violation persistence, 8 new MCP tools; two issues blocked on foundation timing data and durable persistence |
 | [2026-07-10-mdp01-the-missing-step.md](2026-07-10-mdp01-the-missing-step.md) | 2026-07-10 | The Missing Step — CBR Phase 1: structured PR similarity model and precedent retrieval |
 | [2026-07-07-mdp01-trust-closes-the-loop.md](2026-07-07-mdp01-trust-closes-the-loop.md) | 2026-07-07 | Trust closes the loop — trust-modulated attestation confidence via engine-ledger TrustGatedAttestationPolicy; CDI augmentation gap between mvn test and mvn install; defensive try/catch for audit trail protection |
