@@ -2,7 +2,7 @@
 
 ## Last Session
 
-#114 configurable default trust score and #91 RBAC role expansion shipped. `MergeQueueService.admit()` resolves trust score from `PreferenceProvider` (default 0.5). Four new roles in `DevtownRoles`: `ENGINEER`, `AUDITOR`, `DATA_CONTROLLER`, `SERVICE`. Endpoint-to-role mapping: PrReviewResource → engineer+service, CodeReviewComplianceResource+GovernanceResource → engineer+auditor, GdprErasureResource → data-controller. IncidentFeedback and MemoryAdmin remain admin-only. Pre-existing CDI `NoOpSlaBreachPolicy` ambiguity fixed via `exclude-types`. Landed as `bc91a4a` on main.
+S/XS batch sweep — 11 commits on `feat/s-xs-batch` covering 15 issues. CBR Phase 2 refinements (per-capability thresholds, similarity-weighted accumulation, activationSource attribution, weight refinement from outcome feedback), evidential violation persistence, merge queue failure rate API with alerting, and 8 new MCP tools. Two issues blocked on foundation gaps (startup hydration needs durable persistence; SLA calibration needs timing data in CBR pipeline). Two closed as no-action-needed/stale (#149, #110). Landed as `127d13e` on main.
 
 ## Immediate Next Step
 
@@ -16,16 +16,16 @@ Pick next work from What's Next.
 
 **Blocked by:**
 - `pages` / `blocks-ui` — pages#111, blocks-ui#41 (gate ALL devtown UI) · L · Med
+- `neocortex-memory-api` + `engine` — timing data in PlanTrace/PlanCbrCase for SLA calibration (#136) · S · Med
+- `engine` + devtown#34 — durable CaseInstanceRepository + list query API for startup hydration (#127) · M · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #124 | PR supersede/relink backend | M | Med | Independent |
-| #146 | Per-capability precedent activation thresholds | S | Low | Extends #132 |
-| #147 | Similarity-weighted evidence accumulation | S | Med | Extends #132 |
 | blocks-ui#41 | blocks-ui Phase 1 — consume shipped components | L | Med | Waiting on blocks-ui |
 
 ## References
 
-- Spec: `docs/specs/issue-114-trust-score-rbac-roles/2026-07-14-trust-score-rbac-design.md`
+- Blog: `blog/2026-07-14-mdp02-small-issues-structural-gaps.md`
