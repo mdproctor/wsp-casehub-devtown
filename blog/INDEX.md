@@ -2,6 +2,7 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-14-mdp04-centralising-memory-recovering-state.md](2026-07-14-mdp04-centralising-memory-recovering-state.md) | 2026-07-14 | Centralising Memory, Recovering State — MemoryEmitter migration, startup hydration, silent CDI fallthrough fix |
 | [2026-07-14-mdp03-supersede-score-split.md](2026-07-14-mdp03-supersede-score-split.md) | 2026-07-14 | Supersede, Score, Split — PR supersede lifecycle state, CBR batch risk scoring, typed bisection with precedent-guided candidate ranking |
 | [2026-07-14-mdp02-small-issues-structural-gaps.md](2026-07-14-mdp02-small-issues-structural-gaps.md) | 2026-07-14 | Small Issues, Structural Gaps — CBR Phase 2 refinements, evidential violation persistence, 8 new MCP tools; two issues blocked on foundation timing data and durable persistence |
 | [2026-07-10-mdp01-the-missing-step.md](2026-07-10-mdp01-the-missing-step.md) | 2026-07-10 | The Missing Step — CBR Phase 1: structured PR similarity model and precedent retrieval |
