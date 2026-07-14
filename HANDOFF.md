@@ -1,3 +1,5 @@
+*Updated: #133, #55 closed — removed from backlog. Engine branch `issue-133-cbr-experience-analyser` already merged to engine main (`88b1e1ce`).*
+
 # HANDOFF — 2026-07-14
 
 ## Last Session
@@ -6,13 +8,11 @@
 
 ## Immediate Next Step
 
-Engine branch `issue-133-cbr-experience-analyser` in casehub-engine needs merging to engine main (3 commits: ExperienceAnalyser, TrustRoutingPolicy.cbrWeight, TrustWeightedAgentStrategy enhancement). Run `work-end` on that branch or merge manually.
+Clean up engine branch `issue-133-cbr-experience-analyser` (already merged as `88b1e1ce`). Then pick next work from What's Next.
 
 ## What's Left
 
-- **Engine branch** — `issue-133-cbr-experience-analyser` in casehub-engine: 3 commits not yet on engine main · S · Low
 - **parent#361** — docs: sync casehub-devtown.md for CBR Phase 1+2 · XS · Low
-- **blocks#55** — refactor CbrAgentRoutingStrategy to use shared ExperienceAnalyser · S · Low (blocked on engine merge)
 
 ## Cross-Module
 
