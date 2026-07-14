@@ -1,14 +1,14 @@
-*Updated: #124, #134, #135 closed — removed from backlog.*
+*Updated: #127, #150 closed — removed from backlog.*
 
 # HANDOFF — 2026-07-14
 
 ## Last Session
 
-Second batch sweep — 4 commits on `feat/unblocked-batch` covering #124, #134, #135. PR supersede/relink (SUPERSEDED terminal state, audit trail links, MCP tool), batch risk scoring from CBR precedent (CbrBatchRiskAssessor, risk-aware batch composition), and precedent-guided bisection heuristics (typed BisectionSplitStrategy API, PrecedentBisectionStrategy). Squashed to `f404c64` on main. BisectionSplitStrategy/BatchSlice refactored from untyped `List<Map>` to `List<QueuedPr>` — engine boundary conversion in MergeBatchCaseHub.
+Closed #150 (MemoryEmitter migration) and #127 (startup hydration) on `issue-150-memory-emitter-hydration`. CaseMemoryEmitter and FeatureVectorEmitter now delegate to neocortex MemoryEmitter bridge. PrReviewCaseTrackerHydrator rebuilds in-memory tracker state from CaseInstanceRepository on startup. Fixed 3 pre-existing test config bugs: InMemoryPlanItemStore alternative class name, SLA breach policy ID, null caseStatus guard in async observers. Landed as `3c4acca` on main.
 
 ## Immediate Next Step
 
-Pick from Tier 1. #127 (startup hydration) is S/Med, #150 (CaseMemoryEmitter migration) is S/Low — both unblocked.
+Tier 1 is empty. Tier 2 items (#104, #136) need foundation work. Next discretionary work: pick from Tier 2 blockers (file foundation issues) or Tier 3/4.
 
 ## Cross-Module
 
@@ -18,17 +18,14 @@ Pick from Tier 1. #127 (startup hydration) is S/Med, #150 (CaseMemoryEmitter mig
 
 **Tier 1 — Unblocked now:**
 
-| # | Description | Scale | Complexity | Notes |
-|---|-------------|-------|------------|-------|
-| #127 | PrReviewCaseTracker startup hydration | S | Med | Unblocked — engine query API exists |
-| #150 | Migrate CaseMemoryEmitter to MemoryEmitter | S | Low | Unblocked — neocortex#64 closed |
+(empty)
 
 **Tier 2 — Blocked on foundation:**
 
 | # | Description | Scale | Complexity | Blocker |
 |---|-------------|-------|------------|---------|
 | #104 | Batch branch git ops | M | Med | claudony workers |
-| #136 | SLA calibration from past assignments | S | Low | CBR retrieval ready (#131 closed); timing fields in PlanTrace still missing |
+| #136 | SLA calibration from past assignments | S | Low | timing fields in PlanTrace still missing |
 
 **Tier 3 — Blocked on blocks-ui#41:**
 
@@ -40,4 +37,4 @@ Pick from Tier 1. #127 (startup hydration) is S/Med, #150 (CaseMemoryEmitter mig
 
 ## References
 
-- Blog: `blog/2026-07-14-mdp03-supersede-score-split.md`
+- Blog: `blog/2026-07-14-mdp04-centralising-memory-recovering-state.md`
