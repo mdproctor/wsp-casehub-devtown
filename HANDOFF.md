@@ -1,14 +1,12 @@
-*Updated: #133, #55 closed — removed from backlog. Engine branch `issue-133-cbr-experience-analyser` already merged to engine main (`88b1e1ce`).*
-
 # HANDOFF — 2026-07-14
 
 ## Last Session
 
-#133 CBR-enhanced reviewer matching shipped. `ExperienceAnalyser` shared utility in engine-api, `TrustWeightedAgentStrategy` enhanced with `cbrWeight` scoring in engine-ledger, `DevtownTrustRoutingPolicyProvider` wired with per-capability cbrWeight defaults (0.2 for review capabilities), `pr-review.yaml` gains CBR config with JQ feature extraction. Design review caught scoring formula penalty bug, phantom types, and outcome weight mismatch ($10.83, 2 rounds). Engine branch `issue-133-cbr-experience-analyser` (3 commits, not yet merged to engine main). Devtown landed as `27c03ce` on main.
+#114 configurable default trust score and #91 RBAC role expansion shipped. `MergeQueueService.admit()` resolves trust score from `PreferenceProvider` (default 0.5). Four new roles in `DevtownRoles`: `ENGINEER`, `AUDITOR`, `DATA_CONTROLLER`, `SERVICE`. Endpoint-to-role mapping: PrReviewResource → engineer+service, CodeReviewComplianceResource+GovernanceResource → engineer+auditor, GdprErasureResource → data-controller. IncidentFeedback and MemoryAdmin remain admin-only. Pre-existing CDI `NoOpSlaBreachPolicy` ambiguity fixed via `exclude-types`. Landed as `bc91a4a` on main.
 
 ## Immediate Next Step
 
-Clean up engine branch `issue-133-cbr-experience-analyser` (already merged as `88b1e1ce`). Then pick next work from What's Next.
+Pick next work from What's Next.
 
 ## What's Left
 
@@ -30,6 +28,4 @@ Clean up engine branch `issue-133-cbr-experience-analyser` (already merged as `8
 
 ## References
 
-- Spec: `specs/issue-133-cbr-reviewer-matching/2026-07-13-cbr-reviewer-matching-design.md`
-- Blog: `blog/2026-07-14-mdp01-teaching-routing-to-remember.md`
-- Design review: `~/adr/casehub-devtown/cbr-reviewer-matching-20260713-215946/`
+- Spec: `docs/specs/issue-114-trust-score-rbac-roles/2026-07-14-trust-score-rbac-design.md`
