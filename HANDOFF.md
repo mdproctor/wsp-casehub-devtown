@@ -1,3 +1,5 @@
+*Updated: parent#361 closed — removed from backlog.*
+
 # HANDOFF — 2026-07-14
 
 ## Last Session
@@ -7,10 +9,6 @@ S/XS batch sweep — 11 commits on `feat/s-xs-batch` covering 15 issues. CBR Pha
 ## Immediate Next Step
 
 Start with #124 (PR supersede/relink) — highest standalone value, no dependencies.
-
-## What's Left
-
-- **parent#361** — docs: sync casehub-devtown.md for CBR Phase 1+2 · XS · Low
 
 ## Cross-Module
 
@@ -29,7 +27,6 @@ Start with #124 (PR supersede/relink) — highest standalone value, no dependenc
 | #124 | PR supersede/relink — case state transitions + audit trail | M | Med | Independent, highest standalone value |
 | #134 | Batch risk scoring from precedent (CBR P3) | S | Med | Extends CBR into merge queue |
 | #135 | Bisection heuristics — similarity to past failures (CBR P3) | S | Med | Smarter bisection on batch failure |
-| parent#361 | Doc sync casehub-devtown.md for CBR | XS | Low | Trailing obligation |
 | #150 | Migrate CaseMemoryEmitter to MemoryEmitter | S | Low | Depends on neocortex#64 |
 
 **Tier 2 — Blocked on foundation (file prereq issues, then wait):**
