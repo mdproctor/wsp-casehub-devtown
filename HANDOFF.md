@@ -1,3 +1,5 @@
+*Updated: #124, #134, #135 closed — removed from backlog.*
+
 # HANDOFF — 2026-07-14
 
 ## Last Session
