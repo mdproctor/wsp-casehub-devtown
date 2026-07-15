@@ -307,6 +307,16 @@ public record BatchSlice(
 
 `BisectionSplitStrategy.split()` gains a `repository` parameter, and `MergeBatchCaseHub.sliceToMap()` includes `map.put("repository", slice.repository())`. These are changes to existing `queue` and `app` module code that must land alongside this spec.
 
+**bisection-splitter inputSchema fix:** The existing `bisection-splitter` capability's inputSchema passes only `prs` and `strategy` — not the `batch` object. The `adaptBisectionSplit()` adapter reads `input.get("batch")` which returns null, causing all batch-level metadata (batchId, targetBranch, bisectionDepth, riskLevel) to fall through to hardcoded defaults. This pre-existing bug also prevents the adapter from providing `repository` to `split()`.
+
+Fix: add `batch: .batch` to the inputSchema, consistent with `batch-ci-runner` which already uses `inputSchema: "{ batch: .batch }"`:
+
+```yaml
+inputSchema: '{ prs: .batch.prs, strategy: (.batch.bisectionStrategy // "trust-weighted"), batch: .batch }'
+```
+
+This makes all batch metadata available to the adapter, fixing both the new `repository` requirement and the pre-existing defaults bug in one change.
+
 ### 5.2 Worker Adapter
 
 ```java
@@ -548,6 +558,7 @@ Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, n
 
 ## 9. Revision History
 
+- **v4 (2026-07-15):** Review round 3 fix. Extended §5.1.1 prerequisite with `bisection-splitter` inputSchema change — added `batch: .batch` to make batch metadata available to the adapter. Fixes both the new `repository` requirement and pre-existing defaults bug.
 - **v3 (2026-07-15):** Review round 2 fixes. Made `createBatchBranch()` idempotent with delete-before-create pattern (§4.2 step 2), fixing stale branch blocking reroutes after merge conflict. Added §6.0.1 prerequisite for `CaseTrackingStatus.fromCaseStatus()` SUPERSEDED mapping.
 - **v2 (2026-07-15):** Review round 1 fixes. Added `repository` to `BatchSlice` prerequisite (§5.1.1). Added null checks for `GitRef.sha()` and merge commit message (§4.2). Added namespace filter and format validation to cleanup observer (§6.1). Added input validation in worker adapter (§5.2). Documented full REROUTES_EXHAUSTED escalation chain (§5.3) and `tipTest` lifecycle (§5.4). Filed [#3](https://github.com/mdproctor/wsp-casehub-devtown/issues/3) (RepoRef domain type), [#4](https://github.com/mdproctor/wsp-casehub-devtown/issues/4) (per-failure-reason outcomePolicy), [#5](https://github.com/mdproctor/wsp-casehub-devtown/issues/5) (cleanup sweep job) for deferred items.
 - **v1 (2026-07-15):** Initial design. Traced complete merge queue lifecycle to identify exact git operations. Two-method port interface, GitHub Git Data API implementation, CDI cleanup observer on CaseLifecycleEvent.
