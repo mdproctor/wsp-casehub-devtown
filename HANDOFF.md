@@ -1,14 +1,12 @@
-*Updated: #127, #150 closed — removed from backlog.*
-
-# HANDOFF — 2026-07-14
+# HANDOFF — 2026-07-15
 
 ## Last Session
 
-Closed #150 (MemoryEmitter migration) and #127 (startup hydration) on `issue-150-memory-emitter-hydration`. CaseMemoryEmitter and FeatureVectorEmitter now delegate to neocortex MemoryEmitter bridge. PrReviewCaseTrackerHydrator rebuilds in-memory tracker state from CaseInstanceRepository on startup. Fixed 3 pre-existing test config bugs: InMemoryPlanItemStore alternative class name, SLA breach policy ID, null caseStatus guard in async observers. Landed as `3c4acca` on main.
+Closed #104 (batch branch management) on `issue-104-batch-branch-management`. Implemented the `batch-ci-runner` worker and `BatchBranchCleanupObserver` for merge queue batch testing. Port interface (`BatchBranchClient`) with GitHub Git Data API adapter. Fixed pre-existing issues: `BatchSlice` repository propagation, `bisection-splitter` inputSchema missing batch metadata. 4-round adversarial design review ($16.29) caught idempotency bug (stale branch blocking reroutes) and namespace filter gap. Landed as `dfcac13` on main.
 
 ## Immediate Next Step
 
-Tier 1 is empty. Tier 2 items (#104, #136) need foundation work. Next discretionary work: pick from Tier 2 blockers (file foundation issues) or Tier 3/4.
+Tier 1 is empty. #136 (SLA calibration) remains blocked on engine#718 (PlanTrace priorities). Next discretionary: pick from Tier 3 (blocks-ui#41) or Tier 4 (#129 CBR epic).
 
 ## Cross-Module
 
@@ -24,17 +22,18 @@ Tier 1 is empty. Tier 2 items (#104, #136) need foundation work. Next discretion
 
 | # | Description | Scale | Complexity | Blocker |
 |---|-------------|-------|------------|---------|
-| #104 | Batch branch git ops | M | Med | claudony workers |
-| #136 | SLA calibration from past assignments | S | Low | timing fields in PlanTrace still missing |
+| #136 | SLA calibration from past assignments | S | Low | engine#718 (PlanTrace priorities hardcoded to 0) |
 
 **Tier 3 — Blocked on blocks-ui#41:**
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Unchanged — `git show HEAD~2:HANDOFF.md`*
 
 **Tier 4 — Epics, long horizon:**
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+*Unchanged — `git show HEAD~2:HANDOFF.md`*
 
 ## References
 
-- Blog: `blog/2026-07-14-mdp04-centralising-memory-recovering-state.md`
+- Blog: `blog/2026-07-15-mdp05-wiring-the-merge-queue-to-git.md`
+- Spec: `specs/2026-07-15-batch-branch-management-design.md`
+- Design review: `~/adr/casehub-devtown/batch-branch-management-20260715-022043/`
