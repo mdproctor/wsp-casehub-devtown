@@ -181,12 +181,19 @@ public class GitHubBatchBranchClient implements BatchBranchClient {
                     "target branch '" + targetBranch + "' has no resolvable SHA");
             }
 
-            // 2. Create branch ref
+            // 2. Ensure idempotent — delete any stale branch from a previous attempt
             String branchName = "merge-queue/batch-" + batchId;
+            try {
+                gitApi.deleteRef(owner, repo, "heads/" + branchName);
+            } catch (WebApplicationException ignored) {
+                // 422 = doesn't exist — expected on first attempt
+            }
+
+            // 3. Create branch ref
             gitApi.createRef(owner, repo,
                 Map.of("ref", "refs/heads/" + branchName, "sha", baseSha));
 
-            // 3. Merge each PR SHA in order
+            // 4. Merge each PR SHA in order
             for (PrRef pr : prs) {
                 try {
                     gitApi.merge(owner, repo,
@@ -201,7 +208,7 @@ public class GitHubBatchBranchClient implements BatchBranchClient {
                 }
             }
 
-            // 4. Read final tip SHA
+            // 5. Read final tip SHA
             String tipSha = gitApi.getRef(owner, repo, "heads/" + branchName).sha();
             if (tipSha == null) {
                 return new BatchBranchOutcome.Failure(
@@ -354,10 +361,12 @@ outcomePolicy:
 
 The engine reroutes to another worker. With only one registered `batch-ci-runner` worker, reroute attempts exhaust quickly. After exhaustion, the engine writes `{ status: "REROUTES_EXHAUSTED" }` to `tipTest` (via the capability's `outputSchema`), triggering the `tip-test-escalation` binding.
 
+The delete-before-create pattern in §4.2 (step 2) ensures reroutes are idempotent — each attempt deletes any stale branch from the previous attempt, creates a fresh branch, and genuinely retries the merge. Without this, reroutes would fail on `createRef` with HTTP 422 ("Reference already exists"), masking the real conflict as an infrastructure error.
+
 **Escalation chain for merge conflict:**
 
 1. Worker returns `WorkerResult.failed()` with `{ status: "conflict", conflictPr: N }` → engine applies REROUTE
-2. Reroute to same worker → same deterministic conflict recurs
+2. Reroute to same worker → deletes stale branch, creates fresh, same deterministic conflict recurs
 3. After 2 attempts, engine writes `tipTest.status = "REROUTES_EXHAUSTED"`
 4. `tip-test-escalation` binding fires → human task (`repo-maintainers`, expires: 2h)
 5. Human outcomes:
@@ -385,6 +394,27 @@ The `tipTest` context variable is shared between two writers — the `batch-ci-r
 ---
 
 ## 6. Cleanup Observer
+
+### 6.0.1 Prerequisite: CaseTrackingStatus SUPERSEDED mapping
+
+`CaseTrackingStatus.fromCaseStatus()` is missing the `"SUPERSEDED"` case — it falls through to the default `RUNNING`, so `RUNNING.isTerminal()` returns false. SUPERSEDED cases would not trigger cleanup, leaking the batch branch.
+
+Fix in `app/src/main/java/io/casehub/devtown/app/mcp/CaseTrackingStatus.java`:
+
+```java
+public static CaseTrackingStatus fromCaseStatus(String caseStatus) {
+    return switch (caseStatus) {
+        case "COMPLETED" -> COMPLETED;
+        case "FAULTED" -> FAULTED;
+        case "CANCELLED" -> CANCELLED;
+        case "SUPERSEDED" -> SUPERSEDED;   // ← added
+        case "WAITING" -> WAITING;
+        default -> RUNNING;
+    };
+}
+```
+
+This is a pre-existing bug in `CaseTrackingStatus` that affects any observer relying on `isTerminal()`. Must land before or alongside this spec.
 
 ### 6.1 BatchBranchCleanupObserver
 
@@ -479,6 +509,7 @@ Follows the three-tier rule: `domain/` = pure Java, `github/` = external boundar
 | | Delete happy path → Deleted |
 | | Delete not found (422) → NotFound |
 | | Delete API error → Failure |
+| | Branch already exists from previous attempt → deletes and recreates successfully |
 | | Target branch returns null SHA → Failure with descriptive message |
 | | Batch branch returns null SHA after merges → Failure |
 | `GitRefTest` | SHA extraction from nested object structure |
@@ -499,6 +530,7 @@ Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, n
 | | Non-terminal event → no cleanup |
 | | Non-merge-batch event → no cleanup |
 | | Non-devtown namespace event → no cleanup |
+| | SUPERSEDED case status → triggers cleanup |
 | | Invalid repository format in context → no cleanup |
 | | Null context → no cleanup |
 | | Missing batch/repository in context → no cleanup |
@@ -516,5 +548,6 @@ Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, n
 
 ## 9. Revision History
 
+- **v3 (2026-07-15):** Review round 2 fixes. Made `createBatchBranch()` idempotent with delete-before-create pattern (§4.2 step 2), fixing stale branch blocking reroutes after merge conflict. Added §6.0.1 prerequisite for `CaseTrackingStatus.fromCaseStatus()` SUPERSEDED mapping.
 - **v2 (2026-07-15):** Review round 1 fixes. Added `repository` to `BatchSlice` prerequisite (§5.1.1). Added null checks for `GitRef.sha()` and merge commit message (§4.2). Added namespace filter and format validation to cleanup observer (§6.1). Added input validation in worker adapter (§5.2). Documented full REROUTES_EXHAUSTED escalation chain (§5.3) and `tipTest` lifecycle (§5.4). Filed [#3](https://github.com/mdproctor/wsp-casehub-devtown/issues/3) (RepoRef domain type), [#4](https://github.com/mdproctor/wsp-casehub-devtown/issues/4) (per-failure-reason outcomePolicy), [#5](https://github.com/mdproctor/wsp-casehub-devtown/issues/5) (cleanup sweep job) for deferred items.
 - **v1 (2026-07-15):** Initial design. Traced complete merge queue lifecycle to identify exact git operations. Two-method port interface, GitHub Git Data API implementation, CDI cleanup observer on CaseLifecycleEvent.
