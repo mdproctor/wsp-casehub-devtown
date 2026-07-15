@@ -176,6 +176,10 @@ public class GitHubBatchBranchClient implements BatchBranchClient {
         try {
             // 1. Resolve targetBranch HEAD SHA
             String baseSha = gitApi.getRef(owner, repo, "heads/" + targetBranch).sha();
+            if (baseSha == null) {
+                return new BatchBranchOutcome.Failure(
+                    "target branch '" + targetBranch + "' has no resolvable SHA");
+            }
 
             // 2. Create branch ref
             String branchName = "merge-queue/batch-" + batchId;
@@ -186,7 +190,8 @@ public class GitHubBatchBranchClient implements BatchBranchClient {
             for (PrRef pr : prs) {
                 try {
                     gitApi.merge(owner, repo,
-                        Map.of("base", branchName, "head", pr.headSha()));
+                        Map.of("base", branchName, "head", pr.headSha(),
+                               "commit_message", "Merge PR #" + pr.number() + " into " + branchName));
                 } catch (WebApplicationException e) {
                     if (e.getResponse().getStatus() == 409) {
                         return new BatchBranchOutcome.MergeConflict(pr.number(), branchName);
@@ -198,6 +203,10 @@ public class GitHubBatchBranchClient implements BatchBranchClient {
 
             // 4. Read final tip SHA
             String tipSha = gitApi.getRef(owner, repo, "heads/" + branchName).sha();
+            if (tipSha == null) {
+                return new BatchBranchOutcome.Failure(
+                    "batch branch '" + branchName + "' has no resolvable SHA after merges");
+            }
             return new BatchBranchOutcome.Created(branchName, tipSha);
 
         } catch (WebApplicationException e) {
@@ -271,6 +280,26 @@ protected void augment(CaseDefinition definition) {
 }
 ```
 
+### 5.1.1 Prerequisite: BatchSlice repository propagation
+
+The bisection sub-case bindings (`bisect-left`, `bisect-right`) pass `{ batch: .splitResult.left }` as sub-case context. The split result comes from `MergeBatchCaseHub.sliceToMap()` which converts `BatchSlice` records. For the worker adapter to read `batch.repository` in bisection sub-cases, `BatchSlice` must carry `repository`:
+
+```java
+public record BatchSlice(
+        String id,
+        String repository,
+        String targetBranch,
+        List<QueuedPr> prs,
+        int size,
+        String parentBatchId,
+        int bisectionDepth,
+        String bisectionStrategy,
+        String riskLevel
+) {}
+```
+
+`BisectionSplitStrategy.split()` gains a `repository` parameter, and `MergeBatchCaseHub.sliceToMap()` includes `map.put("repository", slice.repository())`. These are changes to existing `queue` and `app` module code that must land alongside this spec.
+
 ### 5.2 Worker Adapter
 
 ```java
@@ -278,6 +307,9 @@ WorkerResult adaptBatchCiRunner(Map<String, Object> input) {
     @SuppressWarnings("unchecked")
     Map<String, Object> batch = (Map<String, Object>) input.get("batch");
     String repository = (String) batch.get("repository");
+    if (repository == null || !repository.contains("/")) {
+        return WorkerResult.failed("batch context missing or invalid 'repository': " + repository);
+    }
     String[] parts = repository.split("/");
     String targetBranch = (String) batch.get("targetBranch");
     String batchId = (String) batch.get("id");
@@ -320,7 +352,35 @@ outcomePolicy:
   maxRerouteAttempts: 2
 ```
 
-This means the engine retries with a different worker (if available). For a merge conflict, retrying is pointless — the same conflict will recur. But with only one registered `batch-ci-runner` worker, the engine exhausts reroute attempts and the plan item FAULTs, which is correct behaviour. A future optimisation could use `FAULT` directly for conflicts, but that requires per-failure-reason outcomePolicy which the engine does not yet support.
+The engine reroutes to another worker. With only one registered `batch-ci-runner` worker, reroute attempts exhaust quickly. After exhaustion, the engine writes `{ status: "REROUTES_EXHAUSTED" }` to `tipTest` (via the capability's `outputSchema`), triggering the `tip-test-escalation` binding.
+
+**Escalation chain for merge conflict:**
+
+1. Worker returns `WorkerResult.failed()` with `{ status: "conflict", conflictPr: N }` → engine applies REROUTE
+2. Reroute to same worker → same deterministic conflict recurs
+3. After 2 attempts, engine writes `tipTest.status = "REROUTES_EXHAUSTED"`
+4. `tip-test-escalation` binding fires → human task (`repo-maintainers`, expires: 2h)
+5. Human outcomes:
+   - **RETRY** → `tip-test-after-escalation` clears `tipTest`, re-dispatches with `onFailure: FAULT`
+   - **REJECT_BATCH** → `tip-test-terminal-failure` goal fires, case terminates
+   - **BLOCKED** → same as REJECT_BATCH
+
+For merge conflicts, rerouting is pointless — the conflict is deterministic. The two reroute attempts are wasted. A future optimisation could short-circuit conflicts directly to escalation via per-failure-reason outcomePolicy, which the engine does not yet support (see [#4](https://github.com/mdproctor/wsp-casehub-devtown/issues/4)).
+
+### 5.4 `tipTest` lifecycle
+
+The `tipTest` context variable is shared between two writers — the `batch-ci-runner` worker sets the initial state, and the CI webhook handler overwrites it with the CI result:
+
+| State | Writer | Trigger |
+|-------|--------|---------|
+| `null` | (initial) | `test-batch-tip` binding fires |
+| `{ status: "branch-created", branch, tipSha }` | Worker (success) | Case waits for CI signal |
+| `{ status: "conflict", conflictPr, branch }` | Worker (failure) | REROUTE via outcomePolicy |
+| `{ status: "passing" }` | CI webhook via `signal()` | `merge-batch` or `human-merge-approval` fires |
+| `{ status: "failing" }` | CI webhook via `signal()` | `compute-bisection-split` or `reject-single-pr` fires |
+| `{ status: "REROUTES_EXHAUSTED" }` | Engine | `tip-test-escalation` fires |
+
+**Signal overwrites:** When the CI webhook signals `{ status: "passing" }`, it replaces the entire `tipTest` value — the `branch` and `tipSha` fields from the worker's initial write are lost. This is acceptable: no downstream binding reads those fields, and the webhook handler has access to branch information from the GitHub event payload independently.
 
 ---
 
@@ -341,6 +401,7 @@ public class BatchBranchCleanupObserver {
     void onCaseLifecycle(@ObservesAsync CaseLifecycleEvent event) {
         if (event.caseStatus() == null) return;
         if (!CaseTrackingStatus.fromCaseStatus(event.caseStatus()).isTerminal()) return;
+        if (!"devtown".equals(event.namespace())) return;
         if (!"merge-batch".equals(event.caseDefinitionName())) return;
 
         JsonNode context = event.contextSnapshot();
@@ -348,7 +409,7 @@ public class BatchBranchCleanupObserver {
 
         JsonNode batch = context.path("batch");
         String repository = batch.path("repository").asText(null);
-        if (repository == null) return;
+        if (repository == null || !repository.contains("/")) return;
         String[] parts = repository.split("/");
 
         String batchId = batch.path("id").asText(null);
@@ -369,9 +430,9 @@ public class BatchBranchCleanupObserver {
 ```
 
 **Design choices:**
-- Filters on `caseDefinitionName == "merge-batch"` — only merge queue cases, not PR review cases
+- Filters on `namespace == "devtown"` and `caseDefinitionName == "merge-batch"` — scoped to devtown merge queue cases only
 - Derives branch name from batch ID using the same `merge-queue/batch-{id}` convention — no extra state stored
-- Fire-and-forget — cleanup failure is logged but doesn't affect the case (already terminal)
+- Fire-and-forget — cleanup failure is logged but doesn't affect the case (already terminal). If GitHub is unavailable at cleanup time, the branch leaks. A periodic sweep job would address accumulated leaks — see [#5](https://github.com/mdproctor/wsp-casehub-devtown/issues/5)
 - Fires for every terminal batch case including bisection sub-cases — each created its own branch, each needs cleanup
 
 ---
@@ -418,6 +479,8 @@ Follows the three-tier rule: `domain/` = pure Java, `github/` = external boundar
 | | Delete happy path → Deleted |
 | | Delete not found (422) → NotFound |
 | | Delete API error → Failure |
+| | Target branch returns null SHA → Failure with descriptive message |
+| | Batch branch returns null SHA after merges → Failure |
 | `GitRefTest` | SHA extraction from nested object structure |
 
 Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, not integration tests of the REST client.
@@ -430,9 +493,13 @@ Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, n
 | | Created outcome → `WorkerResult.of` with status/branch/tipSha |
 | | MergeConflict outcome → `WorkerResult.failed` with conflict details |
 | | Failure outcome → `WorkerResult.failed` |
+| | Missing repository in batch context → `WorkerResult.failed` with descriptive message |
+| | Invalid repository format (no `/`) → `WorkerResult.failed` |
 | `BatchBranchCleanupObserverTest` | Terminal CaseLifecycleEvent for merge-batch → calls `deleteBatchBranch` |
 | | Non-terminal event → no cleanup |
 | | Non-merge-batch event → no cleanup |
+| | Non-devtown namespace event → no cleanup |
+| | Invalid repository format in context → no cleanup |
 | | Null context → no cleanup |
 | | Missing batch/repository in context → no cleanup |
 | | Delete returns NotFound → logs debug, no error |
@@ -449,4 +516,5 @@ Uses Mockito for `GitHubGitApi` — these are unit tests of the adapter logic, n
 
 ## 9. Revision History
 
+- **v2 (2026-07-15):** Review round 1 fixes. Added `repository` to `BatchSlice` prerequisite (§5.1.1). Added null checks for `GitRef.sha()` and merge commit message (§4.2). Added namespace filter and format validation to cleanup observer (§6.1). Added input validation in worker adapter (§5.2). Documented full REROUTES_EXHAUSTED escalation chain (§5.3) and `tipTest` lifecycle (§5.4). Filed [#3](https://github.com/mdproctor/wsp-casehub-devtown/issues/3) (RepoRef domain type), [#4](https://github.com/mdproctor/wsp-casehub-devtown/issues/4) (per-failure-reason outcomePolicy), [#5](https://github.com/mdproctor/wsp-casehub-devtown/issues/5) (cleanup sweep job) for deferred items.
 - **v1 (2026-07-15):** Initial design. Traced complete merge queue lifecycle to identify exact git operations. Two-method port interface, GitHub Git Data API implementation, CDI cleanup observer on CaseLifecycleEvent.
