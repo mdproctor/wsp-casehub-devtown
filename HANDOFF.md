@@ -1,12 +1,12 @@
-# HANDOFF — 2026-07-15
+# HANDOFF — 2026-07-16
 
 ## Last Session
 
-Closed #104 (batch branch management) on `issue-104-batch-branch-management`. Implemented the `batch-ci-runner` worker and `BatchBranchCleanupObserver` for merge queue batch testing. Port interface (`BatchBranchClient`) with GitHub Git Data API adapter. Fixed pre-existing issues: `BatchSlice` repository propagation, `bisection-splitter` inputSchema missing batch metadata. 4-round adversarial design review ($16.29) caught idempotency bug (stale branch blocking reroutes) and namespace filter gap. Landed as `dfcac13` on main.
+Two issues closed in one session. #104 (batch branch management): implemented `batch-ci-runner` worker and `BatchBranchCleanupObserver` for merge queue batch testing — port interface, GitHub Git Data API adapter, delete-before-create idempotency, cleanup on `CaseLifecycleEvent`. Fixed pre-existing `BatchSlice` repository propagation and `bisection-splitter` inputSchema. Landed as `dfcac13` on main. #136 (SLA calibration): advisory `slaEstimate` in case context from CBR precedent completion times. Duration computed from existing memory timestamps — no new data capture. `SlaEstimator` pure domain logic. Landed as `878e673` on main.
 
 ## Immediate Next Step
 
-Tier 1 is empty. #136 (SLA calibration) remains blocked on engine#718 (PlanTrace priorities). Next discretionary: pick from Tier 3 (blocks-ui#41) or Tier 4 (#129 CBR epic).
+Tier 1 is empty. Next discretionary: pick from Tier 3 (blocks-ui#41) or Tier 4 (#129 CBR epic).
 
 ## Cross-Module
 
@@ -20,20 +20,20 @@ Tier 1 is empty. #136 (SLA calibration) remains blocked on engine#718 (PlanTrace
 
 **Tier 2 — Blocked on foundation:**
 
-| # | Description | Scale | Complexity | Blocker |
-|---|-------------|-------|------------|---------|
-| #136 | SLA calibration from past assignments | S | Low | engine#718 (PlanTrace priorities hardcoded to 0) |
+(empty — #104 and #136 both closed)
 
 **Tier 3 — Blocked on blocks-ui#41:**
 
-*Unchanged — `git show HEAD~2:HANDOFF.md`*
+*Unchanged — `git show HEAD~3:HANDOFF.md`*
 
 **Tier 4 — Epics, long horizon:**
 
-*Unchanged — `git show HEAD~2:HANDOFF.md`*
+*Unchanged — `git show HEAD~3:HANDOFF.md`*
 
 ## References
 
 - Blog: `blog/2026-07-15-mdp05-wiring-the-merge-queue-to-git.md`
-- Spec: `specs/2026-07-15-batch-branch-management-design.md`
-- Design review: `~/adr/casehub-devtown/batch-branch-management-20260715-022043/`
+- Spec #104: `specs/2026-07-15-batch-branch-management-design.md`
+- Spec #136: `specs/2026-07-16-sla-calibration-design.md`
+- Design review #104: `~/adr/casehub-devtown/batch-branch-management-20260715-022043/`
+- Design review #136: `~/adr/casehub-devtown/sla-calibration-20260716-005106/`
