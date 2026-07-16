@@ -32,18 +32,21 @@ GitHub-native audit trail alongside the ledger's cryptographic record.
 ### Flow
 
 ```
-1. GET  /repos/{o}/{r}/git/commits/{mergeSha}     → merge commit details
+1. GET  /repos/{o}/{r}/git/commits/{mergeSha}     → merge commit (validate ≥2 parents)
 2. GET  /repos/{o}/{r}/git/commits/{parentSha}     → first parent's tree SHA
-3. POST /repos/{o}/{r}/git/commits                 → revert commit (tree=parent's tree, parent=mergeSha)
+3. POST /repos/{o}/{r}/git/commits                 → revert commit
 4. DELETE /repos/{o}/{r}/git/refs/heads/revert/...  → idempotent cleanup (may 404)
 5. POST /repos/{o}/{r}/git/refs                    → temp branch at revert commit
-6. POST /repos/{o}/{r}/pulls                       → revert PR (temp → target)
-7. PUT  /repos/{o}/{r}/pulls/{n}/merge             → merge the revert PR
-8. DELETE /repos/{o}/{r}/git/refs/heads/revert/...  → cleanup temp branch
+6. GET  /repos/{o}/{r}/pulls?head=...&base=...     → find existing revert PR
+7. POST /repos/{o}/{r}/pulls                       → revert PR (only if step 6 found none)
+8. PUT  /repos/{o}/{r}/pulls/{n}/merge             → merge the revert PR
+9. DELETE /repos/{o}/{r}/git/refs/heads/revert/...  → cleanup (skipped on MergeConflict)
 ```
 
 Steps 4+5 use the delete-before-create idempotency pattern from
-`GitHubBatchBranchClient`. Step 7 uses `merge_method: "merge"` (not squash) to
+`GitHubBatchBranchClient`. Step 6 finds any existing open revert PR for the same
+head/base pair — on retry, the previous attempt's PR is reused rather than
+creating a duplicate. Step 8 uses `merge_method: "merge"` (not squash) to
 preserve the revert commit's tree identity for auditability.
 
 ### Why first parent's tree
@@ -62,7 +65,7 @@ commit appears after the merge, not instead of it. This is exactly what
 package io.casehub.devtown.domain;
 
 public interface RevertClient {
-    RevertOutcome revert(String owner, String repo, String targetBranch, String mergeSha);
+    RevertOutcome revert(String owner, String repo, String targetBranch, String mergeSha, String commitMessage);
 }
 ```
 
@@ -73,7 +76,7 @@ package io.casehub.devtown.domain;
 
 public sealed interface RevertOutcome {
     record Success(int revertPrNumber, String revertSha) implements RevertOutcome {}
-    record MergeConflict(String reason) implements RevertOutcome {}
+    record MergeConflict(int revertPrNumber, String reason) implements RevertOutcome {}
     record Failure(String reason) implements RevertOutcome {}
 }
 ```
@@ -81,14 +84,15 @@ public sealed interface RevertOutcome {
 - `Success` — revert PR merged; carries PR number (GitHub audit trail) and merge
   SHA (EventLog record).
 - `MergeConflict` — revert PR cannot merge because subsequent commits on the
-  target branch conflict with the revert. The rollback worker escalates to human
-  oversight (`HumanOversight.ROUTING_REVIEW`).
+  target branch conflict with the revert. Carries the PR number so the rollback
+  worker's escalation to `HumanOversight.ROUTING_REVIEW` can reference the PR
+  directly. The revert PR and temp branch are left intact for human resolution.
 - `Failure` — API error, network failure, or unexpected state. The rollback
   worker can retry via the engine's `OutcomePolicy` reroute loop.
 
 ## GitHubGitApi Extensions
 
-Three new endpoints on the existing `@RegisterRestClient(configKey = "github-api")`
+Two new endpoints on the existing `@RegisterRestClient(configKey = "github-api")`
 interface:
 
 ```java
@@ -103,13 +107,6 @@ GitCommit getCommit(@PathParam("owner") String owner,
 GitCommit createCommit(@PathParam("owner") String owner,
                        @PathParam("repo") String repo,
                        Map<String, Object> body);
-
-@PATCH
-@Path("/{owner}/{repo}/git/refs/heads/{ref}")
-GitRef updateRef(@PathParam("owner") String owner,
-                 @PathParam("repo") String repo,
-                 @PathParam("ref") String ref,
-                 Map<String, Object> body);
 ```
 
 ### GitCommit record
@@ -125,14 +122,9 @@ public record GitCommit(String sha, GitCommitTree tree, List<GitCommitParent> pa
 }
 ```
 
-The `updateRef` endpoint is added for completeness — it provides atomic ref
-updates vs the current delete+create pattern. The revert flow itself uses the
-temp-branch+PR approach so doesn't need `updateRef`, but it's a natural addition
-to `GitHubGitApi` and may be useful for future operations.
-
 ## GitHubPullRequestApi
 
-New REST client interface for PR creation:
+New REST client interface for PR operations:
 
 ```java
 package io.casehub.devtown.github;
@@ -143,6 +135,14 @@ package io.casehub.devtown.github;
 @Consumes(MediaType.APPLICATION_JSON)
 public interface GitHubPullRequestApi {
 
+    @GET
+    @Path("/{owner}/{repo}/pulls")
+    List<Map<String, Object>> listPullRequests(@PathParam("owner") String owner,
+                                                @PathParam("repo") String repo,
+                                                @QueryParam("head") String head,
+                                                @QueryParam("base") String base,
+                                                @QueryParam("state") String state);
+
     @POST
     @Path("/{owner}/{repo}/pulls")
     Map<String, Object> createPullRequest(@PathParam("owner") String owner,
@@ -152,7 +152,8 @@ public interface GitHubPullRequestApi {
 ```
 
 Same `configKey` as all other GitHub REST clients — shares base URL and auth.
-Returns raw `Map<String, Object>` matching the existing convention.
+Returns raw `Map<String, Object>` / `List<Map<String, Object>>` matching the
+existing convention.
 
 ## GitHubRevertClient
 
@@ -163,21 +164,29 @@ Returns raw `Map<String, Object>` matching the existing convention.
 ### Revert flow
 
 1. **Get merge commit** — `gitApi.getCommit(owner, repo, mergeSha)`. Validate it
-   has at least one parent (not a root commit).
+   has at least two parents (merge commit). A single-parent SHA indicates a caller
+   bug — the rollback worker should only pass merge commit SHAs from
+   `MergeOutcome.Success.mergeSha()`.
 2. **Get first parent** — `gitApi.getCommit(owner, repo, parents.getFirst().sha())`.
    Extract `tree.sha()` — this is the pre-merge tree.
 3. **Create revert commit** — `gitApi.createCommit(owner, repo, body)` with
    `tree = parentCommit.tree().sha()`, `parents = [mergeSha]`,
-   `message = "Revert merge <short-sha>"`.
+   `message = commitMessage`.
 4. **Create temp branch** — delete-before-create at
    `refs/heads/revert/<short-sha>` pointing to the revert commit.
-5. **Create revert PR** — `prApi.createPullRequest(owner, repo, body)` with
+5. **Find or create revert PR** — search for existing open PR via
+   `prApi.listPullRequests(owner, repo, owner + ":revert/<short-sha>", targetBranch, "open")`.
+   If found, reuse it (the branch recreation in step 4 already points to the
+   correct commit). If not found, create via
+   `prApi.createPullRequest(owner, repo, body)` with
    `head = "revert/<short-sha>"`, `base = targetBranch`,
-   `title = "Revert merge <short-sha>"`.
+   `title = commitMessage`.
 6. **Merge revert PR** — `mergeApi.merge(owner, repo, prNumber, body)` with
-   `merge_method = "merge"`. If 409 → return `MergeConflict`.
+   `merge_method = "merge"`. If 409 → return `MergeConflict(prNumber, reason)`.
+   The revert PR and temp branch are left intact for human resolution.
 7. **Cleanup temp branch** — `gitApi.deleteRef(owner, repo, "heads/revert/<short-sha>")`.
-   Swallowed on failure — temp branch is harmless if orphaned.
+   Swallowed on failure — temp branch is harmless if orphaned. Skipped when
+   step 6 returns `MergeConflict`.
 
 ### Error handling
 
@@ -187,14 +196,15 @@ Each step catches `WebApplicationException` and returns the appropriate
 | Step | Failure mode | Outcome |
 |------|-------------|---------|
 | 1–3 | API error (4xx/5xx) | `Failure` |
-| 1 | Merge commit has no parents | `Failure("not a merge commit")` |
+| 1 | Merge commit has <2 parents | `Failure("not a merge commit: expected ≥2 parents, got N")` |
 | 4–5 | API error | `Failure` (temp branch cleanup attempted) |
-| 6 | 409 Conflict | `MergeConflict` (temp branch cleanup attempted) |
+| 6 | 409 Conflict | `MergeConflict(prNumber, reason)` — branch and PR left intact |
 | 6 | Other API error | `Failure` (temp branch cleanup attempted) |
 | 7 | Any error | Swallowed — logged, not surfaced |
 
-Steps 4–7 are wrapped so that temp branch cleanup always runs regardless of
-where the failure occurs.
+Steps 4–6 are wrapped so that temp branch cleanup runs on `Failure` outcomes.
+On `MergeConflict`, cleanup is skipped — the temp branch and PR are left intact
+so a human can resolve the conflict and merge the PR manually.
 
 ## NoOpRevertClient
 
@@ -204,7 +214,8 @@ where the failure occurs.
 public class NoOpRevertClient implements RevertClient {
     @Override
     public RevertOutcome revert(String owner, String repo,
-                                String targetBranch, String mergeSha) {
+                                String targetBranch, String mergeSha,
+                                String commitMessage) {
         return new RevertOutcome.Failure("no revert client configured");
     }
 }
@@ -220,11 +231,14 @@ classpath.
 |---|---|---|
 | `domain/` | `RevertClient.java` | New |
 | `domain/` | `RevertOutcome.java` | New |
-| `github/` | `GitHubGitApi.java` | Modified — 3 new methods |
+| `github/` | `GitHubGitApi.java` | Modified — 2 new methods |
 | `github/` | `GitCommit.java` | New |
 | `github/` | `GitHubPullRequestApi.java` | New |
 | `github/` | `GitHubRevertClient.java` | New |
 | `app/spi/` | `NoOpRevertClient.java` | New |
+| `domain/test` | `RevertOutcomeTest.java` | New |
+| `github/test` | `GitCommitTest.java` | New |
+| `github/test` | `GitHubRevertClientTest.java` | New |
 
 ## Test plan
 
@@ -234,14 +248,16 @@ classpath.
 | `GitCommitTest` | `github/test` | Record construction and accessor correctness — tree SHA, parent list, nested records |
 | `GitHubRevertClientTest` | `github/test` | Unit tests with mocked REST clients: |
 | | | — Happy path: full 7-step flow, verify correct API calls and returned `Success` |
-| | | — Merge conflict: step 6 returns 409 → `MergeConflict`, temp branch cleaned up |
+| | | — Merge conflict: step 6 returns 409 → `MergeConflict(prNumber, reason)`, temp branch NOT cleaned up |
 | | | — API error on getCommit (step 1) → `Failure` |
 | | | — API error on createCommit (step 3) → `Failure` |
-| | | — API error on createPullRequest (step 5) → `Failure`, temp branch cleaned up |
+| | | — API error on PR search/create (step 5) → `Failure`, temp branch cleaned up |
 | | | — API error on merge (step 6, non-409) → `Failure`, temp branch cleaned up |
 | | | — Cleanup failure swallowed: step 7 deleteRef throws → still returns `Success` |
 | | | — Idempotent temp branch: step 4 deleteRef 404 swallowed, createRef succeeds |
-| | | — No-parent commit: getCommit returns empty parents → `Failure("not a merge commit")` |
+| | | — Non-merge commit: getCommit returns 1 parent → `Failure("not a merge commit: expected ≥2 parents, got 1")` |
+| | | — PR reuse on retry: existing open PR found via listPullRequests → reused, no createPullRequest called |
+| | | — Commit message: verify commitMessage appears in revert commit body and PR title |
 
 ## No pom.xml changes
 
@@ -255,10 +271,12 @@ The rollback worker receives a list of `{owner, repo, targetBranch, mergeSha}`
 from the parent case context. For each already-merged repo:
 
 ```java
-RevertOutcome outcome = revertClient.revert(owner, repo, targetBranch, mergeSha);
+String message = "Revert merge " + mergeSha.substring(0, 7)
+    + " — coordinated rollback (case " + caseId + ")";
+RevertOutcome outcome = revertClient.revert(owner, repo, targetBranch, mergeSha, message);
 switch (outcome) {
     case Success s    -> // record revert in EventLog, continue
-    case MergeConflict mc -> // escalate to HumanOversight.ROUTING_REVIEW
+    case MergeConflict mc -> // escalate to HumanOversight.ROUTING_REVIEW with mc.revertPrNumber()
     case Failure f    -> // engine OutcomePolicy handles retry/reroute
 }
 ```
