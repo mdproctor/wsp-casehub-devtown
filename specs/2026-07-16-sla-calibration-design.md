@@ -29,6 +29,8 @@ Both timestamps needed to compute duration are already in the memory store:
 
 No new data capture is required. The timestamps exist on every completed past case that has both a case-vector and at least one outcome memory.
 
+**Independence from SLA start mode:** This duration measures actual wall-clock time from case creation to final outcome, independent of the configured `SlaStartFrom` mode in the milestone schema. The calibration answers "how long did similar reviews actually take?" — not "how much SLA clock time elapsed." This remains valid regardless of future SLA start modes (`PREVIOUS_MILESTONE_COMPLETED`, `EVENT_OCCURRED`, etc.).
+
 ---
 
 ## 3. Changes
@@ -51,6 +53,19 @@ public record Precedent(
 ```
 
 `completionTime` is nullable — cases where no outcome memory exists (e.g., FAULTED before any capability completed) have `null` and are excluded from SLA estimation.
+
+**Downstream effects of the Precedent change:**
+
+- **`MemoryContext.toContextMap()`** — include `completionTimeSeconds` in the serialized precedent map (when non-null). Requires switching from `Map.of()` to a mutable map for nullable handling:
+  ```java
+  var m = new LinkedHashMap<String, Object>();
+  m.put("caseId", p.caseId().toString());
+  // ... existing fields ...
+  if (p.completionTime() != null) {
+      m.put("completionTimeSeconds", p.completionTime().toSeconds());
+  }
+  ```
+- **`DevtownMcpTools.findSimilarCases()`** — returns `List<Precedent>` directly to MCP consumers. Adding `completionTime` changes the MCP tool's JSON response schema. This is desirable — governance agents benefit from per-precedent timing data. `null` values serialize as `"completionTime": null` in JSON for cases without outcomes.
 
 ### 3.2 Thread start timestamp through retrieval
 
@@ -76,9 +91,16 @@ Instant latestOutcome = outcomeFacts.stream()
     .max(Instant::compareTo)
     .orElse(null);
 
-Duration completionTime = (latestOutcome != null && cv.startedAt() != null)
-    ? Duration.between(cv.startedAt(), latestOutcome)
-    : null;
+Duration completionTime = null;
+if (latestOutcome != null && cv.startedAt() != null) {
+    Duration raw = Duration.between(cv.startedAt(), latestOutcome);
+    if (raw.isNegative()) {
+        LOG.warnf("Negative completion time for case=%s: start=%s outcome=%s — possible clock skew or async race",
+                  cv.caseId(), cv.startedAt(), latestOutcome);
+    } else {
+        completionTime = raw;
+    }
+}
 ```
 
 The outcome memories are already queried in `enrichOutcomes()` — the `latestOutcome` extraction uses the same `outcomeFacts` list. One structural change: `enrichOutcomes()` must return both the outcomes map AND the latest timestamp. Refactor to return a result record:
@@ -120,6 +142,8 @@ public final class SlaEstimator {
 }
 ```
 
+**Design note — unweighted median:** All precedents contribute equally to the estimate regardless of similarity score. This is intentional: (1) precedents already pass the configured minimum similarity threshold, so all are considered relevant matches; (2) median is inherently robust to outliers — a single marginal-similarity case cannot skew the estimate; (3) this is advisory, not binding — precision beyond "reasonable ballpark" adds complexity without value. Similarity-weighted estimation can be explored as a refinement if calibration accuracy becomes a concern.
+
 ### 3.4 SlaEstimate (new, domain/)
 
 ```java
@@ -133,10 +157,10 @@ public record SlaEstimate(
 ) {
     public Map<String, Object> toContextMap() {
         return Map.of(
-            "medianMinutes", median.toMinutes(),
+            "medianSeconds", median.toSeconds(),
             "precedentCount", precedentCount,
-            "minMinutes", min.toMinutes(),
-            "maxMinutes", max.toMinutes()
+            "minSeconds", min.toSeconds(),
+            "maxSeconds", max.toSeconds()
         );
     }
 }
@@ -144,17 +168,22 @@ public record SlaEstimate(
 
 ### 3.5 Wire into PrReviewCaseService.startReview()
 
-After the existing `findSimilar()` call, compute the estimate and write to case context:
+After the existing `memoryRecaller.recall(pr)` call, compute the estimate from the recalled precedents and include it in initial case context:
 
 ```java
-List<Precedent> precedents = cbrRetrievalService.findSimilar(vector, repo, tenantId);
+var memoryContext = memoryRecaller.recall(pr);
+
+// ... existing context building (pr, policy, memory, ci) ...
+initialContext.put("memory", memoryContext.toContextMap());
 
 // SLA calibration — advisory estimate from similar past reviews
-SlaEstimator.estimate(precedents).ifPresent(estimate ->
-    caseHub.signal(caseId, "slaEstimate", estimate.toContextMap()));
+SlaEstimator.estimate(memoryContext.precedents()).ifPresent(estimate ->
+    initialContext.put("slaEstimate", estimate.toContextMap()));
+
+UUID caseId = caseHub.startCase(initialContext).toCompletableFuture().join();
 ```
 
-The `slaEstimate` key in case context is readable by MCP tools (`get_case_detail`) and the governance workbench case detail view. No binding reads it — it is purely advisory.
+No new dependencies required. The precedent list is already available from `memoryContext.precedents()`, populated by `CaseMemoryRecaller.recall()` via the existing CBR retrieval path (`cbrService.get().findSimilar()`). The estimate is included in initial case context, making it available from case creation to MCP tools (`get_case_detail`) and the governance workbench case detail view. No binding reads it — it is purely advisory.
 
 ---
 
@@ -180,11 +209,11 @@ The `slaEstimate` key in case context is readable by MCP tools (`get_case_detail
 | | All null durations → empty Optional |
 | | Single precedent → median equals that duration |
 | | Odd count → middle element is median |
-| | Even count → lower-middle element is median |
+| | Even count → upper-middle element is median (conservative: biases toward longer estimates) |
 | | Negative/zero durations filtered out |
 | | Min and max correct |
-| `SlaEstimateTest` | `toContextMap()` produces correct keys and minute conversions |
-| | Sub-minute durations round to 0 |
+| `SlaEstimateTest` | `toContextMap()` produces correct keys and second conversions |
+| | Sub-second durations truncate to 0 (acceptable for SLA advisory) |
 
 ### 5.2 Unit Tests (app/)
 
@@ -206,13 +235,16 @@ The `slaEstimate` key in case context is readable by MCP tools (`get_case_detail
 
 ## 6. Not in Scope
 
-- Overriding configured SLA based on the estimate (advisory only)
-- Per-capability duration breakdown (total only — can be added later)
-- Governance workbench UI changes (case context is already displayed)
-- Persisting the estimate to a database (case context is sufficient)
+The following items are deferred and tracked as GitHub issues:
+
+- Overriding configured SLA based on the estimate (advisory only) — devtown#140
+- Per-capability duration breakdown (total only — can be added later) — devtown#141
+- Governance view showing estimated vs configured SLA side by side — devtown#142 (criterion 3 from #136; this spec addresses criteria 1 and 2)
+- Persisting the estimate to a database (case context is sufficient) — devtown#143
 
 ---
 
 ## 7. Revision History
 
 - **v1 (2026-07-16):** Initial design. Duration computed from existing memory timestamps (case-vector start, latest outcome completion). SlaEstimator as pure domain logic. Advisory estimate in case context.
+- **v2 (2026-07-16):** Review round 1 fixes. Corrected §3.5 wiring to use `memoryContext.precedents()` instead of nonexistent `cbrRetrievalService` call. Fixed median test description (upper-middle, not lower-middle). Added negative duration warning at source. Changed toContextMap() from minutes to seconds. Documented Precedent downstream effects (MemoryContext serialization, MCP API). Added SlaStartFrom independence note. Added design rationale for unweighted median. Deferred scope items tracked as GitHub issues. Governance view criterion (#136 criterion 3) deferred to devtown#142.
