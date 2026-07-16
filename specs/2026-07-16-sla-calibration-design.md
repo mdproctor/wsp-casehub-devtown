@@ -185,6 +185,14 @@ UUID caseId = caseHub.startCase(initialContext).toCompletableFuture().join();
 
 No new dependencies required. The precedent list is already available from `memoryContext.precedents()`, populated by `CaseMemoryRecaller.recall()` via the existing CBR retrieval path (`cbrService.get().findSimilar()`). The estimate is included in initial case context, making it available from case creation to MCP tools (`get_case_detail`) and the governance workbench case detail view. No binding reads it — it is purely advisory.
 
+**Invalidation on revise:** `PrReviewCaseService.revisePr()` must invalidate the SLA estimate alongside the existing capability analysis invalidations. The estimate was computed from CBR precedents matched against the original PR's feature vector — after a revise, `linesChanged` and `changedPaths` change, making the original match set (and therefore the estimate) stale. Add to the existing invalidation block:
+
+```java
+caseHub.signal(caseId, "slaEstimate", null);
+```
+
+Recomputation on revise is not in scope — it would require CBR recall in the revise path, which currently only updates metadata and invalidates stale results. The null-out is consistent with how every other content-dependent result is treated: absent is better than stale for advisory data.
+
 ---
 
 ## 4. Module Placement
@@ -230,6 +238,7 @@ No new dependencies required. The precedent list is already available from `memo
 | `SlaCalibrationIntegrationTest` | `startReview()` with similar past cases → `slaEstimate` in case context |
 | | No similar cases → no `slaEstimate` in context |
 | | Similar cases with no outcome memories → no `slaEstimate` |
+| | `revisePr()` after `startReview()` → `slaEstimate` nulled out |
 
 ---
 
@@ -248,3 +257,4 @@ The following items are deferred and tracked as GitHub issues:
 
 - **v1 (2026-07-16):** Initial design. Duration computed from existing memory timestamps (case-vector start, latest outcome completion). SlaEstimator as pure domain logic. Advisory estimate in case context.
 - **v2 (2026-07-16):** Review round 1 fixes. Corrected §3.5 wiring to use `memoryContext.precedents()` instead of nonexistent `cbrRetrievalService` call. Fixed median test description (upper-middle, not lower-middle). Added negative duration warning at source. Changed toContextMap() from minutes to seconds. Documented Precedent downstream effects (MemoryContext serialization, MCP API). Added SlaStartFrom independence note. Added design rationale for unweighted median. Deferred scope items tracked as GitHub issues. Governance view criterion (#136 criterion 3) deferred to devtown#153.
+- **v3 (2026-07-16):** Review round 2 fix. Added `slaEstimate` invalidation in `revisePr()` — consistent with existing capability analysis invalidation pattern. Stale advisory data is worse than absent.
