@@ -2,11 +2,11 @@
 
 ## Last Session
 
-Two issues closed in one session. #104 (batch branch management): implemented `batch-ci-runner` worker and `BatchBranchCleanupObserver` for merge queue batch testing — port interface, GitHub Git Data API adapter, delete-before-create idempotency, cleanup on `CaseLifecycleEvent`. Fixed pre-existing `BatchSlice` repository propagation and `bisection-splitter` inputSchema. Landed as `dfcac13` on main. #136 (SLA calibration): advisory `slaEstimate` in case context from CBR precedent completion times. Duration computed from existing memory timestamps — no new data capture. `SlaEstimator` pure domain logic. Landed as `878e673` on main.
+Epic #12 (cross-repo coordinated merge) decomposed into 6 child issues (#155–#160) in 3 phases. Then #155 (GitHub revert capability) implemented and closed. RevertClient SPI + GitHubRevertClient with PR-based revert flow — 7-step process handling protected branches, retry idempotency (PR reuse), and merge conflict escalation. 25 tests. Design spec passed 3-round adversarial review (9 issues, 7 verified fixes). Landed as `299a979` on main.
 
 ## Immediate Next Step
 
-Tier 1 is empty. Next discretionary: pick from Tier 3 (blocks-ui#41) or Tier 4 (#129 CBR epic).
+Pick next epic #12 work. #155 and #156 are Phase 1 (no deps) — #155 done, #156 (cross-repo CasePlanModel YAML) is the other unblocked item. Phase 2 (#157, #158, #159) depends on Phase 1.
 
 ## Cross-Module
 
@@ -14,26 +14,31 @@ Tier 1 is empty. Next discretionary: pick from Tier 3 (blocks-ui#41) or Tier 4 (
 
 ## What's Next
 
-**Tier 1 — Unblocked now:**
+**Tier 1 — Unblocked now (Epic #12 Phase 1):**
 
-(empty)
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #156 | Cross-repo CasePlanModel YAML — parent case + per-repo sub-cases | S | Low | No deps — uses existing engine sub-case primitives |
 
-**Tier 2 — Blocked on foundation:**
+**Tier 2 — Blocked on Phase 1 (#155 ✅, #156 pending):**
 
-(empty — #104 and #136 both closed)
+| # | Description | Scale | Complexity | Blocker |
+|---|-------------|-------|------------|---------|
+| #157 | Coordinated-merge worker | M | Med | #155 ✅, #156 |
+| #158 | Coordinated-rollback worker | M | Med | #155 ✅, #156 |
+| #159 | Cross-repo webhook handler | S | Med | #156 |
 
-**Tier 3 — Blocked on blocks-ui#41:**
+**Tier 3 — Blocked on Phase 2:**
 
-*Unchanged — `git show HEAD~3:HANDOFF.md`*
+| # | Description | Scale | Complexity | Blocker |
+|---|-------------|-------|------------|---------|
+| #160 | End-to-end integration test | M | Med | #155–#159 |
 
-**Tier 4 — Epics, long horizon:**
+**Tier 4 — Other open work:**
 
-*Unchanged — `git show HEAD~3:HANDOFF.md`*
+*Unchanged — `git show HEAD~1:HANDOFF.md`*
 
 ## References
 
-- Blog: `blog/2026-07-15-mdp05-wiring-the-merge-queue-to-git.md`
-- Spec #104: `specs/2026-07-15-batch-branch-management-design.md`
-- Spec #136: `specs/2026-07-16-sla-calibration-design.md`
-- Design review #104: `~/adr/casehub-devtown/batch-branch-management-20260715-022043/`
-- Design review #136: `~/adr/casehub-devtown/sla-calibration-20260716-005106/`
+- Spec: `docs/specs/2026-07-16-github-revert-capability-design.md`
+- Design review: `~/adr/casehub-devtown/github-revert-capability-20260716-143704/`
