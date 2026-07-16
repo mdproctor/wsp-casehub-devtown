@@ -83,10 +83,12 @@ public sealed interface RevertOutcome {
 
 - `Success` — revert PR merged; carries PR number (GitHub audit trail) and merge
   SHA (EventLog record).
-- `MergeConflict` — revert PR cannot merge because subsequent commits on the
-  target branch conflict with the revert. Carries the PR number so the rollback
-  worker's escalation to `HumanOversight.ROUTING_REVIEW` can reference the PR
-  directly. The revert PR and temp branch are left intact for human resolution.
+- `MergeConflict` — revert PR could not be auto-merged. Covers content conflicts
+  (409), branch protection requirements such as required status checks or reviews
+  (405/422), and any other GitHub-side merge block. Carries the PR number so the
+  rollback worker's escalation to `HumanOversight.ROUTING_REVIEW` can reference
+  the PR directly. The revert PR and temp branch are left intact for human
+  resolution.
 - `Failure` — API error, network failure, or unexpected state. The rollback
   worker can retry via the engine's `OutcomePolicy` reroute loop.
 
@@ -182,8 +184,9 @@ existing convention.
    `head = "revert/<short-sha>"`, `base = targetBranch`,
    `title = commitMessage`.
 6. **Merge revert PR** — `mergeApi.merge(owner, repo, prNumber, body)` with
-   `merge_method = "merge"`. If 409 → return `MergeConflict(prNumber, reason)`.
-   The revert PR and temp branch are left intact for human resolution.
+   `merge_method = "merge"`. If 409 (conflict), 405 (branch protection), or 422
+   (not mergeable) → return `MergeConflict(prNumber, reason)`. The revert PR and
+   temp branch are left intact for human resolution.
 7. **Cleanup temp branch** — `gitApi.deleteRef(owner, repo, "heads/revert/<short-sha>")`.
    Swallowed on failure — temp branch is harmless if orphaned. Skipped when
    step 6 returns `MergeConflict`.
@@ -199,6 +202,8 @@ Each step catches `WebApplicationException` and returns the appropriate
 | 1 | Merge commit has <2 parents | `Failure("not a merge commit: expected ≥2 parents, got N")` |
 | 4–5 | API error | `Failure` (temp branch cleanup attempted) |
 | 6 | 409 Conflict | `MergeConflict(prNumber, reason)` — branch and PR left intact |
+| 6 | 405 Branch protection | `MergeConflict(prNumber, reason)` — branch and PR left intact |
+| 6 | 422 Not mergeable | `MergeConflict(prNumber, reason)` — branch and PR left intact |
 | 6 | Other API error | `Failure` (temp branch cleanup attempted) |
 | 7 | Any error | Swallowed — logged, not surfaced |
 
@@ -249,6 +254,7 @@ classpath.
 | `GitHubRevertClientTest` | `github/test` | Unit tests with mocked REST clients: |
 | | | — Happy path: full 7-step flow, verify correct API calls and returned `Success` |
 | | | — Merge conflict: step 6 returns 409 → `MergeConflict(prNumber, reason)`, temp branch NOT cleaned up |
+| | | — Branch protection block: step 6 returns 405 → `MergeConflict(prNumber, reason)`, branch and PR left intact |
 | | | — API error on getCommit (step 1) → `Failure` |
 | | | — API error on createCommit (step 3) → `Failure` |
 | | | — API error on PR search/create (step 5) → `Failure`, temp branch cleaned up |
