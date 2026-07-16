@@ -237,14 +237,14 @@ No new dependencies required. The precedent list is already available from `memo
 
 The following items are deferred and tracked as GitHub issues:
 
-- Overriding configured SLA based on the estimate (advisory only) — devtown#140
-- Per-capability duration breakdown (total only — can be added later) — devtown#141
-- Governance view showing estimated vs configured SLA side by side — devtown#142 (criterion 3 from #136; this spec addresses criteria 1 and 2)
-- Persisting the estimate to a database (case context is sufficient) — devtown#143
+- Overriding configured SLA based on the estimate (advisory only) — devtown#151
+- Per-capability duration breakdown (total only — can be added later) — devtown#152
+- Governance view showing estimated vs configured SLA side by side — devtown#153 (criterion 3 from #136; this spec addresses criteria 1 and 2)
+- Persisting the estimate to a database (case context is sufficient) — devtown#154
 
 ---
 
 ## 7. Revision History
 
 - **v1 (2026-07-16):** Initial design. Duration computed from existing memory timestamps (case-vector start, latest outcome completion). SlaEstimator as pure domain logic. Advisory estimate in case context.
-- **v2 (2026-07-16):** Review round 1 fixes. Corrected §3.5 wiring to use `memoryContext.precedents()` instead of nonexistent `cbrRetrievalService` call. Fixed median test description (upper-middle, not lower-middle). Added negative duration warning at source. Changed toContextMap() from minutes to seconds. Documented Precedent downstream effects (MemoryContext serialization, MCP API). Added SlaStartFrom independence note. Added design rationale for unweighted median. Deferred scope items tracked as GitHub issues. Governance view criterion (#136 criterion 3) deferred to devtown#142.
+- **v2 (2026-07-16):** Review round 1 fixes. Corrected §3.5 wiring to use `memoryContext.precedents()` instead of nonexistent `cbrRetrievalService` call. Fixed median test description (upper-middle, not lower-middle). Added negative duration warning at source. Changed toContextMap() from minutes to seconds. Documented Precedent downstream effects (MemoryContext serialization, MCP API). Added SlaStartFrom independence note. Added design rationale for unweighted median. Deferred scope items tracked as GitHub issues. Governance view criterion (#136 criterion 3) deferred to devtown#153.
