@@ -255,10 +255,11 @@ classpath.
 | | | — Happy path: full 7-step flow, verify correct API calls and returned `Success` |
 | | | — Merge conflict: step 6 returns 409 → `MergeConflict(prNumber, reason)`, temp branch NOT cleaned up |
 | | | — Branch protection block: step 6 returns 405 → `MergeConflict(prNumber, reason)`, branch and PR left intact |
+| | | — Not mergeable: step 6 returns 422 → `MergeConflict(prNumber, reason)`, branch and PR left intact |
 | | | — API error on getCommit (step 1) → `Failure` |
 | | | — API error on createCommit (step 3) → `Failure` |
 | | | — API error on PR search/create (step 5) → `Failure`, temp branch cleaned up |
-| | | — API error on merge (step 6, non-409) → `Failure`, temp branch cleaned up |
+| | | — Other API error on merge (step 6, e.g., 500) → `Failure`, temp branch cleaned up |
 | | | — Cleanup failure swallowed: step 7 deleteRef throws → still returns `Success` |
 | | | — Idempotent temp branch: step 4 deleteRef 404 swallowed, createRef succeeds |
 | | | — Non-merge commit: getCommit returns 1 parent → `Failure("not a merge commit: expected ≥2 parents, got 1")` |
