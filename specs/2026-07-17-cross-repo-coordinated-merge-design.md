@@ -75,12 +75,12 @@ spec:
     - name: coordinated-merge
       description: "Merges all repos in the change set sequentially"
       inputProjection: "{ repos: .repos }"
-      outputProjection: "{ mergeResults: . }"
+      outputProjection: "{ mergeResults: .mergeResults }"
 
     - name: coordinated-rollback
       description: "Reverts already-merged repos on failure"
       inputProjection: "{ repos: .repos, mergeResults: .mergeResults }"
-      outputProjection: "{ rollbackResults: . }"
+      outputProjection: "{ rollbackResults: .rollbackResults }"
 
   goals:
     - name: all-repos-merged
@@ -367,6 +367,8 @@ For each repo in repos (sequential, in input order):
      or:     {repo: "owner/repo", status: "failed", reason: "merge conflict"}
   4. On failure: STOP — do not merge remaining repos
 Return: WorkerResult.of({mergeResults: [...]})
+  // outputProjection "{ mergeResults: .mergeResults }" extracts the array
+  // from worker output and stores it as context.mergeResults = [...]
 ```
 
 Stop-on-failure is deliberate: already-merged repos stay merged; the `rollback-on-merge-failure` binding fires when the failure goal matches, and the rollback worker (#158) handles revert.
