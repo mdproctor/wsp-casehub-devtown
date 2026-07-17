@@ -18,10 +18,12 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
 - The cross-repo knowledge (which repos, how to correlate, what constitutes "all merged") is software-engineering domain logic that belongs in devtown, not in generic engine primitives.
 
 **Why standard pr-review cases:**
-- Each review IS a standard pr-review case — same lifecycle, same `pr-review.yaml` CasePlanModel (at `review/src/main/resources/devtown/pr-review.yaml`), same workers, same webhook routing.
+- Each review IS a standard pr-review case — same `pr-review.yaml` CasePlanModel (at `review/src/main/resources/devtown/pr-review.yaml`), same review workers, same webhook routing. Coordinated reviews suppress per-repo auto-merge via a `coordinatedChange` context flag (see §pr-review.yaml Modifications for Coordinated Mode).
 - `PrReviewCaseService.startReview()` calls `caseTracker.register()`, so each review case is registered with `PrReviewCaseTracker`.
 - `GitHubWebhookResource` injects `PrReviewApplicationService` and calls `service.signalCiStatus()`. Inside `PrReviewCaseService` (the implementation), `signalCiStatus()` queries `PrReviewCaseTracker.findActiveCaseByPr(repo, prNumber)` to resolve the case. Per-repo webhook routing works unchanged — no handler modifications needed.
-- No engine changes. No coupling to engine internals.
+- No engine changes. No coupling to engine internals. No webhook handler changes.
+
+**pr-review.yaml modifications:** The YAML is extended with a `coordinatedChange` context guard on merge bindings and an extended `merge-completed` goal condition. These are additive changes — standalone reviews (where `coordinatedChange` is absent) are unaffected. See §pr-review.yaml Modifications for Coordinated Mode.
 
 **Divergence from epic #12:** Epic #12 and issues #156, #159 were written assuming engine sub-case primitives. This spec chooses application-layer coordination instead, for the reasons above. The epic, #156, and #159 descriptions must be updated to reflect this design decision before implementation begins. `docs/orchestration-advantages.md` §4 uses sub-case bindings as an illustrative example of cross-repo coordination — the example shows what is *possible*, not what is *prescribed*. The application-layer approach achieves the same outcomes (atomic merge-all-or-rollback, auditable coordination decisions, automatic failure propagation) through different mechanisms.
 
@@ -35,14 +37,16 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
 2. Start parent case via CoordinatedChangeCaseHub.startCase(context)
    - Parent case has repos list, no active bindings yet
 3. For each repo in request (all-or-none — see §Partial Failure Atomicity):
-   - PrReviewCaseService.startReview(prPayload) → PrReviewOutcome(caseId)
+   - PrReviewCaseService.startReview(prPayload, Map.of("coordinatedChange", true)) → PrReviewOutcome(caseId)
    - CoordinatedChangeTracker.register(parentCaseId, repo, outcome.caseId())
    On failure after any reviews started: cancel all started reviews + parent case
 3b. Signal parent with review case mapping:
    - caseHubRuntime.signal(parentCaseId, "reviewCases", {repo → reviewCaseId})
    - Persists mapping to parent case context (enables hydration on restart)
-4. Each repo's PR goes through standard pr-review lifecycle
+4. Each repo's PR goes through standard pr-review lifecycle (merge suppressed)
    - Code analysis, security review, CI, human gates — all existing
+   - Merge bindings suppressed by `coordinatedChange` flag in context
+   - Review case completes via extended `merge-completed` goal when all reviews pass
 5. Webhooks arrive per-repo
    - Existing GitHubWebhookResource routes correctly via PrReviewCaseTracker
    - No webhook handler changes needed
@@ -133,6 +137,55 @@ spec:
 
 The `coordinated-rollback` capability is declared but the worker is NOT implemented in this batch (#158). The binding exists so the YAML is structurally complete.
 
+## pr-review.yaml Modifications for Coordinated Mode
+
+Coordinated reviews use the same `pr-review.yaml` lifecycle but must not auto-merge — the coordinator handles all merges atomically. Three additive changes to `pr-review.yaml` achieve this:
+
+**1. Guard merge bindings with `coordinatedChange` flag:**
+
+Both `merge-direct` and `enqueue-for-merge` bindings gain `.coordinatedChange != true` in their `when` conditions. When `coordinatedChange` is absent (standalone reviews), JQ evaluates `null != true` → `true`, so standalone behavior is unchanged. When `coordinatedChange` is `true` (coordinated reviews), the guard evaluates to `false` and the binding does not fire.
+
+```yaml
+# merge-direct — add guard (shown as first condition)
+when: >-
+  .coordinatedChange != true and
+  .merge_sha == null and
+  .pr.status != "merged" and
+  ...existing conditions...
+
+# enqueue-for-merge — same guard
+when: >-
+  .coordinatedChange != true and
+  .enqueueResult == null and
+  .merge_sha == null and
+  .pr.status != "merged" and
+  ...existing conditions...
+```
+
+**2. Extend `merge-completed` goal for coordinated reviews:**
+
+The `merge-completed` goal gains `.coordinatedChange == true` as an alternative. For coordinated reviews, the merge obligation is delegated to the parent coordinator — the review case considers it satisfied. The completion block (`allOf: [pr-approved, security-verified, ci-passing, merge-completed]`) remains unchanged; all four goals must be true. For coordinated reviews, `merge-completed` fires via the flag, while `pr-approved`, `security-verified`, and `ci-passing` still require all reviews to pass and CI to pass before the case reaches terminal SUCCESS.
+
+```yaml
+- name: merge-completed
+  kind: success
+  condition: '.coordinatedChange == true or .pr.status == "merged" or .merge_sha != null'
+```
+
+**3. Inject the flag via `startReview` additional context:**
+
+`CoordinatedChangeService.start()` calls `reviewService.startReview(prPayload, Map.of("coordinatedChange", true))`. The `coordinatedChange` flag is merged into `initialContext` at case creation, so it is available from the first context evaluation — no race condition with binding evaluation.
+
+**End-to-end coordinated path:**
+
+1. `startReview(pr, Map.of("coordinatedChange", true))` creates review case with flag in context
+2. Reviews proceed: code analysis, security, CI, human gates — all standard bindings fire normally
+3. All reviews pass and CI passes → `pr-approved`, `security-verified`, `ci-passing` become true
+4. `merge-completed` is already true (via `.coordinatedChange == true`)
+5. Merge bindings do NOT fire (guarded by `.coordinatedChange != true`)
+6. Completion `allOf` is satisfied → review case reaches terminal SUCCESS
+7. `CaseLifecycleEvent(SUCCESS)` → observer signals parent → coordinator merges all repos
+
 ## Components
 
 ### Domain types (`domain/`)
@@ -171,6 +224,21 @@ public interface CoordinatedChangePort {
 ```java
 public record CoordinatedChangeOutcome(UUID parentCaseId, Map<String, UUID> reviewCaseIds) {}
 ```
+
+**API change: `PrReviewApplicationService`** — add `startReview` overload with additional context:
+```java
+public interface PrReviewApplicationService {
+    PrReviewOutcome startReview(PrPayload pr);
+    PrReviewOutcome startReview(PrPayload pr, Map<String, Object> additionalContext);
+    // ...existing methods unchanged...
+}
+```
+The single-argument method delegates to the two-argument method with `Map.of()`. In `PrReviewCaseService`, the implementation merges `additionalContext` into `initialContext` before calling `caseHub.startCase()`:
+```java
+initialContext.putAll(additionalContext);
+UUID caseId = caseHub.startCase(initialContext).toCompletableFuture().join();
+```
+This is a general-purpose extension — `PrReviewApplicationService` has no knowledge of coordinated changes. The coordination flag is an opaque context entry that `pr-review.yaml` conditions evaluate.
 
 **API change: `PrReviewOutcome`** — add `caseId` field:
 ```java
@@ -231,7 +299,7 @@ public class CoordinatedChangeService implements CoordinatedChangePort {
         //    Map<String, UUID> started = new LinkedHashMap<>();
         //    try {
         //        for each repo in request:
-        //            PrReviewOutcome outcome = reviewService.startReview(prPayload)
+        //            PrReviewOutcome outcome = reviewService.startReview(prPayload, Map.of("coordinatedChange", true))
         //            UUID reviewCaseId = outcome.caseId()
         //            tracker.register(parentCaseId, repo, reviewCaseId)
         //            started.put(repo, reviewCaseId)
