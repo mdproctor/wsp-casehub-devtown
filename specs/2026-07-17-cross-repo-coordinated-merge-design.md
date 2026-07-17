@@ -29,11 +29,14 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
 
 ```
 1. Trigger → CoordinatedChangeService.start(request)
+1b. Pre-check: for each repo, verify no active review case exists (standalone or coordinated)
+   - PrReviewCaseTracker.findActiveCaseByPr(repo, prNumber) must return empty
+   - Reject entire request if any repo has an active review (see §Edge Cases)
 2. Start parent case via CoordinatedChangeCaseHub.startCase(context)
    - Parent case has repos list, no active bindings yet
 3. For each repo in request (all-or-none — see §Partial Failure Atomicity):
-   - PrReviewCaseService.startReview(prPayload) → reviewCaseId
-   - CoordinatedChangeTracker.register(parentCaseId, repo, reviewCaseId)
+   - PrReviewCaseService.startReview(prPayload) → PrReviewOutcome(caseId)
+   - CoordinatedChangeTracker.register(parentCaseId, repo, outcome.caseId())
    On failure after any reviews started: cancel all started reviews + parent case
 3b. Signal parent with review case mapping:
    - caseHubRuntime.signal(parentCaseId, "reviewCases", {repo → reviewCaseId})
@@ -169,6 +172,12 @@ public interface CoordinatedChangePort {
 public record CoordinatedChangeOutcome(UUID parentCaseId, Map<String, UUID> reviewCaseIds) {}
 ```
 
+**API change: `PrReviewOutcome`** — add `caseId` field:
+```java
+public record PrReviewOutcome(String verdict, List<String> findings, UUID caseId) {}
+```
+Currently `PrReviewOutcome(String verdict, List<String> findings)` does not expose the case identifier. A caller that starts a review should know what case was created. `PrReviewCaseService.startReview()` generates the `caseId` at line 107 but discards it in the return value — this is a design gap in the existing API, not specific to coordinated changes. The `caseId` field is `null` when no case was created (e.g., if the method were to take a revise-only path, though the coordinated flow's pre-check prevents this — see §Edge Cases).
+
 ### Application layer (`app/`)
 
 **`CoordinatedChangeCaseHub`** — extends `YamlCaseHub`:
@@ -204,16 +213,26 @@ public class CoordinatedChangeService implements CoordinatedChangePort {
     @Inject CoordinatedChangeCaseHub caseHub;
     @Inject PrReviewApplicationService reviewService;
     @Inject CoordinatedChangeTracker tracker;
+    @Inject PrReviewCaseTracker prReviewCaseTracker;
     @Inject CaseHubRuntime caseHubRuntime;
 
     public CoordinatedChangeOutcome start(CoordinatedChangeRequest request) {
+        // 0. Pre-check: reject if any repo has an active review case (standalone or coordinated)
+        //    for each repo in request:
+        //        Optional<CaseInfo> active = prReviewCaseTracker.findActiveCaseByPr(repo, prNumber)
+        //        if active.isPresent():
+        //            if tracker.isPartOfCoordinatedChange(active.get().caseId()):
+        //                throw ConflictingCoordinatedChangeException(repo, prNumber)
+        //            else:
+        //                throw ActiveReviewExistsException(repo, prNumber, active.get().caseId())
         // 1. Build initial context with repos list
         // 2. Start parent case via caseHub.startCase(context) → parentCaseId
         // 3. Start all review cases (all-or-none):
         //    Map<String, UUID> started = new LinkedHashMap<>();
         //    try {
         //        for each repo in request:
-        //            UUID reviewCaseId = reviewService.startReview(prPayload)
+        //            PrReviewOutcome outcome = reviewService.startReview(prPayload)
+        //            UUID reviewCaseId = outcome.caseId()
         //            tracker.register(parentCaseId, repo, reviewCaseId)
         //            started.put(repo, reviewCaseId)
         //    } catch (Exception e) {
@@ -233,7 +252,8 @@ public class CoordinatedChangeService implements CoordinatedChangePort {
 @ApplicationScoped
 public class CoordinatedChangeTracker {
     // parentCaseId → CoordinationState
-    // CoordinationState: {repos: Map<String, UUID>, completedRepos: Set<String>, allCompletedFired: AtomicBoolean}
+    // CoordinationState: {repos: Map<String, UUID>, completedRepos: Set<String>,
+    //                     allCompletedFired: AtomicBoolean, parentTerminal: AtomicBoolean}
 
     void register(UUID parentCaseId, String repo, UUID reviewCaseId);
     Entry findByReviewCaseId(UUID reviewCaseId);
@@ -241,10 +261,14 @@ public class CoordinatedChangeTracker {
     boolean markCompleted(UUID parentCaseId, String repo);
     boolean tryTransitionToAllCompleted(UUID parentCaseId);
     boolean isPartOfCoordinatedChange(UUID reviewCaseId);
+    void markParentTerminal(UUID parentCaseId);
+    boolean isParentTerminal(UUID parentCaseId);
 }
 ```
 
 **Race condition prevention:** `tryTransitionToAllCompleted()` uses `AtomicBoolean.compareAndSet(false, true)` — exactly one concurrent caller succeeds when the last review completes. This prevents duplicate `allReviewsCompleted` signals to the parent case. The method returns `true` only for the thread that wins the CAS.
+
+**Cancel feedback loop prevention:** When the parent case reaches terminal state, `onParentTerminal` cancels remaining review cases. Each cancellation fires a `CaseLifecycleEvent` with `caseStatus=CANCELLED`. Without a guard, `onCaseLifecycle` would try to signal `reviewFaulted` to the already-terminal parent — producing error noise for every cancelled review. The `parentTerminal` flag on `CoordinationState` prevents this: `onParentTerminal` calls `tracker.markParentTerminal(parentCaseId)` before cancelling reviews, and `onCaseLifecycle` checks `tracker.isParentTerminal()` before signaling. This is preferred over filtering all CANCELLED events because external cancellation of a review (not coordinator-initiated) should still propagate to the parent when it is non-terminal.
 
 **`CoordinatedChangeTrackerHydrator`** — rebuilds tracker state on startup, following the `PrReviewCaseTrackerHydrator` pattern:
 ```java
@@ -275,18 +299,28 @@ public class CoordinatedChangeObserver {
 
     void onCaseLifecycle(@ObservesAsync CaseLifecycleEvent event) {
         // 1. Check if event.caseId() is tracked as a per-repo review
-        // 2. If terminal + success: mark completed, signal parent context
-        // 3. If terminal + failure: signal parent reviewFaulted
-        // 4. If all completed: signal parent allReviewsCompleted = true
+        //    Entry entry = tracker.findByReviewCaseId(event.caseId());
+        //    if (entry == null) return;
+        // 2. If parent already terminal, skip — avoids feedback loop when
+        //    coordinator-initiated cancellations fire CaseLifecycleEvents
+        //    back to the observer (see §Cancel Feedback Loop Prevention)
+        //    if (tracker.isParentTerminal(entry.parentCaseId())) return;
+        // 3. If terminal + success: mark completed, signal parent context
+        // 4. If terminal + failure/cancelled: signal parent reviewFaulted
+        // 5. If all completed: signal parent allReviewsCompleted = true
     }
 
     void onParentTerminal(@ObservesAsync CaseLifecycleEvent event) {
-        // If the parent case reaches terminal state (FAULTED, COMPLETED, CANCELLED),
-        // cancel remaining non-terminal reviews via CaseHubRuntime.cancelCase(reviewCaseId).
-        // This transitions each review case to CANCELLED, which fires CaseLifecycleEvent
-        // with caseStatus=CANCELLED. The pr-review.yaml's review-abandoned goal
-        // (condition: '.pr.status == "closed" or .pr.status == "superseded"') does NOT
-        // fire from engine cancellation — the case is already terminal.
+        // If the parent case reaches terminal state (FAULTED, COMPLETED, CANCELLED):
+        // 1. Mark parent terminal in tracker BEFORE cancelling reviews:
+        //    tracker.markParentTerminal(event.caseId())
+        //    This ensures subsequent CANCELLED events from child reviews are
+        //    filtered by onCaseLifecycle's parent-terminal guard.
+        // 2. Cancel remaining non-terminal reviews via CaseHubRuntime.cancelCase(reviewCaseId).
+        //    This transitions each review case to CANCELLED, which fires CaseLifecycleEvent
+        //    with caseStatus=CANCELLED. The pr-review.yaml's review-abandoned goal
+        //    (condition: '.pr.status == "closed" or .pr.status == "superseded"') does NOT
+        //    fire from engine cancellation — the case is already terminal.
         // GitHub-side cleanup (removing status checks, posting cancel comments) is handled
         // by a separate CaseLifecycleEvent observer in the github module, not here.
     }
@@ -384,7 +418,9 @@ Or on fault:
 
 ## Edge Cases
 
-**Existing active review for a repo:** `PrReviewCaseService.startReview()` checks for an existing case on the same repo+prNumber. If found, it calls `revisePr()` instead of creating a new case. `CoordinatedChangeService.start()` checks each repo against `CoordinatedChangeTracker.isPartOfCoordinatedChange()` before starting. If any PR is already part of an active coordinated change, the request is **rejected** — the caller must cancel the existing coordinated set first. Partial overlap between coordinated sets would create ambiguous completion semantics (one set waiting for a review that another set might cancel).
+**Existing active review for a repo:** `CoordinatedChangeService.start()` pre-checks each repo via `PrReviewCaseTracker.findActiveCaseByPr(repo, prNumber)` before starting any cases. If any PR has an active review case of any kind, the request is **rejected**:
+- **Coordinated review** (tracked by `CoordinatedChangeTracker.isPartOfCoordinatedChange()`): throws `ConflictingCoordinatedChangeException`. Partial overlap between coordinated sets would create ambiguous completion semantics.
+- **Standalone review**: throws `ActiveReviewExistsException`. Without this check, `PrReviewCaseService.startReview()` would call `revisePr()` on the existing case instead of creating a new one — the coordinator would then track a pre-existing standalone review at an arbitrary lifecycle stage, with no guarantee its completion semantics align with coordination requirements. The caller must cancel or wait for the existing review before initiating a coordinated change.
 
 **Out-of-order completion:** Reviews complete independently. Observer counts completions. Order does not matter.
 
