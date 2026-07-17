@@ -31,9 +31,13 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
 1. Trigger → CoordinatedChangeService.start(request)
 2. Start parent case via CoordinatedChangeCaseHub.startCase(context)
    - Parent case has repos list, no active bindings yet
-3. For each repo in request:
+3. For each repo in request (all-or-none — see §Partial Failure Atomicity):
    - PrReviewCaseService.startReview(prPayload) → reviewCaseId
    - CoordinatedChangeTracker.register(parentCaseId, repo, reviewCaseId)
+   On failure after any reviews started: cancel all started reviews + parent case
+3b. Signal parent with review case mapping:
+   - caseHubRuntime.signal(parentCaseId, "reviewCases", {repo → reviewCaseId})
+   - Persists mapping to parent case context (enables hydration on restart)
 4. Each repo's PR goes through standard pr-review lifecycle
    - Code analysis, security review, CI, human gates — all existing
 5. Webhooks arrive per-repo
@@ -200,13 +204,26 @@ public class CoordinatedChangeService implements CoordinatedChangePort {
     @Inject CoordinatedChangeCaseHub caseHub;
     @Inject PrReviewApplicationService reviewService;
     @Inject CoordinatedChangeTracker tracker;
+    @Inject CaseHubRuntime caseHubRuntime;
 
     public CoordinatedChangeOutcome start(CoordinatedChangeRequest request) {
         // 1. Build initial context with repos list
-        // 2. Start parent case via caseHub.startCase(context)
-        // 3. For each repo: reviewService.startReview(prPayload)
-        // 4. Register each reviewCaseId with tracker
-        // 5. Return parentCaseId + reviewCaseIds map
+        // 2. Start parent case via caseHub.startCase(context) → parentCaseId
+        // 3. Start all review cases (all-or-none):
+        //    Map<String, UUID> started = new LinkedHashMap<>();
+        //    try {
+        //        for each repo in request:
+        //            UUID reviewCaseId = reviewService.startReview(prPayload)
+        //            tracker.register(parentCaseId, repo, reviewCaseId)
+        //            started.put(repo, reviewCaseId)
+        //    } catch (Exception e) {
+        //        started.values().forEach(caseHubRuntime::cancelCase);
+        //        caseHubRuntime.cancelCase(parentCaseId);
+        //        throw new CoordinatedChangeStartFailedException(request, e);
+        //    }
+        // 4. Signal parent with mapping for hydration:
+        //    caseHubRuntime.signal(parentCaseId, "reviewCases", started)
+        // 5. Return parentCaseId + started map
     }
 }
 ```
@@ -239,13 +256,14 @@ public class CoordinatedChangeTrackerHydrator {
 
     void onStartup(@Observes StartupEvent event) {
         // Query active cases with caseDefinitionName = "coordinated-change"
-        // For each: extract repos + reviewCaseIds from case context
+        // For each: extract repos from initial context,
+        //           reviewCaseIds from "reviewCases" context key (written by step 4 of start())
         // Re-register with tracker, mark already-completed reviews
     }
 }
 ```
 
-Hydration source is `CaseInstanceRepository.findByStatus()` filtered by `caseDefinitionName`, extracting the coordination mapping from the parent case context — the same pattern used by `PrReviewCaseTrackerHydrator`. No EventLog queries required.
+Hydration source is `CaseInstanceRepository.findByStatus()` filtered by `caseDefinitionName`, extracting the `reviewCases` mapping from the parent case context (written by the signal in step 4 of `CoordinatedChangeService.start()`) — the same pattern used by `PrReviewCaseTrackerHydrator`. No EventLog queries required.
 ```
 
 **`CoordinatedChangeObserver`** — `CaseLifecycleEvent` observer:
@@ -275,19 +293,19 @@ public class CoordinatedChangeObserver {
 }
 ```
 
-## EventLog Coordination Entries
+## EventLog Audit Trail
 
-The observer writes custom EventLog entries for coordination decisions, establishing an audit trail for the parent-child relationship:
+Coordination decisions are auditable through the engine's existing `SIGNAL_RECEIVED` EventLog entries — no custom event types or engine changes required. Every call to `caseHubRuntime.signal()` writes a `SIGNAL_RECEIVED` entry with the signal path and value as payload. The coordination signals produce these entries on the parent case's EventLog:
 
-1. **`COORDINATION_STARTED`** — written by `CoordinatedChangeService.start()` after all review cases are created. Payload: `{repos: [{repo, reviewCaseId}...]}`. This is the root entry for the coordination chain.
+1. **Review case mapping** — `signal(parentCaseId, "reviewCases", {repo → reviewCaseId})` records which review cases belong to this coordinated change.
 
-2. **`REVIEW_COMPLETED`** — written by `CoordinatedChangeObserver` when a per-repo review reaches terminal state. Payload: `{repo, reviewCaseId, status}`, with `causedByEntryId` linking to the child case's terminal EventLog entry ID (available from `CaseLifecycleEvent.contextSnapshot`).
+2. **Review completion** — `signal(parentCaseId, "completedReviews.{repo}", {status, reviewCaseId})` records each repo's review outcome.
 
-3. **`COORDINATION_MERGE_TRIGGERED`** — written when `allReviewsCompleted` is signaled. Payload: `{completedReviews: {repo → reviewCaseId}}`, with `causedByEntryId` linking to the last `REVIEW_COMPLETED` entry.
+3. **All reviews completed** — `signal(parentCaseId, "allReviewsCompleted", true)` records the completion threshold transition.
 
-4. **`COORDINATION_FAULTED`** — written when `reviewFaulted` is signaled. Payload: `{faultedRepo, reviewCaseId, reason}`, with `causedByEntryId` linking to the faulted review's terminal entry.
+4. **Review faulted** — `signal(parentCaseId, "reviewFaulted", {repo, reason})` records which review faulted and why.
 
-These entries make the parent-child coordination visible to `CaseHistoryResource` and any EventLog viewer, satisfying the epic's requirement for auditable coordination decisions.
+Each review case's own EventLog records its internal lifecycle (code analysis, CI, human gates) through the standard `pr-review.yaml` bindings. The parent case EventLog records coordination decisions. Together they provide a complete audit trail visible to `CaseHistoryResource`, with cross-references via `reviewCaseId` values in signal payloads.
 
 ## Coordinated-merge Worker (#157)
 
@@ -373,6 +391,8 @@ Or on fault:
 **One review faults, others still running:** Observer signals `reviewFaulted` immediately. Parent failure goal fires. `onParentTerminal` handler cancels remaining reviews.
 
 **Merge order:** Sequential, in the order repos appear in the request. Caller controls ordering by arranging the repos list.
+
+**Partial failure during start:** If `PrReviewCaseService.startReview()` fails for one repo after others have already started, `CoordinatedChangeService.start()` cancels all already-started review cases and the parent case via `caseHubRuntime.cancelCase()`, then throws `CoordinatedChangeStartFailedException`. This ensures atomicity: either all review cases are created, or none remain active. Cleanup failures during cancellation are logged but do not suppress the original exception.
 
 **Partial merge failure:** Repos A and B merge successfully, repo C fails. The worker returns results for all three. The `merge-failed` goal fires. The `rollback-on-merge-failure` binding fires (worker implemented in #158, not this batch).
 
