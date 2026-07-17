@@ -2,6 +2,8 @@
 
 | File | Date | Title |
 |------|------|-------|
+| [2026-07-17-mdp06-when-subcases-arent-subcases.md](2026-07-17-mdp06-when-subcases-arent-subcases.md) | 2026-07-17 | When sub-cases aren't sub-cases — application-layer coordination over engine sub-cases for cross-repo coordinated merge |
+| [2026-07-15-mdp05-wiring-the-merge-queue-to-git.md](2026-07-15-mdp05-wiring-the-merge-queue-to-git.md) | 2026-07-15 | Wiring the merge queue to git — batch branch management, SLA calibration from past assignments |
 | [2026-07-14-mdp04-centralising-memory-recovering-state.md](2026-07-14-mdp04-centralising-memory-recovering-state.md) | 2026-07-14 | Centralising Memory, Recovering State — MemoryEmitter migration, startup hydration, silent CDI fallthrough fix |
 | [2026-07-14-mdp03-supersede-score-split.md](2026-07-14-mdp03-supersede-score-split.md) | 2026-07-14 | Supersede, Score, Split — PR supersede lifecycle state, CBR batch risk scoring, typed bisection with precedent-guided candidate ranking |
 | [2026-07-14-mdp02-small-issues-structural-gaps.md](2026-07-14-mdp02-small-issues-structural-gaps.md) | 2026-07-14 | Small Issues, Structural Gaps — CBR Phase 2 refinements, evidential violation persistence, 8 new MCP tools; two issues blocked on foundation timing data and durable persistence |
