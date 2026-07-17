@@ -18,10 +18,12 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
 - The cross-repo knowledge (which repos, how to correlate, what constitutes "all merged") is software-engineering domain logic that belongs in devtown, not in generic engine primitives.
 
 **Why standard pr-review cases:**
-- Each review IS a standard pr-review case — same lifecycle, same YAML, same workers, same webhook routing.
+- Each review IS a standard pr-review case — same lifecycle, same `pr-review.yaml` CasePlanModel (at `review/src/main/resources/devtown/pr-review.yaml`), same workers, same webhook routing.
 - `PrReviewCaseService.startReview()` calls `caseTracker.register()`, so each review case is registered with `PrReviewCaseTracker`.
-- `GitHubWebhookResource.handleCheckSuite()` calls `signalCiStatus(repo, prNumber, ...)` which looks up `caseTracker.findActiveCaseByPr(repo, prNumber)`. Per-repo webhook routing works unchanged.
+- `GitHubWebhookResource` injects `PrReviewApplicationService` and calls `service.signalCiStatus()`. Inside `PrReviewCaseService` (the implementation), `signalCiStatus()` queries `PrReviewCaseTracker.findActiveCaseByPr(repo, prNumber)` to resolve the case. Per-repo webhook routing works unchanged — no handler modifications needed.
 - No engine changes. No coupling to engine internals.
+
+**Divergence from epic #12:** Epic #12 and issues #156, #159 were written assuming engine sub-case primitives. This spec chooses application-layer coordination instead, for the reasons above. The epic, #156, and #159 descriptions must be updated to reflect this design decision before implementation begins. `docs/orchestration-advantages.md` §4 uses sub-case bindings as an illustrative example of cross-repo coordination — the example shows what is *possible*, not what is *prescribed*. The application-layer approach achieves the same outcomes (atomic merge-all-or-rollback, auditable coordination decisions, automatic failure propagation) through different mechanisms.
 
 ## Coordination Flow
 
@@ -39,8 +41,8 @@ Per-repo reviews are standard pr-review cases started through `PrReviewCaseServi
    - No webhook handler changes needed
 6. Review case completes → CaseLifecycleEvent
    - CoordinatedChangeObserver detects it's tracked
-   - Signals parent context: completedReviews[repo] = {status: "completed"}
-7. ALL reviews complete
+   - Signals parent context: completedReviews[repo] = {status: "completed", reviewCaseId: "<uuid>"}
+7. ALL reviews complete (atomic transition — see §Race Condition Prevention)
    - Observer signals parent: allReviewsCompleted = true
    - Parent YAML binding merge-all-repos fires
    - Coordinated-merge worker merges all repos sequentially
@@ -78,6 +80,7 @@ spec:
       kind: success
       condition: >-
         .mergeResults != null and
+        (.mergeResults | length > 0) and
         (.mergeResults | all(.status == "success"))
 
     - name: review-faulted
@@ -208,19 +211,41 @@ public class CoordinatedChangeService implements CoordinatedChangePort {
 }
 ```
 
-**`CoordinatedChangeTracker`** — `@ApplicationScoped`, in-memory mapping:
+**`CoordinatedChangeTracker`** — `@ApplicationScoped`, in-memory mapping with atomic completion transition:
 ```java
 @ApplicationScoped
 public class CoordinatedChangeTracker {
     // parentCaseId → CoordinationState
-    // CoordinationState: {repos: Map<String, UUID>, completedRepos: Set<String>}
+    // CoordinationState: {repos: Map<String, UUID>, completedRepos: Set<String>, allCompletedFired: AtomicBoolean}
 
     void register(UUID parentCaseId, String repo, UUID reviewCaseId);
     Entry findByReviewCaseId(UUID reviewCaseId);
     Set<UUID> findReviewCaseIds(UUID parentCaseId);
     boolean markCompleted(UUID parentCaseId, String repo);
-    boolean allCompleted(UUID parentCaseId);
+    boolean tryTransitionToAllCompleted(UUID parentCaseId);
+    boolean isPartOfCoordinatedChange(UUID reviewCaseId);
 }
+```
+
+**Race condition prevention:** `tryTransitionToAllCompleted()` uses `AtomicBoolean.compareAndSet(false, true)` — exactly one concurrent caller succeeds when the last review completes. This prevents duplicate `allReviewsCompleted` signals to the parent case. The method returns `true` only for the thread that wins the CAS.
+
+**`CoordinatedChangeTrackerHydrator`** — rebuilds tracker state on startup, following the `PrReviewCaseTrackerHydrator` pattern:
+```java
+@ApplicationScoped
+public class CoordinatedChangeTrackerHydrator {
+    @Inject CaseInstanceRepository caseInstanceRepository;
+    @Inject CoordinatedChangeTracker tracker;
+    @Inject CurrentPrincipal principal;
+
+    void onStartup(@Observes StartupEvent event) {
+        // Query active cases with caseDefinitionName = "coordinated-change"
+        // For each: extract repos + reviewCaseIds from case context
+        // Re-register with tracker, mark already-completed reviews
+    }
+}
+```
+
+Hydration source is `CaseInstanceRepository.findByStatus()` filtered by `caseDefinitionName`, extracting the coordination mapping from the parent case context — the same pattern used by `PrReviewCaseTrackerHydrator`. No EventLog queries required.
 ```
 
 **`CoordinatedChangeObserver`** — `CaseLifecycleEvent` observer:
@@ -238,10 +263,31 @@ public class CoordinatedChangeObserver {
     }
 
     void onParentTerminal(@ObservesAsync CaseLifecycleEvent event) {
-        // If the parent case reaches terminal state, cancel remaining reviews
+        // If the parent case reaches terminal state (FAULTED, COMPLETED, CANCELLED),
+        // cancel remaining non-terminal reviews via CaseHubRuntime.cancelCase(reviewCaseId).
+        // This transitions each review case to CANCELLED, which fires CaseLifecycleEvent
+        // with caseStatus=CANCELLED. The pr-review.yaml's review-abandoned goal
+        // (condition: '.pr.status == "closed" or .pr.status == "superseded"') does NOT
+        // fire from engine cancellation — the case is already terminal.
+        // GitHub-side cleanup (removing status checks, posting cancel comments) is handled
+        // by a separate CaseLifecycleEvent observer in the github module, not here.
     }
 }
 ```
+
+## EventLog Coordination Entries
+
+The observer writes custom EventLog entries for coordination decisions, establishing an audit trail for the parent-child relationship:
+
+1. **`COORDINATION_STARTED`** — written by `CoordinatedChangeService.start()` after all review cases are created. Payload: `{repos: [{repo, reviewCaseId}...]}`. This is the root entry for the coordination chain.
+
+2. **`REVIEW_COMPLETED`** — written by `CoordinatedChangeObserver` when a per-repo review reaches terminal state. Payload: `{repo, reviewCaseId, status}`, with `causedByEntryId` linking to the child case's terminal EventLog entry ID (available from `CaseLifecycleEvent.contextSnapshot`).
+
+3. **`COORDINATION_MERGE_TRIGGERED`** — written when `allReviewsCompleted` is signaled. Payload: `{completedReviews: {repo → reviewCaseId}}`, with `causedByEntryId` linking to the last `REVIEW_COMPLETED` entry.
+
+4. **`COORDINATION_FAULTED`** — written when `reviewFaulted` is signaled. Payload: `{faultedRepo, reviewCaseId, reason}`, with `causedByEntryId` linking to the faulted review's terminal entry.
+
+These entries make the parent-child coordination visible to `CaseHistoryResource` and any EventLog viewer, satisfying the epic's requirement for auditable coordination decisions.
 
 ## Coordinated-merge Worker (#157)
 
@@ -258,6 +304,8 @@ Return: WorkerResult.of({mergeResults: [...]})
 ```
 
 Stop-on-failure is deliberate: already-merged repos stay merged; the `rollback-on-merge-failure` binding fires when the failure goal matches, and the rollback worker (#158) handles revert.
+
+**Dependency on #155:** `MergeClient` already exists at `io.casehub.devtown.domain.MergeClient` with implementation `GitHubMergeClient` in the github module. Issue #155 has been rescoped to `RevertClient` only (for the rollback worker #158). The merge worker (#157) has **no dependency on #155** — it uses the existing `MergeClient` directly.
 
 ## Webhook Routing (#159)
 
@@ -318,7 +366,7 @@ Or on fault:
 
 ## Edge Cases
 
-**Existing active review for a repo:** `PrReviewCaseService.startReview()` checks for an existing case on the same repo+prNumber. If found, it calls `revisePr()` instead of creating a new case. `CoordinatedChangeService.start()` must check for conflicts before starting and reject or supersede.
+**Existing active review for a repo:** `PrReviewCaseService.startReview()` checks for an existing case on the same repo+prNumber. If found, it calls `revisePr()` instead of creating a new case. `CoordinatedChangeService.start()` checks each repo against `CoordinatedChangeTracker.isPartOfCoordinatedChange()` before starting. If any PR is already part of an active coordinated change, the request is **rejected** — the caller must cancel the existing coordinated set first. Partial overlap between coordinated sets would create ambiguous completion semantics (one set waiting for a review that another set might cancel).
 
 **Out-of-order completion:** Reviews complete independently. Observer counts completions. Order does not matter.
 
