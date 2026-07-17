@@ -270,25 +270,39 @@ public class CoordinatedChangeTracker {
 
 **Cancel feedback loop prevention:** When the parent case reaches terminal state, `onParentTerminal` cancels remaining review cases. Each cancellation fires a `CaseLifecycleEvent` with `caseStatus=CANCELLED`. Without a guard, `onCaseLifecycle` would try to signal `reviewFaulted` to the already-terminal parent — producing error noise for every cancelled review. The `parentTerminal` flag on `CoordinationState` prevents this: `onParentTerminal` calls `tracker.markParentTerminal(parentCaseId)` before cancelling reviews, and `onCaseLifecycle` checks `tracker.isParentTerminal()` before signaling. This is preferred over filtering all CANCELLED events because external cancellation of a review (not coordinator-initiated) should still propagate to the parent when it is non-terminal.
 
-**`CoordinatedChangeTrackerHydrator`** — rebuilds tracker state on startup, following the `PrReviewCaseTrackerHydrator` pattern:
+**`CoordinatedChangeTrackerHydrator`** — rebuilds tracker state on startup and replays missed completion signals:
 ```java
 @ApplicationScoped
 public class CoordinatedChangeTrackerHydrator {
     @Inject CaseInstanceRepository caseInstanceRepository;
     @Inject CoordinatedChangeTracker tracker;
+    @Inject CaseHubRuntime caseHubRuntime;
     @Inject CurrentPrincipal principal;
 
     void onStartup(@Observes StartupEvent event) {
-        // Query active cases with caseDefinitionName = "coordinated-change"
-        // For each: extract repos from initial context,
-        //           reviewCaseIds from "reviewCases" context key (written by step 4 of start())
-        // Re-register with tracker, mark already-completed reviews
+        // Phase 1: Rebuild tracker state
+        // Query non-terminal cases with caseDefinitionName = "coordinated-change"
+        // For each parent case:
+        //   - Extract repos from initial context
+        //   - Extract reviewCaseIds from "reviewCases" context key (written by step 3b)
+        //   - Re-register with tracker
+
+        // Phase 2: Reconcile review case status and replay missed signals
+        // For each review case in the tracker:
+        //   - Query CaseInstance via caseInstanceRepository.findByUuid(reviewCaseId, tenancyId)
+        //   - If terminal+success AND not in parent context "completedReviews":
+        //       tracker.markCompleted(parentCaseId, repo)
+        //       caseHubRuntime.signal(parentCaseId, "completedReviews." + repo, {status, reviewCaseId})
+        //   - If terminal+failure AND parent context "reviewFaulted" is null:
+        //       caseHubRuntime.signal(parentCaseId, "reviewFaulted", {repo, reason})
+        // After all reviews reconciled:
+        //   - If tracker.tryTransitionToAllCompleted(parentCaseId):
+        //       caseHubRuntime.signal(parentCaseId, "allReviewsCompleted", true)
     }
 }
 ```
 
-Hydration source is `CaseInstanceRepository.findByStatus()` filtered by `caseDefinitionName`, extracting the `reviewCases` mapping from the parent case context (written by the signal in step 4 of `CoordinatedChangeService.start()`) — the same pattern used by `PrReviewCaseTrackerHydrator`. No EventLog queries required.
-```
+Hydration source is `CaseInstanceRepository.findByStatus()` filtered by `caseDefinitionName`, extracting the `reviewCases` mapping from the parent case context (written by the signal in step 4 of `CoordinatedChangeService.start()`). Phase 1 follows the `PrReviewCaseTrackerHydrator` pattern. Phase 2 goes beyond it: `PrReviewCaseTrackerHydrator` only rebuilds a routing index for webhooks — missing a webhook during downtime means a stale CI status, not a stuck case. The coordinated change hydrator drives state machine transitions, so it must detect review cases that completed during downtime and replay the corresponding signals to the parent case context. Without this, a review completing during restart would leave the parent waiting indefinitely.
 
 **`CoordinatedChangeObserver`** — `CaseLifecycleEvent` observer:
 ```java
@@ -432,9 +446,13 @@ Or on fault:
 
 **Partial merge failure:** Repos A and B merge successfully, repo C fails. The worker returns results for all three. The `merge-failed` goal fires. The `rollback-on-merge-failure` binding fires (worker implemented in #158, not this batch).
 
-## Risk: GE-20260521-9188c1
+## Risk: Duplicate binding dispatch (ChoreographyLoopControl)
 
-Garden entry documents that `when:` conditions on contextChange bindings may fire unconditionally. If still present, both `merge-all-repos` and `rollback-on-merge-failure` would fire on every context change regardless of their conditions. Mitigation: verify during implementation. If the issue persists, guard inside the worker functions with early-return on unmet preconditions.
+`CaseContextChangedEventHandler` correctly evaluates `when:` conditions — bindings whose conditions evaluate to false are excluded (verified from engine source, lines 221–223). The garden entry GE-20260521-9188c1's concern about unconditional firing is disproven.
+
+The **actual** risk is `ChoreographyLoopControl` (the default `LoopControl` implementation), whose Javadoc states: "Pure choreography: every rule whose trigger condition matched is scheduled for execution without deliberate ordering or prioritisation. ... no dedup mechanism exists in this path." This means: if a binding's `when` condition remains true across consecutive context changes, the binding fires each time. The `merge-all-repos` binding's `when: '.allReviewsCompleted == true and .mergeResults == null'` prevents re-dispatch AFTER the worker writes results (`mergeResults` becomes non-null), but during worker execution — before results are written — a stray context change would cause duplicate dispatch.
+
+**Practical impact:** Low. No context changes are expected between `allReviewsCompleted` being set and `mergeResults` being written (the merge worker runs synchronously in the binding's worker execution). Mitigation: guard inside worker functions with early-return on unmet preconditions (idempotency check).
 
 ## Not In Scope
 
