@@ -99,7 +99,7 @@ public static final String COORDINATED_ROLLBACK = "coordinated-rollback";
 
 - Rollback on review failure (pre-merge) — nothing to revert
 - Rollback on abandonment — separate concern, would need its own binding
-- EventLog `causedByEntryId` linking — the parent spec (cross-repo-coordinated-merge-design §EventLog Coordination Entries) defines `COORDINATION_FAULTED` entries with `causedByEntryId` linking to the faulting review's terminal entry. The engine also logs binding activations automatically when `rollback-on-merge-failure` fires. Per-repo revert outcome entries are a potential enhancement but not required for #158's audit trail
+- Explicit `causedByEntryId` linking — the parent spec (cross-repo-coordinated-merge-design §EventLog Audit Trail) uses `SIGNAL_RECEIVED` entries for coordination decisions, providing temporal audit ordering with `reviewCaseId` cross-references in signal payloads. The rollback worker follows the same pattern: the engine logs binding activation when `rollback-on-merge-failure` fires, and per-repo revert outcomes are recorded in the case context as `rollbackResults`. Together with the parent case's coordination signals, this provides a complete audit trail without requiring explicit `causedByEntryId` chains. Per-repo rollback EventLog entries are a potential future enhancement
 - New domain types — worker uses `Map<String, Object>` like the merge worker
 
 ## Tests
