@@ -2,24 +2,34 @@
 
 ## Last Session
 
-Epic #12 Phase 2 started. #158 (coordinated-rollback worker) implemented and closed. Best-effort revert of all successfully-merged repos when a coordinated merge fails partway through. Worker returns results as data, YAML humanTask binding handles escalation on revert failure. 3-round adversarial design review ($11.69, 9 issues, 7 verified). Landed as `ffc504a` on main.
+Epic #12 Phase 2 complete. #160 (cross-repo coordinated merge E2E test) implemented and closed. 5 scenarios exercising full coordination lifecycle through real engine case evaluation. Design review (5 rounds, $19.02, 14 issues, all resolved). Found and filed 4 design gaps: #161 (observer COMPLETED semantics), #162 (TrackerHydrator restart recovery), #163 (cross-case provenance linking), #164 (merge-failed goal race with rollback escalation). 3 garden entries submitted. Landed as `922167d` on main.
 
 ## Immediate Next Step
 
-Pick next Epic #12 work. #160 (end-to-end integration test) is now unblocked — the last Phase 2 piece.
+Pick next work. #164 (merge-failed goal race) is the most impactful fix — it's a YAML design gap that prevents rollback human escalation from firing. Small fix, high value, and the E2E test provides regression coverage.
 
 ## Cross-Module
 
 **Blocked by:**
 - `blocks-ui` — blocks-ui#41 (gates ALL devtown UI: #98, #119, #120, #123) · L · Med
 
+## What's Left
+
+- #161 — observer COMPLETED semantics gap (misclassifies failure-goal completion) · S · Med
+- #162 — TrackerHydrator restart recovery test · S · Low
+- #163 — cross-case provenance linking in EventLog · M · Med
+- #164 — merge-failed goal race with rollback escalation · S · Med
+
 ## What's Next
 
-**Tier 1 — Unblocked now (Epic #12 Phase 2 final):**
+**Tier 1 — Unblocked now (fix design gaps found by E2E test):**
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #160 | End-to-end integration test | M | Med | All deps closed (#155–#159) |
+| #164 | merge-failed goal race — condition rollback completion | S | Med | YAML fix + E2E regression |
+| #161 | Observer COMPLETED semantics gap | S | Med | Observer + engine API |
+| #163 | Cross-case provenance linking | M | Med | Engine EventLog API |
+| #162 | TrackerHydrator restart recovery test | S | Low | Test only |
 
 **Tier 2 — Blocked on blocks-ui#41:**
 
@@ -40,6 +50,6 @@ Pick next Epic #12 work. #160 (end-to-end integration test) is now unblocked —
 
 ## References
 
-- Spec: `specs/2026-07-17-coordinated-rollback-worker-design.md`
-- Design review: `~/adr/casehub-devtown/coordinated-rollback-worker-20260717-223500/`
-- Blog: `blog/2026-07-18-mdp07-the-undo-button-for-cross-repo.md`
+- Spec: `docs/specs/2026-07-18-cross-repo-e2e-test-design.md`
+- Design review: `~/adr/casehub-devtown/cross-repo-e2e-test-20260718-042547/`
+- Blog: `blog/2026-07-18-mdp08-the-test-that-found-two-bugs.md`
