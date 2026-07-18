@@ -24,7 +24,7 @@ Review cases are started via `CoordinatedChangeService.start()` → `PrReviewApp
 - The observer receives events via `@ObservesAsync` CDI delivery (the production path)
 - The observer correctly signals the parent case context
 
-Capability bindings (code-analysis, style-review, etc.) would fire on review case creation because `PrReviewCaseHub` only registers a `merge-executor` worker. With no workers for other capabilities, the engine exhausts reroute attempts (`maxRerouteAttempts: 2`) and writes `status: "REROUTES_EXHAUSTED"`, eventually triggering human escalation bindings that create WorkItems. Per protocol PP-20260521-134c38, the test pre-seeds all capability keys with non-null PENDING values immediately after review case creation using `caseHubRuntime.signal(reviewCaseId, Map<String, Object>)` (the batch atomic variant). This prevents binding guards (which check `== null`) from firing, avoiding reroute churn, WorkItem pollution, and DEEP_MERGE context races. `driveReviewToCompletion` then overwrites PENDING with APPROVED values.
+Capability bindings (code-analysis, style-review, etc.) would fire on review case creation because `PrReviewCaseHub` only registers a `merge-executor` worker. With no workers for other capabilities, the engine exhausts reroute attempts (`maxRerouteAttempts: 2`) and writes `status: "REROUTES_EXHAUSTED"`, eventually triggering human escalation bindings that create WorkItems. Per protocol PP-20260521-134c38, the test pre-seeds all capability keys with non-null PENDING values immediately after review case creation (see `preSeedCapabilityKeys` helper). This prevents binding guards (which check `== null`) from firing, avoiding reroute churn, WorkItem pollution, and DEEP_MERGE context races. `driveReviewToCompletion` then overwrites PENDING with APPROVED values.
 
 ### Observable @Alternative stubs (not Mockito)
 
@@ -98,7 +98,7 @@ Builds request from varargs. All entries use `linesChanged: 10`, non-empty `chan
 
 **`void preSeedCapabilityKeys(UUID reviewCaseId)`**
 
-Signals non-null PENDING values for all capability keys using the batch `caseHubRuntime.signal(reviewCaseId, Map<String, Object>)` API. This prevents capability binding guards (which check `== null`) from triggering reroute/escalation cycles. Called immediately after each review case is created. Per PP-20260521-134c38.
+Signals non-null PENDING values for all capability keys. Prefers the batch `caseHubRuntime.signal(reviewCaseId, Map<String, Object>)` API; falls back to sequential `signal(UUID, String, Object)` calls if the batch variant throws `UnsupportedOperationException` (it is a `default` method). Sequential ordering is safe: pre-seeding `codeAnalysis` first blocks `initial-analysis` and indirectly blocks all downstream bindings (they require `.codeAnalysis.complete == true`); pre-seeding `ci` blocks `run-ci`. Called immediately after `CoordinatedChangeService.start()` returns, before any `driveReviewToCompletion` call. Pre-seeding must arrive before the engine's asynchronous binding evaluation cycle — this holds because `startCase()` returns before bindings are evaluated, and the pre-seeding signal is queued ahead of the deferred evaluation. Per PP-20260521-134c38.
 
 | Signal path | Value |
 |-------------|-------|
@@ -166,10 +166,11 @@ Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → re
 
 **Phase 6 — EventLog verification:**
 - `caseHubRuntime.eventLog(parentCaseId)` → list of `CaseEventLogRecord`
-- Assert log contains CONTEXT_CHANGED entries for `completedReviews` signals (both repos)
-- Assert log contains CONTEXT_CHANGED entry for `allReviewsCompleted`
-- Assert log contains entries for merge worker dispatch and completion
-- Assert `causedByEntryId` chain links review case completion events to parent context updates
+- Filter by `SIGNAL_RECEIVED` — assert entries exist with `payload` containing `completedReviews` paths for both repos
+- Filter by `SIGNAL_RECEIVED` — assert entry with `payload` containing `allReviewsCompleted`
+- Filter by `WORKER_EXECUTION_COMPLETED` — assert merge worker completion entry
+- Filter by `GOAL_REACHED` — assert `all-repos-merged` goal reached
+- Cross-case provenance linking (`causedByEntryId`) is not yet supported by the engine API — tracked as #163
 
 ### Scenario 2: Review faults — parent terminates, remaining cancelled
 
@@ -192,8 +193,9 @@ Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → re
 
 **Phase 5 — EventLog verification:**
 - `caseHubRuntime.eventLog(parentCaseId)` → list of `CaseEventLogRecord`
-- Assert log contains CONTEXT_CHANGED entry for `reviewFaulted` signal linked to the faulting review case
-- Assert `causedByEntryId` chain links the faulting review case's CANCELLED event to the parent's `reviewFaulted` context update
+- Filter by `SIGNAL_RECEIVED` — assert entry with `payload` containing `reviewFaulted` with `repo: "casehubio/platform"` and `reason: "CANCELLED"`
+- Filter by `GOAL_REACHED` — assert `review-faulted` goal reached
+- Cross-case provenance linking not yet available (#163)
 
 ### Scenario 3: Rollback failure with human escalation
 
