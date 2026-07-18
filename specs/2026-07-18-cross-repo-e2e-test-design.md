@@ -24,7 +24,7 @@ Review cases are started via `CoordinatedChangeService.start()` → `PrReviewApp
 - The observer receives events via `@ObservesAsync` CDI delivery (the production path)
 - The observer correctly signals the parent case context
 
-Capability bindings (code-analysis, style-review, etc.) fire on review case creation but stall — `PrReviewCaseHub` only registers a `merge-executor` worker. Goals evaluate context independently of binding state, so the stalled bindings are irrelevant. The test signals APPROVED values directly, which overwrite any partial state.
+Capability bindings (code-analysis, style-review, etc.) would fire on review case creation because `PrReviewCaseHub` only registers a `merge-executor` worker. With no workers for other capabilities, the engine exhausts reroute attempts (`maxRerouteAttempts: 2`) and writes `status: "REROUTES_EXHAUSTED"`, eventually triggering human escalation bindings that create WorkItems. Per protocol PP-20260521-134c38, the test pre-seeds all capability keys with non-null PENDING values immediately after review case creation using `caseHubRuntime.signal(reviewCaseId, Map<String, Object>)` (the batch atomic variant). This prevents binding guards (which check `== null`) from firing, avoiding reroute churn, WorkItem pollution, and DEEP_MERGE context races. `driveReviewToCompletion` then overwrites PENDING with APPROVED values.
 
 ### Observable @Alternative stubs (not Mockito)
 
@@ -83,7 +83,7 @@ CoordinatedChangeService          — entry point under test
 CoordinatedChangeTracker          — verify tracker state
 PrReviewCaseHub                   — signal review cases
 CoordinatedChangeCaseHub          — signal parent case (idempotent guard test)
-CrossTenantCaseInstanceRepository — read case state + context
+CaseInstanceRepository              — read case state (returns Uni<CaseInstance>)
 CaseHubRuntime                    — cancelCase() for fault path
 WorkItemQueries                   — verify human escalation WorkItem (scenario 3)
 TestMergeClient                   — program + verify merge calls
@@ -96,9 +96,21 @@ TestRevertClient                  — program + verify revert calls
 
 Builds request from varargs. All entries use `linesChanged: 10`, non-empty `changedPaths`, valid `contributor`.
 
+**`void preSeedCapabilityKeys(UUID reviewCaseId)`**
+
+Signals non-null PENDING values for all capability keys using the batch `caseHubRuntime.signal(reviewCaseId, Map<String, Object>)` API. This prevents capability binding guards (which check `== null`) from triggering reroute/escalation cycles. Called immediately after each review case is created. Per PP-20260521-134c38.
+
+| Signal path | Value |
+|-------------|-------|
+| `codeAnalysis` | `{outcome: "PENDING"}` |
+| `styleCheck` | `{outcome: "PENDING"}` |
+| `testCoverage` | `{outcome: "PENDING"}` |
+| `performanceAnalysis` | `{outcome: "PENDING"}` |
+| `ci` | `{status: "PENDING"}` |
+
 **`void driveReviewToCompletion(UUID reviewCaseId)`**
 
-Signals the review case context to satisfy all four pr-review.yaml success goals:
+Signals the review case context to satisfy all four pr-review.yaml success goals (overwrites PENDING values from pre-seeding):
 
 | Signal path | Value | Goal satisfied |
 |-------------|-------|---------------|
@@ -117,7 +129,7 @@ Calls `caseHubRuntime.cancelCase(reviewCaseId)`. Produces `CaseLifecycleEvent` w
 
 **`void awaitCaseStatus(UUID caseId, CaseStatus expected)`**
 
-Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → reads `caseInstanceRepository.findByUuid(caseId)` → asserts status.
+Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → reads `caseInstanceRepository.findByUuid(caseId).await().indefinitely()` → asserts `instance.getState()` matches expected status.
 
 ## Test Scenarios
 
@@ -152,6 +164,13 @@ Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → re
 - Assert review case contexts contain `coordinatedChange: true`
 - Assert merge-executor was NOT called on review cases (flag suppressed per-repo merge)
 
+**Phase 6 — EventLog verification:**
+- `caseHubRuntime.eventLog(parentCaseId)` → list of `CaseEventLogRecord`
+- Assert log contains CONTEXT_CHANGED entries for `completedReviews` signals (both repos)
+- Assert log contains CONTEXT_CHANGED entry for `allReviewsCompleted`
+- Assert log contains entries for merge worker dispatch and completion
+- Assert `causedByEntryId` chain links review case completion events to parent context updates
+
 ### Scenario 2: Review faults — parent terminates, remaining cancelled
 
 **Setup:** 2-repo request. No MergeClient outcomes (merge never reached).
@@ -168,8 +187,13 @@ Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → re
 
 **Phase 4 — Terminal + cancel propagation:**
 - Await parent case terminal state — the `review-faulted` failure goal is satisfied, triggering `failure: anyOf: [review-faulted]`. Assert terminal (not a specific status — the engine may produce COMPLETED-with-failure-metadata or FAULTED; the test discovers which)
-- Await engine review case reaches CANCELLED (observer's `onParentTerminal` cancels remaining)
+- Assert engine review case (reviewCaseIdA) stays COMPLETED — `cancelCase()` throws `IllegalStateException` on terminal cases (caught by observer's try/catch), so reviewCaseIdA is unchanged
 - Assert `testMergeClient.calls` empty
+
+**Phase 5 — EventLog verification:**
+- `caseHubRuntime.eventLog(parentCaseId)` → list of `CaseEventLogRecord`
+- Assert log contains CONTEXT_CHANGED entry for `reviewFaulted` signal linked to the faulting review case
+- Assert `causedByEntryId` chain links the faulting review case's CANCELLED event to the parent's `reviewFaulted` context update
 
 ### Scenario 3: Rollback failure with human escalation
 
@@ -227,19 +251,18 @@ Awaitility: `await().atMost(10, SECONDS).pollInterval(100, MILLISECONDS)` → re
 
 ## Protocols Applied
 
-- **PP-20260521-134c38** (HITL test pre-seeding): Not directly applied — review cases use capability binding stalling instead of pre-seeding, because `CoordinatedChangeService` controls initial context. Signals override context post-creation.
-- **PP-20260618-fc6a53** (failure cascade pattern): Informed the semantic gap observation — failure goals produce COMPLETED, not FAULTED.
-- **GE-20260604-97031b** (WorkItem isolation): Each test uses unique case IDs. Tracker accumulation across tests is safe because assertions filter by parent case ID.
+- **PP-20260521-134c38** (HITL test pre-seeding): Applied — `preSeedCapabilityKeys()` signals non-null PENDING values for all capability keys immediately after review case creation, preventing reroute/escalation binding churn.
+- **failure-cascade-pattern.md** (failure cascade pattern): Informed the semantic gap observation — failure goals produce COMPLETED, not FAULTED. The observer COMPLETED semantics gap is tracked as #161.
+- Each test uses unique case IDs via engine-generated UUIDs. Tracker accumulation across tests is safe because assertions filter by parent case ID.
 
 ## Known Issue: Observer COMPLETED semantics
 
 `CoordinatedChangeObserver` classifies `CaseStatus.COMPLETED` as `TERMINAL_SUCCESS`. But per the failure-cascade-pattern protocol, failure goals also produce COMPLETED. A review case that hits `review-abandoned` (PR closed) would be misclassified as successfully completed, causing the coordinator to merge a closed PR.
 
-This test uses `cancelCase()` to sidestep the gap. A separate issue should be filed to fix the observer — either by checking the case's completion outcome type in the `CaseLifecycleEvent`, or by the engine producing a distinct status for failure-goal completion.
+This test uses `cancelCase()` to sidestep the gap. Filed as #161 — fix options include checking the completion outcome type in `CaseLifecycleEvent`, or having the engine produce a distinct status for failure-goal completion.
 
 ## Not In Scope
 
 - REST endpoint or MCP tool for triggering coordinated changes
-- EventLog causedByEntryId chain assertions (deferred — requires understanding the InMemoryEventLogRepository query API; can be added as a follow-up once the core scenarios pass)
-- Testing the `CoordinatedChangeTrackerHydrator` restart recovery path
+- Testing the `CoordinatedChangeTrackerHydrator` restart recovery path (tracked as #162)
 - Webhook-driven review lifecycle (already covered by existing webhook handler tests)
