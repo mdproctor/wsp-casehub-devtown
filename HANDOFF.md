@@ -1,38 +1,45 @@
-# HANDOFF — 2026-07-17
+# HANDOFF — 2026-07-18
 
 ## Last Session
 
-Epic #12 Phase 1 completed. #156 (cross-repo CasePlanModel), #157 (coordinated-merge worker), and #159 (webhook routing / coordination tracking) implemented and closed on one branch. Application-layer coordination over engine sub-cases — per-repo reviews are standard pr-review cases with a `coordinatedChange` context flag suppressing auto-merge. `CoordinatedChangeTracker` with `AtomicBoolean` for exactly-once completion transition, `CoordinatedChangeObserver` for lifecycle event signaling, `CoordinatedChangeService` with all-or-none startup atomicity. 7-round adversarial design review ($16.95, 25 issues, 16 verified, 9 accepted). Landed as `390f084` on main.
+Epic #12 Phase 2 started. #158 (coordinated-rollback worker) implemented and closed. Best-effort revert of all successfully-merged repos when a coordinated merge fails partway through. Worker returns results as data, YAML humanTask binding handles escalation on revert failure. 3-round adversarial design review ($11.69, 9 issues, 7 verified). Landed as `ffc504a` on main.
 
 ## Immediate Next Step
 
-Pick next epic #12 work. Phase 2 is now unblocked: #158 (coordinated-rollback worker) and #160 (end-to-end integration test). #158 uses `RevertClient` from #155 and the rollback binding already declared in `coordinated-change.yaml`. #160 depends on #158.
+Pick next Epic #12 work. #160 (end-to-end integration test) is now unblocked — the last Phase 2 piece.
 
 ## Cross-Module
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+**Blocked by:**
+- `blocks-ui` — blocks-ui#41 (gates ALL devtown UI: #98, #119, #120, #123) · L · Med
 
 ## What's Next
 
-**Tier 1 — Unblocked now (Epic #12 Phase 2):**
+**Tier 1 — Unblocked now (Epic #12 Phase 2 final):**
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #158 | Coordinated-rollback worker — revert merges on sub-case FAULT | M | Med | Rollback binding declared in YAML; uses RevertClient from #155 |
+| #160 | End-to-end integration test | M | Med | All deps closed (#155–#159) |
 
-**Tier 2 — Blocked on Phase 2:**
+**Tier 2 — Blocked on blocks-ui#41:**
 
-| # | Description | Scale | Complexity | Blocker |
-|---|-------------|-------|------------|---------|
-| #160 | End-to-end integration test | M | Med | #158 |
+| # | Description | Scale | Complexity |
+|---|-------------|-------|------------|
+| #98 | Trust visibility UI | M | Med |
+| #119 | CasePlanModel browser | M | Med |
+| #120 | Case dependency graph | M | Med |
+| #123 | Worker session mgmt UI | S | Med |
 
-**Tier 3 — Other open work:**
+**Tier 3 — Epics, long horizon:**
 
-*Unchanged — `git show HEAD~1:HANDOFF.md`*
+| # | Description | Scale | Complexity |
+|---|-------------|-------|------------|
+| #16 | Epic 9: Notification wiring | XL | High |
+| #81 | Doltgres time-travel (P1.5) | L | High |
+| #24 | Contributor trust for OSS | XL | High |
 
 ## References
 
-- Spec: `docs/specs/2026-07-17-cross-repo-coordinated-merge-design.md`
-- Design review: `~/adr/casehub-devtown/cross-repo-coordinated-merge-20260717-121432/`
-- Blog: `blog/2026-07-17-mdp06-when-subcases-arent-subcases.md`
-- Garden: GE-20260717-f7dc41 (CaseHubRuntime.startCase parentCaseId bypass gotcha)
+- Spec: `specs/2026-07-17-coordinated-rollback-worker-design.md`
+- Design review: `~/adr/casehub-devtown/coordinated-rollback-worker-20260717-223500/`
+- Blog: `blog/2026-07-18-mdp07-the-undo-button-for-cross-repo.md`
