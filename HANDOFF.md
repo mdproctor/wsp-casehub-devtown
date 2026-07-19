@@ -1,35 +1,32 @@
-# HANDOFF — 2026-07-18
+# HANDOFF — 2026-07-19
 
 ## Last Session
 
-Epic #12 Phase 2 complete. #160 (cross-repo coordinated merge E2E test) implemented and closed. 5 scenarios exercising full coordination lifecycle through real engine case evaluation. Design review (5 rounds, $19.02, 14 issues, all resolved). Found and filed 4 design gaps: #161 (observer COMPLETED semantics), #162 (TrackerHydrator restart recovery), #163 (cross-case provenance linking), #164 (merge-failed goal race with rollback escalation). 3 garden entries submitted. Landed as `922167d` on main.
+Tier 1 design gaps from #160's E2E test — all four fixed. Two engine API changes (CaseLifecycleEvent goal metadata, signal metadata overload) and four devtown fixes (observer semantics, YAML goal condition, signal provenance, tracker hydrator). Landed as `373d199` on main. Filed #165 (casehub-work WorkItemRef binary incompatibility). 2 garden entries submitted.
 
 ## Immediate Next Step
 
-Pick next work. #164 (merge-failed goal race) is the most impactful fix — it's a YAML design gap that prevents rollback human escalation from firing. Small fix, high value, and the E2E test provides regression coverage.
+Pick next work. #165 (casehub-work binary incompatibility) is the highest-value fix — it unblocks all humanTask tests and enables full rollback escalation E2E validation. XS / Low.
 
 ## Cross-Module
 
 **Blocked by:**
 - `blocks-ui` — blocks-ui#41 (gates ALL devtown UI: #98, #119, #120, #123) · L · Med
 
+**Engine changes landed (not yet pushed to upstream):**
+- casehub-engine branch `issue-752-adaptation-aware-cbr` has 2 commits for devtown#161 and devtown#163. Push to casehubio/engine when ready.
+
 ## What's Left
 
-- #161 — observer COMPLETED semantics gap (misclassifies failure-goal completion) · S · Med
-- #162 — TrackerHydrator restart recovery test · S · Low
-- #163 — cross-case provenance linking in EventLog · M · Med
-- #164 — merge-failed goal race with rollback escalation · S · Med
+- #165 — casehub-work WorkItemRef binary incompatibility (blocks humanTask tests) · XS · Low
 
 ## What's Next
 
-**Tier 1 — Unblocked now (fix design gaps found by E2E test):**
+**Tier 1 — Unblocked now:**
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #164 | merge-failed goal race — condition rollback completion | S | Med | YAML fix + E2E regression |
-| #161 | Observer COMPLETED semantics gap | S | Med | Observer + engine API |
-| #163 | Cross-case provenance linking | M | Med | Engine EventLog API |
-| #162 | TrackerHydrator restart recovery test | S | Low | Test only |
+| #165 | casehub-work WorkItemRef binary incompatibility | XS | Low | Rebuild casehub-work |
 
 **Tier 2 — Blocked on blocks-ui#41:**
 
@@ -50,6 +47,6 @@ Pick next work. #164 (merge-failed goal race) is the most impactful fix — it's
 
 ## References
 
-- Spec: `docs/specs/2026-07-18-cross-repo-e2e-test-design.md`
-- Design review: `~/adr/casehub-devtown/cross-repo-e2e-test-20260718-042547/`
-- Blog: `blog/2026-07-18-mdp08-the-test-that-found-two-bugs.md`
+- Spec: `docs/specs/2026-07-18-tier1-design-gaps-spec.md`
+- Blog: `blog/2026-07-18-mdp09-four-fixes-one-root.md`
+- Engine commits: `7e84caf1` (goal metadata), `2c34b485` (signal metadata)
