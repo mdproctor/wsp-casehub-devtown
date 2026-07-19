@@ -1,4 +1,5 @@
-# Branch Closed — issue-59-s-xs-cleanup
-**Date:** 2026-06-01
-**Issue:** #59
-**Scheduled for deletion:** 2026-06-15
+# Branch Closed: issue-165-work-workitemref-compat
+
+**Date:** 2026-07-19
+**Issues:** 165
+**Status:** merged to main
