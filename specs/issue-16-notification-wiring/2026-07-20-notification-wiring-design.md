@@ -83,7 +83,7 @@ Six notification scenarios, each mapping to a `SubscribableEvent` POJO, a `Subsc
 | 3 | Merge failure | `io.casehub.devtown.merge.failed` | `CaseLifecycleEvent` (caseStatus=`CANCELLED`) | `@ObservesAsync` | URGENT | EVENT_FIELD (authorId) + GROUP (devtown-ops) | `devtown.merge` |
 | 4 | Stalled commitment | `io.casehub.devtown.commitment.stalled` | `WatchdogAlertEvent` | `@ObservesAsync` | WARNING | GROUP (devtown-ops) | `devtown.watchdog` |
 | 5 | Case fault | `io.casehub.devtown.case.faulted` | `CaseLifecycleEvent` (caseStatus=`FAULTED`) | `@ObservesAsync` | URGENT | GROUP (devtown-ops) | `devtown.case` |
-| 6 | SLA breach escalation | `io.casehub.devtown.sla.escalated` | `SlaBreachEvent` (decision=`EscalateTo`) | `@Observes` | URGENT | GROUP (devtown-ops) + EVENT_FIELD (assigneeId) | `devtown.sla` |
+| 6 | SLA breach escalation | `io.casehub.devtown.sla.escalated` | `SlaBreachEvent` (decision=`EscalateTo`) | `@Observes` | URGENT | GROUP (devtown-ops) | `devtown.sla` |
 
 **Observer annotations** depend on source event firing mechanism:
 - `CaseLifecycleEvent` → `@ObservesAsync` — fired via `Event.fireAsync()` from Vert.x handlers (Javadoc-documented)
@@ -97,7 +97,15 @@ GE-20260427-893862 (`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SU
 
 **Scenario 4 — watchdog condition filter:** The bridge filters `WatchdogAlertEvent.conditionType()` for `OBLIGATION_FAN_OUT` (unresponded obligations past deadline) and `CONVERSATION_STALL` (stalled correlations on a channel). Other condition types (`BARRIER_STUCK`, `AGENT_STALE`, `QUEUE_DEPTH`, etc.) are excluded — they are infrastructure concerns, not reviewer-facing notifications. The existing Qhorus channel dispatch (`messageService.dispatch()`) notifies agents; this notification path notifies human operators. Dual delivery is intentional — different audiences.
 
-**Scenario 6 — escalation redesign:** Issue #16 references `EscalationPolicy.escalate()` which does not exist as a class. The actual escalation mechanism is `SlaBreachEvent` from `casehub-work`, fired when a WorkItem's SLA expires. The bridge filters for `BreachDecision.EscalateTo` decisions. This is distinct from `AgentRoutingEscalationEvent` (engine routing failure due to trust qualification gaps) — a separate concern not included in this epic.
+**Scenario 6 — SLA breach field mapping:** `SlaBreachEvent(SlaBreachContext context, BreachDecision decision, String tenancyId)`. The bridge extracts fields from verified APIs:
+- `taskId` ← `context.task().taskId().toString()` (`BreachedTask.taskId()`: UUID)
+- `taskTitle` ← `context.task().title()` (`BreachedTask.title()`: String)
+- `callerRef` ← `context.task().callerRef()` (`BreachedTask.callerRef()`: String — the process that created the work item; used as actorIdField since SLA breach is system-initiated, no human actor)
+- `breachType` ← `context.breachType().name()` (`SlaBreachContext.breachType()`: BreachType enum)
+- `escalationGroups` ← `String.join(", ", ((EscalateTo) decision).groups())` (`EscalateTo.groups()`: Set<String> — joined for template substitution)
+- `scope` ← `context.scope()` (`SlaBreachContext.scope()`: Path — the repo scope, used for per-repo preference resolution)
+
+`BreachedTask` has no `assigneeId` — the notification targets GROUP(devtown-ops) only. `EscalateTo.groups()` identifies the escalation destination and appears in the template body. This is distinct from `AgentRoutingEscalationEvent` (engine routing failure due to trust qualification gaps) — a separate concern not included in this epic.
 
 ### Templates
 
@@ -108,7 +116,7 @@ GE-20260427-893862 (`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SU
 | Merge failed | `Merge rejected: {prTitle}` | `CI failure: {failureReason} — author: {authorName}` | `devtown.merge.failed` | `/api/reviews/{prNumber}` | `devtown.merge` | `prNumber` | `authorId` |
 | Stalled commitment | `Stalled: {conditionType} on {targetName}` | `{summary} — fired at {firedAt}` | `devtown.commitment.stalled` | null | `devtown.watchdog` | `targetName` | `actorId` |
 | Case faulted | `Case faulted: {caseDefinitionName}` | `Case {caseId} in state {caseStatus}` | `devtown.case.faulted` | `/api/compliance/code-review/{caseId}` | `devtown.case` | `caseId` | `actorId` |
-| SLA escalated | `SLA breach: review escalated` | `{detail} — escalated to {escalationGroup}` | `devtown.sla.escalated` | `/api/workitems/{workItemId}` | `devtown.sla` | `workItemId` | `assigneeId` |
+| SLA escalated | `SLA breach: {taskTitle}` | `{breachType} — escalated to {escalationGroups}` | `devtown.sla.escalated` | `/api/workitems/{taskId}` | `devtown.sla` | `taskId` | `callerRef` |
 
 All templates use platform `NotificationTemplate` with all 8 required fields (`titlePattern`, `bodyPattern`, `severity`, `category`, `actionUrlPattern`, `entityType`, `entityIdField`, `actorIdField`). `severity` is embedded in the template (not a separate registration argument). `category` is `@NonNull`. `actionUrlPattern` is nullable (null for stalled commitment — no single resource to link to).
 
@@ -186,6 +194,30 @@ public class ReviewAssignmentNotificationBridge {
 }
 ```
 
+**Sync source (SlaBreachEvent — fired synchronously during breach handling):**
+
+```java
+@ApplicationScoped
+public class SlaBreachNotificationBridge {
+
+    @Inject Event<SlaEscalatedEvent> slaEscalatedEvents;
+
+    @Transactional(NOT_SUPPORTED)
+    void onSlaBreach(@Observes SlaBreachEvent event) {
+        if (!(event.decision() instanceof BreachDecision.EscalateTo escalation)) return;
+        BreachedTask task = event.context().task();
+        slaEscalatedEvents.fire(new SlaEscalatedEvent(
+            task.taskId().toString(),
+            task.title(),
+            task.callerRef(),
+            event.context().breachType().name(),
+            String.join(", ", escalation.groups()),
+            event.context().scope().toString(),
+            event.tenancyId()));
+    }
+}
+```
+
 ### Subscription registration
 
 Programmatic at `@Startup` via `SubscriptionStore`. Subscriptions are code-versioned, not Flyway-seeded. Uses idempotent find-then-store against the actual `SubscriptionStore` API:
@@ -243,24 +275,28 @@ public class DevtownSubscriptionRegistrar {
 
 Issue #16 requires: "connector targets configurable per-repo (which Slack channel gets which repo's notifications)."
 
-devtown uses `PreferenceProvider` (parent#26 ✅ CLOSED) scoped by repository for channel target resolution.
+devtown uses `PreferenceProvider` (parent#26 ✅ CLOSED) scoped by repository. Per-repo channel resolution happens in devtown's bridge observers — not in the generic connector bridge (connectors#86). This keeps devtown-specific preference knowledge inside devtown.
 
-**Preference keys** (in `devtown-domain`, pure Java):
+**Preference keys** (in `devtown-domain`, pure Java — follows the same pattern as `SlaPreferenceKeys`):
 
 ```java
 public final class NotificationPreferenceKeys {
-    public static final PreferenceKey<String> SLACK_CHANNEL =
-        PreferenceKey.of("notification.slack-channel", String.class, "#devtown-ops");
-    public static final PreferenceKey<String> TEAMS_CHANNEL =
-        PreferenceKey.of("notification.teams-channel", String.class, null);
-    public static final PreferenceKey<Boolean> NOTIFICATIONS_ENABLED =
-        PreferenceKey.of("notification.enabled", Boolean.class, true);
+    public static final PreferenceKey<StringPreference> SLACK_CHANNEL =
+        new PreferenceKey<>("devtown.notification", "slack-channel",
+            StringPreference.of("#devtown-ops"), StringPreference::parse);
+    public static final PreferenceKey<StringPreference> TEAMS_CHANNEL =
+        new PreferenceKey<>("devtown.notification", "teams-channel",
+            StringPreference.of(""), StringPreference::parse);
 }
 ```
 
-**Resolution path:** Each `SubscribableEvent` POJO carries `repoId`. The connector bridge (connectors#86) resolves the delivery destination via `PreferenceProvider.resolve(scope).get(SLACK_CHANNEL)` where `scope` is the repository path (e.g., `casehubio/devtown`). Repository A can target `#team-a-alerts`; repository B targets `#team-b-alerts`.
+`PreferenceKey` is a 4-arg record: `PreferenceKey<T extends Preference>(String namespace, String name, T defaultValue, Function<String, T> parser)`. Values use `StringPreference` (implements `SingleValuePreference` → `Preference`), consistent with existing devtown preference keys.
 
-**Default behaviour:** `#devtown-ops` (the default in the preference key definition) applies when no per-repo override is configured.
+**Resolution boundary:** devtown bridge observers resolve per-repo channel configuration and embed the resolved `targetChannel` in the `SubscribableEvent` POJO. The observer injects `PreferenceProvider`, calls `resolve(SettingsScope.of(repoPath)).getOrDefault(SLACK_CHANNEL)`, and writes the result into the event POJO. The platform/connector pipeline sees a plain string field — no devtown preference key coupling crosses the boundary.
+
+For `SlaBreachEvent`, the bridge observer can read preferences directly from `SlaBreachContext.preferences()` (which carries the scoped `Preferences` for the breached task's scope) instead of injecting `PreferenceProvider`.
+
+**Default behaviour:** `#devtown-ops` (the `defaultValue` in the preference key) applies when no per-repo override is configured. Repository A can override to `#team-a-alerts`; repository B to `#team-b-alerts`.
 
 ---
 
