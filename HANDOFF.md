@@ -6,14 +6,23 @@ Completed #16 (Epic 9: Notification wiring). Discovered the platform notificatio
 
 ## Immediate Next Step
 
-Pick next work. Tier 2 UI issues blocked on blocks-ui#41. Tier 3 epics available.
+Pick next work. Tier 2 UI issues unblocked (blocks-ui#41 blocks-ui side complete). #119 and #123 wait on blocks-ui#87; #120 needs a blocks-ui issue filed; #98 needs a compose-vs-new-component decision. Tier 3 epics available.
 
 ## Cross-Module
 
 **Blocked by:**
-- `blocks-ui` — blocks-ui#41 (gates ALL devtown UI: #98, #119, #120, #123) · L · Med
 - `connectors` — connectors#86 (notification delivery bridge — in progress) · M · Med
 - `platform` — SubscriptionEngine + NotificationDispatcher (not yet implemented) · L · High
+
+## UI Issue Status (evaluated 2026-07-20)
+
+**#119 CasePlanModel browser** — covered by blocks-ui#87 (composable case-explorer, in progress on `issue-87-composable-case-explorer` branch). Spec: `blocks-ui/docs/specs/2026-07-20-composable-case-explorer-design.md`. Devtown work: register entity types with endpoints/renderers, no custom components needed. **Wait for blocks-ui#87 to land, then wire.**
+
+**#123 Worker session mgmt UI** — also covered by blocks-ui#87. `EntityStateContributor` SPI + `<entity-command-bar>` handle worker state/commands generically. Devtown work: implement `AgentWorkerStateContributor`, `FlowWorkerStateContributor`, `HumanWorkerStateContributor`. **Wait for blocks-ui#87 to land, then implement SPIs.**
+
+**#120 Case dependency graph** — explicitly out of scope in blocks-ui#87 §13: "many-to-many relationship visualization, fundamentally different from parent→child tree hierarchy, requires graph data model and D3/similar." **Needs a new blocks-ui issue filed before devtown work can begin.**
+
+**#98 Trust visibility UI** — not in case-explorer spec. Existing blocks-ui components: `trust-score-panel`, `trust-feedback-display`, branch `issue-45-trust-score-trend-sparkline`. **Decision needed: compose existing blocks-ui trust components into a devtown view, or file for a new blocks-ui composite component.**
 
 ## What's Left
 
@@ -21,14 +30,14 @@ Pick next work. Tier 2 UI issues blocked on blocks-ui#41. Tier 3 epics available
 
 ## What's Next
 
-**Tier 2 — Blocked on blocks-ui#41:**
+**Tier 2 — UI (unblocked, but dependencies noted above):**
 
-| # | Description | Scale | Complexity |
-|---|-------------|-------|------------|
-| #98 | Trust visibility UI | M | Med |
-| #119 | CasePlanModel browser | M | Med |
-| #120 | Case dependency graph | M | Med |
-| #123 | Worker session mgmt UI | S | Med |
+| # | Description | Scale | Complexity | Notes |
+|---|-------------|-------|------------|-------|
+| #98 | Trust visibility UI | M | Med | Decision needed: compose vs new blocks-ui component |
+| #119 | CasePlanModel browser | M | Med | Waiting on blocks-ui#87 |
+| #120 | Case dependency graph | M | Med | Needs blocks-ui issue filed first |
+| #123 | Worker session mgmt UI | S | Med | Waiting on blocks-ui#87 |
 
 **Tier 3 — Epics, long horizon:**
 
@@ -43,3 +52,4 @@ Pick next work. Tier 2 UI issues blocked on blocks-ui#41. Tier 3 epics available
 - ADR: `docs/adr/0001-use-platform-notification-system.md`
 - Spec: `docs/specs/issue-16-notification-wiring/2026-07-20-notification-wiring-design.md`
 - Blog: `2026-07-20-mdp10-notification-system-i-almost-built.md`
+- blocks-ui case-explorer spec: `blocks-ui/docs/specs/2026-07-20-composable-case-explorer-design.md`
