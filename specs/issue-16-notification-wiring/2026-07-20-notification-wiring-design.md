@@ -83,13 +83,13 @@ Six notification scenarios, each mapping to a `SubscribableEvent` POJO, a `Subsc
 | 3 | Merge failure | `io.casehub.devtown.merge.failed` | `CaseLifecycleEvent` (caseStatus=`CANCELLED`) | `@ObservesAsync` | URGENT | EVENT_FIELD (authorId) + GROUP (devtown-ops) | `devtown.merge` |
 | 4 | Stalled commitment | `io.casehub.devtown.commitment.stalled` | `WatchdogAlertEvent` | `@ObservesAsync` | WARNING | GROUP (devtown-ops) | `devtown.watchdog` |
 | 5 | Case fault | `io.casehub.devtown.case.faulted` | `CaseLifecycleEvent` (caseStatus=`FAULTED`) | `@ObservesAsync` | URGENT | GROUP (devtown-ops) | `devtown.case` |
-| 6 | SLA breach escalation | `io.casehub.devtown.sla.escalated` | `SlaBreachEvent` (decision=`EscalateTo`) | `@Observes` | URGENT | GROUP (devtown-ops) | `devtown.sla` |
+| 6 | SLA breach escalation | `io.casehub.devtown.sla.escalated` | `SlaBreachEvent` (decision=`EscalateTo`) | `@Observes(during = AFTER_SUCCESS)` | URGENT | GROUP (devtown-ops) | `devtown.sla` |
 
 **Observer annotations** depend on source event firing mechanism:
 - `CaseLifecycleEvent` → `@ObservesAsync` — fired via `Event.fireAsync()` from Vert.x handlers (Javadoc-documented)
 - `WatchdogAlertEvent` → `@ObservesAsync` — fired via `Event.fireAsync()` (qhorus#200 design)
 - `WorkItemLifecycleEvent` → `@Observes(during = AFTER_SUCCESS)` — fired synchronously
-- `SlaBreachEvent` → `@Observes` — fired synchronously during breach handling
+- `SlaBreachEvent` → `@Observes(during = AFTER_SUCCESS)` — fired synchronously during breach handling
 
 GE-20260427-893862 (`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)`) applies to **synchronous** source events only. Async source events use `@ObservesAsync` + `@Transactional(NOT_SUPPORTED)`.
 
@@ -142,12 +142,15 @@ Each scenario is a record implementing `SubscribableEvent`:
 public record MergeFailedEvent(
     String prNumber, String prTitle, String authorId, String authorName,
     String failureReason, String repoId, String prUrl,
+    String targetChannel,
     String tenancyId
 ) implements SubscribableEvent {
     @Override public String type() { return "io.casehub.devtown.merge.failed"; }
     @Override public String tenancyId() { return tenancyId; }
 }
 ```
+
+All `SubscribableEvent` POJOs include a `targetChannel` field — the per-repo resolved delivery channel (see §Per-Repo Connector Configuration). Bridge observers resolve this before firing the event.
 
 ### Bridge observer pattern
 
@@ -160,15 +163,20 @@ Each observer translates a foundation CDI event into a `SubscribableEvent` and f
 public class CaseFaultNotificationBridge {
 
     @Inject Event<CaseFaultedEvent> caseFaultedEvents;
+    @Inject PreferenceProvider preferenceProvider;
 
     @Transactional(NOT_SUPPORTED)
     void onCaseFault(@ObservesAsync CaseLifecycleEvent event) {
         if (!"FAULTED".equals(event.caseStatus())) return;
+        String targetChannel = preferenceProvider
+            .resolve(SettingsScope.of(event.namespace()))
+            .getOrDefault(NotificationPreferenceKeys.SLACK_CHANNEL).value();
         caseFaultedEvents.fire(new CaseFaultedEvent(
             event.caseId().toString(),
             event.caseDefinitionName(),
             event.caseStatus(),
             event.contextSnapshot() != null ? event.contextSnapshot().toString() : null,
+            targetChannel,
             event.tenancyId()));
     }
 }
@@ -181,14 +189,19 @@ public class CaseFaultNotificationBridge {
 public class ReviewAssignmentNotificationBridge {
 
     @Inject Event<ReviewAssignedEvent> reviewAssignedEvents;
+    @Inject PreferenceProvider preferenceProvider;
 
     @Transactional(NOT_SUPPORTED)
     void onWorkItemCreated(@Observes(during = AFTER_SUCCESS) WorkItemLifecycleEvent event) {
         if (event.eventType() != WorkEventType.CREATED) return;
         if (!event.types().contains("human-decision:pr-approval")) return;
+        String targetChannel = preferenceProvider
+            .resolve(SettingsScope.of(event.tenancyId()))
+            .getOrDefault(NotificationPreferenceKeys.SLACK_CHANNEL).value();
         reviewAssignedEvents.fire(new ReviewAssignedEvent(
             event.workItemId().toString(),
             event.assigneeId(),
+            targetChannel,
             event.tenancyId()));
     }
 }
@@ -203,9 +216,11 @@ public class SlaBreachNotificationBridge {
     @Inject Event<SlaEscalatedEvent> slaEscalatedEvents;
 
     @Transactional(NOT_SUPPORTED)
-    void onSlaBreach(@Observes SlaBreachEvent event) {
+    void onSlaBreach(@Observes(during = AFTER_SUCCESS) SlaBreachEvent event) {
         if (!(event.decision() instanceof BreachDecision.EscalateTo escalation)) return;
         BreachedTask task = event.context().task();
+        String targetChannel = event.context().preferences()
+            .getOrDefault(NotificationPreferenceKeys.SLACK_CHANNEL).value();
         slaEscalatedEvents.fire(new SlaEscalatedEvent(
             task.taskId().toString(),
             task.title(),
@@ -213,6 +228,7 @@ public class SlaBreachNotificationBridge {
             event.context().breachType().name(),
             String.join(", ", escalation.groups()),
             event.context().scope().toString(),
+            targetChannel,
             event.tenancyId()));
     }
 }
