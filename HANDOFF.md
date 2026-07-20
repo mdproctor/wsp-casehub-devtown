@@ -22,7 +22,7 @@ Pick next work. Tier 2 UI issues unblocked (blocks-ui#41 blocks-ui side complete
 
 **#120 Case dependency graph** — explicitly out of scope in blocks-ui#87 §13: "many-to-many relationship visualization, fundamentally different from parent→child tree hierarchy, requires graph data model and D3/similar." **Needs a new blocks-ui issue filed before devtown work can begin.**
 
-**#98 Trust visibility UI** — not in case-explorer spec. Existing blocks-ui components: `trust-score-panel`, `trust-feedback-display`, branch `issue-45-trust-score-trend-sparkline`. **Decision needed: compose existing blocks-ui trust components into a devtown view, or file for a new blocks-ui composite component.**
+**#98 Trust visibility UI** — resolved: all three data surfaces exist in blocks-ui (`trust-score-panel`, `routing-rationale`, `trust-feedback-display`). Composition is domain-agnostic → filed blocks-ui#89 (`trust-workbench` composite). **Work slot 8 created** on branch `issue-89-trust-workbench`. Devtown#98 becomes: consume `<trust-workbench>` with endpoints (S/Low). Blocked on blocks-ui#89.
 
 ## What's Left
 
@@ -34,7 +34,7 @@ Pick next work. Tier 2 UI issues unblocked (blocks-ui#41 blocks-ui side complete
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #98 | Trust visibility UI | M | Med | Decision needed: compose vs new blocks-ui component |
+| #98 | Trust visibility UI | S | Low | Blocked on blocks-ui#89 — work slot 8 |
 | #119 | CasePlanModel browser | M | Med | Waiting on blocks-ui#87 |
 | #120 | Case dependency graph | M | Med | Needs blocks-ui issue filed first |
 | #123 | Worker session mgmt UI | S | Med | Waiting on blocks-ui#87 |
