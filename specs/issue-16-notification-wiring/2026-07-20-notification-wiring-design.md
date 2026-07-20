@@ -7,27 +7,66 @@
 
 ---
 
-## Architecture
+## Platform Prerequisites
 
-devtown produces domain events and subscriptions. The platform notification system handles everything downstream — target resolution, suppression, user preferences, digest batching, channel routing, delivery tracking, and retry.
+The platform notification system (documented in `casehub-parent/docs/platform/notifications.md`) is partially implemented. devtown's notification wiring builds on the data model layer that exists today; the matching and dispatch pipeline activates when the platform ships it.
+
+**Exists in casehub-platform-api (data model):**
+- `SubscribableEvent` interface (`type()`, `tenancyId()`)
+- `SubscriptionStore` / `ReactiveSubscriptionStore` (CRUD: `store()`, `findById()`, `find()`, `update()`, `delete()`, `findAllEnabled()`)
+- `SubscriptionInput` (10 fields: `ownerId`, `tenancyId`, `name`, `eventType`, `filters`, `targets`, `includeActor`, `template`, `enabled`, `scope`)
+- `SubscriptionScope` (`USER`, `SYSTEM`)
+- `NotificationTarget` + `TargetType` (`USER`, `GROUP`, `EVENT_FIELD`, `ENTITY_WATCHERS`)
+- `NotificationTemplate` (8 fields: `titlePattern`, `bodyPattern`, `severity`, `category`, `actionUrlPattern`, `entityType`, `entityIdField`, `actorIdField`)
+- `NotificationSeverity` (`INFO`, `WARNING`, `URGENT`)
+- `DeliveryChannelRegistry` interface + `NoOpDeliveryChannelRegistry` fallback
+- `NotificationDeliverer` interface
+
+**Exists in casehub-platform (runtime):**
+- `NoOpSubscriptionStore` / `NoOpReactiveSubscriptionStore` (fallbacks)
+- In-memory subscription store (`subscriptions-inmem` module)
+
+**Does not yet exist (platform prerequisites for full pipeline):**
+- `SubscriptionEngine` — pattern matching against active subscriptions, fires `SubscriptionMatched`
+- `NotificationDispatcher` — target resolution → suppression → template → channel routing
+- `TargetResolver`, `SuppressionEvaluator`, `TemplateResolver`, `ChannelRouter`
+- `DigestBuffer` / `DigestFlushScheduler`
+- `InAppNotificationDeliverer`
+
+**External dependency:** connectors#86 (notification delivery bridge: `NotificationDeliverer` → `Connector.send()` auto-discovery) — in progress in casehub-connectors. devtown develops and tests against in-memory stores; external delivery activates when connectors#86 ships and the bridge module is on the classpath.
+
+### Foundation gates
+
+- **parent#5** (Connector SPI consolidation) ✅ CLOSED. Resolution: `NotificationChannel` implementations in `casehub-work-notifications` delegate to `Connector`. The platform notification system uses `NotificationDeliverer` SPI; connectors#86 bridges `NotificationDeliverer` → `Connector.send()`. This spec aligns with the consolidation — devtown owns event POJOs and subscriptions; delivery routes through the consolidated `Connector` path.
+- **qhorus#200** (WatchdogAlertEvent + ConnectorAlertBridge) ✅ CLOSED. `WatchdogAlertEvent` is a CDI event fired via `Event.fireAsync()`. This spec's stalled commitment bridge observes that event directly.
+
+### Build progression
+
+devtown builds and tests everything in this spec using in-memory platform stores today. The full notification pipeline activates in two stages:
+1. Platform ships `SubscriptionEngine` + `NotificationDispatcher` → matching and dispatch activate
+2. connectors#86 ships `ConnectorNotificationDeliverer` → external delivery activates (Slack, Teams, email)
+
+Bridge observers fire `SubscribableEvent` POJOs as CDI events. When `SubscriptionEngine` is deployed, it observes these events and drives the downstream pipeline. Until then, integration tests verify: foundation event → correct `SubscribableEvent` fired with correct fields.
+
+---
+
+## Architecture
 
 ```
 devtown CDI observers (bridge foundation events)
-  ↓ insert SubscribableEvent POJO
-Platform SubscriptionEngine (alpha network matching)
-  ↓ SubscriptionMatched (async)
-Platform NotificationDispatcher (target → suppression → template → channel routing)
+  ↓ fire SubscribableEvent via CDI Event.fire()
+Platform SubscriptionEngine (pattern matching) [not yet implemented]
+  ↓ SubscriptionMatched (async CDI event)
+Platform NotificationDispatcher (pipeline orchestration) [not yet implemented]
   ↓ NotificationInput
 Platform DeliveryChannelRegistry
-  ├── InAppNotificationDeliverer (inbox + SSE)
-  └── ConnectorNotificationDeliverer (connectors#86 — slack, teams, email, sms)
+  ├── InAppNotificationDeliverer (inbox + SSE) [not yet implemented]
+  └── ConnectorNotificationDeliverer (connectors#86 — in progress)
         ↓ ConnectorMessage
      casehub-connectors Connector.send()
 ```
 
-devtown owns event POJOs, subscription definitions, and bridge observers. Everything right of the subscription engine is platform infrastructure.
-
-**External dependency:** connectors#86 (notification delivery bridge — `NotificationDeliverer` → `Connector.send()` auto-discovery). In progress in casehub-connectors. devtown can develop and test against in-memory deliverers; external delivery activates when connectors#86 ships and the bridge module is on the classpath.
+devtown owns: event POJOs implementing `SubscribableEvent`, subscription definitions via `SubscriptionStore`, bridge observers translating foundation events to `SubscribableEvent` CDI events, and per-repo connector target configuration via `PreferenceProvider`.
 
 ---
 
@@ -37,41 +76,55 @@ Six notification scenarios, each mapping to a `SubscribableEvent` POJO, a `Subsc
 
 ### Event type mapping
 
-| # | Scenario | Event type | Source event | Severity | Targets |
-|---|----------|-----------|-------------|----------|---------|
-| 1 | Review assignment | `io.casehub.devtown.review.assigned` | Qhorus COMMAND dispatch | INFO | EVENT_FIELD (reviewerId) |
-| 2 | Merge success | `io.casehub.devtown.merge.succeeded` | Merge decision (approved) | INFO | ENTITY_WATCHERS (PR authors) |
-| 3 | Merge failure | `io.casehub.devtown.merge.failed` | Merge decision (rejected) / bisect result | URGENT | EVENT_FIELD (authorId) + GROUP (devtown-ops) |
-| 4 | Stalled commitment | `io.casehub.devtown.commitment.stalled` | WatchdogEvaluationService | WARNING | GROUP (devtown-ops) |
-| 5 | Case fault | `io.casehub.devtown.case.faulted` | Engine CaseLifecycleEvent(FAULTED) | URGENT | GROUP (devtown-ops) |
-| 6 | Escalation | `io.casehub.devtown.workitem.escalated` | Work EscalationPolicy fires | URGENT | GROUP (devtown-ops) + EVENT_FIELD (assigneeId) |
+| # | Scenario | Event type | Source event | Observer annotation | Severity | Targets | Entity type |
+|---|----------|-----------|-------------|---------------------|----------|---------|-------------|
+| 1 | Review assignment | `io.casehub.devtown.review.assigned` | `WorkItemLifecycleEvent(CREATED)` | `@Observes(during = AFTER_SUCCESS)` | INFO | EVENT_FIELD (assigneeId) | `devtown.review` |
+| 2 | Merge success | `io.casehub.devtown.merge.succeeded` | `CaseLifecycleEvent` (caseStatus=`COMPLETED`) | `@ObservesAsync` | INFO | ENTITY_WATCHERS | `devtown.merge` |
+| 3 | Merge failure | `io.casehub.devtown.merge.failed` | `CaseLifecycleEvent` (caseStatus=`CANCELLED`) | `@ObservesAsync` | URGENT | EVENT_FIELD (authorId) + GROUP (devtown-ops) | `devtown.merge` |
+| 4 | Stalled commitment | `io.casehub.devtown.commitment.stalled` | `WatchdogAlertEvent` | `@ObservesAsync` | WARNING | GROUP (devtown-ops) | `devtown.watchdog` |
+| 5 | Case fault | `io.casehub.devtown.case.faulted` | `CaseLifecycleEvent` (caseStatus=`FAULTED`) | `@ObservesAsync` | URGENT | GROUP (devtown-ops) | `devtown.case` |
+| 6 | SLA breach escalation | `io.casehub.devtown.sla.escalated` | `SlaBreachEvent` (decision=`EscalateTo`) | `@Observes` | URGENT | GROUP (devtown-ops) + EVENT_FIELD (assigneeId) | `devtown.sla` |
+
+**Observer annotations** depend on source event firing mechanism:
+- `CaseLifecycleEvent` → `@ObservesAsync` — fired via `Event.fireAsync()` from Vert.x handlers (Javadoc-documented)
+- `WatchdogAlertEvent` → `@ObservesAsync` — fired via `Event.fireAsync()` (qhorus#200 design)
+- `WorkItemLifecycleEvent` → `@Observes(during = AFTER_SUCCESS)` — fired synchronously
+- `SlaBreachEvent` → `@Observes` — fired synchronously during breach handling
+
+GE-20260427-893862 (`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)`) applies to **synchronous** source events only. Async source events use `@ObservesAsync` + `@Transactional(NOT_SUPPORTED)`.
+
+**Scenario 1 — review assignment scope:** `WorkItemLifecycleEvent(CREATED)` covers human review assignments (WorkItem with `types` containing `human-decision:pr-approval`). Agent review dispatch notification requires a commitment lifecycle CDI event that does not yet exist — tracked as devtown#163.
+
+**Scenario 4 — watchdog condition filter:** The bridge filters `WatchdogAlertEvent.conditionType()` for `OBLIGATION_FAN_OUT` (unresponded obligations past deadline) and `CONVERSATION_STALL` (stalled correlations on a channel). Other condition types (`BARRIER_STUCK`, `AGENT_STALE`, `QUEUE_DEPTH`, etc.) are excluded — they are infrastructure concerns, not reviewer-facing notifications. The existing Qhorus channel dispatch (`messageService.dispatch()`) notifies agents; this notification path notifies human operators. Dual delivery is intentional — different audiences.
+
+**Scenario 6 — escalation redesign:** Issue #16 references `EscalationPolicy.escalate()` which does not exist as a class. The actual escalation mechanism is `SlaBreachEvent` from `casehub-work`, fired when a WorkItem's SLA expires. The bridge filters for `BreachDecision.EscalateTo` decisions. This is distinct from `AgentRoutingEscalationEvent` (engine routing failure due to trust qualification gaps) — a separate concern not included in this epic.
 
 ### Templates
 
-| Scenario | Title pattern | Body pattern | Category |
-|----------|--------------|-------------|----------|
-| Review assigned | `PR #{prNumber} assigned for {capability} review` | `{prTitle} by {authorName} — deadline {deadline}` | `devtown.review.assigned` |
-| Merge succeeded | `Batch merged: {prCount} PRs` | `{prList}` | `devtown.merge.succeeded` |
-| Merge failed | `Merge rejected: {prTitle}` | `CI failure: {failureReason} — author: {authorName}` | `devtown.merge.failed` |
-| Stalled commitment | `Stalled reviewer on PR #{prNumber}` | `{reviewerName} — {elapsedTime} past deadline` | `devtown.commitment.stalled` |
-| Case faulted | `Case faulted: {caseId}` | `Last known state: {lastKnownState}` | `devtown.case.faulted` |
-| Escalation | `SLA breach: {workItemType} on PR #{prNumber}` | `Deadline {deadline} exceeded by {overdueTime}` | `devtown.workitem.escalated` |
+| Scenario | Title pattern | Body pattern | Category | Action URL pattern | Entity type | Entity ID field | Actor ID field |
+|----------|--------------|-------------|----------|-------------------|-------------|----------------|---------------|
+| Review assigned | `PR #{prNumber} assigned for {capability} review` | `{prTitle} by {authorName} — deadline {deadline}` | `devtown.review.assigned` | `/api/workitems/{workItemId}` | `devtown.review` | `prNumber` | `assigneeId` |
+| Merge succeeded | `Batch merged: {prCount} PRs` | `{prList}` | `devtown.merge.succeeded` | `/api/reviews/{prNumber}` | `devtown.merge` | `prNumber` | `actorId` |
+| Merge failed | `Merge rejected: {prTitle}` | `CI failure: {failureReason} — author: {authorName}` | `devtown.merge.failed` | `/api/reviews/{prNumber}` | `devtown.merge` | `prNumber` | `authorId` |
+| Stalled commitment | `Stalled: {conditionType} on {targetName}` | `{summary} — fired at {firedAt}` | `devtown.commitment.stalled` | null | `devtown.watchdog` | `targetName` | `actorId` |
+| Case faulted | `Case faulted: {caseDefinitionName}` | `Case {caseId} in state {caseStatus}` | `devtown.case.faulted` | `/api/compliance/code-review/{caseId}` | `devtown.case` | `caseId` | `actorId` |
+| SLA escalated | `SLA breach: review escalated` | `{detail} — escalated to {escalationGroup}` | `devtown.sla.escalated` | `/api/workitems/{workItemId}` | `devtown.sla` | `workItemId` | `assigneeId` |
 
-All templates use platform `NotificationTemplate` with `{field}` placeholder substitution from event POJO properties. `entityType` is `"pr-review"` for all scenarios. `entityIdField` is `"prNumber"` (or `"caseId"` for case fault). `actorIdField` varies per scenario.
+All templates use platform `NotificationTemplate` with all 8 required fields (`titlePattern`, `bodyPattern`, `severity`, `category`, `actionUrlPattern`, `entityType`, `entityIdField`, `actorIdField`). `severity` is embedded in the template (not a separate registration argument). `category` is `@NonNull`. `actionUrlPattern` is nullable (null for stalled commitment — no single resource to link to).
 
 ---
 
 ## Module Placement
 
-All notification code lives in a single package: `review/src/main/java/io/casehub/devtown/review/notification/`.
+Event POJO records live in `review/` (pure Java records implementing a platform API interface — integration contract, Tier 2). Bridge observers, subscription registrar, and per-repo configuration live in `app/` (CDI wiring, Tier 3). This follows the three-tier module protocol and is consistent with existing observers (`MergeDecisionObserver` in `app/src/main/java/io/casehub/devtown/app/ledger/`).
 
 | Component | Location | Count |
 |-----------|----------|-------|
-| `SubscribableEvent` records | `review/notification/` | 6 records |
-| Bridge observers | `review/notification/` | 4-5 classes (some foundation events share an observer) |
-| `DevtownSubscriptionRegistrar` | `review/notification/` | 1 class |
-| Domain module changes | None | `devtown-domain` stays pure Java |
-| App module changes | Dependencies only | Platform + connectors bridge on classpath |
+| `SubscribableEvent` records | `review/src/main/java/io/casehub/devtown/review/notification/` | 6 records |
+| Bridge observers | `app/src/main/java/io/casehub/devtown/app/notification/` | 4–5 classes |
+| `DevtownSubscriptionRegistrar` | `app/src/main/java/io/casehub/devtown/app/notification/` | 1 class |
+| `NotificationPreferenceKeys` | `domain/src/main/java/io/casehub/devtown/domain/` | 1 class (per-repo config keys) |
+| Domain module changes | None | `devtown-domain` stays pure Java (except preference key constants) |
 
 ### Event POJO pattern
 
@@ -90,45 +143,124 @@ public record MergeFailedEvent(
 
 ### Bridge observer pattern
 
-Each observer translates a foundation CDI event into a `SubscribableEvent` and inserts it into the subscription engine:
+Each observer translates a foundation CDI event into a `SubscribableEvent` and fires it as a CDI event. The platform `SubscriptionEngine` (when deployed) observes `SubscribableEvent` subtypes via CDI and drives the downstream pipeline.
+
+**Async source (CaseLifecycleEvent — fired via `Event.fireAsync()`):**
 
 ```java
 @ApplicationScoped
 public class CaseFaultNotificationBridge {
 
-    @Inject SubscriptionEngine engine;
+    @Inject Event<CaseFaultedEvent> caseFaultedEvents;
 
     @Transactional(NOT_SUPPORTED)
-    void onCaseFault(@Observes(during = AFTER_SUCCESS) CaseLifecycleEvent event) {
-        if (event.status() != CaseStatus.FAULTED) return;
-        engine.insert(new CaseFaultedEvent(
-            event.caseId(), event.lastKnownState(), event.tenancyId()));
+    void onCaseFault(@ObservesAsync CaseLifecycleEvent event) {
+        if (!"FAULTED".equals(event.caseStatus())) return;
+        caseFaultedEvents.fire(new CaseFaultedEvent(
+            event.caseId().toString(),
+            event.caseDefinitionName(),
+            event.caseStatus(),
+            event.contextSnapshot() != null ? event.contextSnapshot().toString() : null,
+            event.tenancyId()));
     }
 }
 ```
 
-`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)` pairing on all observers (GE-20260427-893862).
+**Sync source (WorkItemLifecycleEvent — fired synchronously):**
+
+```java
+@ApplicationScoped
+public class ReviewAssignmentNotificationBridge {
+
+    @Inject Event<ReviewAssignedEvent> reviewAssignedEvents;
+
+    @Transactional(NOT_SUPPORTED)
+    void onWorkItemCreated(@Observes(during = AFTER_SUCCESS) WorkItemLifecycleEvent event) {
+        if (event.eventType() != WorkEventType.CREATED) return;
+        if (!event.types().contains("human-decision:pr-approval")) return;
+        reviewAssignedEvents.fire(new ReviewAssignedEvent(
+            event.workItemId().toString(),
+            event.assigneeId(),
+            event.tenancyId()));
+    }
+}
+```
 
 ### Subscription registration
 
-Programmatic at `@Startup` via `SubscriptionStore`. Subscriptions are code-versioned, not Flyway-seeded:
+Programmatic at `@Startup` via `SubscriptionStore`. Subscriptions are code-versioned, not Flyway-seeded. Uses idempotent find-then-store against the actual `SubscriptionStore` API:
 
 ```java
 @ApplicationScoped
 public class DevtownSubscriptionRegistrar {
 
     @Inject SubscriptionStore subscriptionStore;
+    @Inject TenancyProvider tenancyProvider;
 
     void onStartup(@Observes StartupEvent event) {
-        registerIfAbsent("devtown-merge-failed", "io.casehub.devtown.merge.failed",
-            NotificationSeverity.URGENT,
-            List.of(target(GROUP, "devtown-ops"), target(EVENT_FIELD, "authorId")),
-            template("Merge rejected: {prTitle}", "CI failure: {failureReason}",
-                "pr-review", "prNumber", "authorId"));
-        // ... 5 more
+        String tenancyId = tenancyProvider.defaultTenancyId();
+
+        registerIfAbsent(tenancyId, new SubscriptionInput(
+            "system:devtown",
+            tenancyId,
+            "devtown-merge-failed",
+            "io.casehub.devtown.merge.failed",
+            List.of(),
+            List.of(
+                new NotificationTarget(TargetType.GROUP, "devtown-ops"),
+                new NotificationTarget(TargetType.EVENT_FIELD, "authorId")),
+            false,
+            new NotificationTemplate(
+                "Merge rejected: {prTitle}",
+                "CI failure: {failureReason} — author: {authorName}",
+                NotificationSeverity.URGENT,
+                "devtown.merge.failed",
+                "/api/reviews/{prNumber}",
+                "devtown.merge",
+                "prNumber",
+                "authorId"),
+            true,
+            SubscriptionScope.SYSTEM));
+        // ... 5 more subscriptions
+    }
+
+    private void registerIfAbsent(String tenancyId, SubscriptionInput input) {
+        SubscriptionPage page = subscriptionStore.find(new SubscriptionQuery(
+            input.ownerId(), tenancyId, SubscriptionScope.SYSTEM,
+            null, null, 100));
+        boolean exists = page.subscriptions().stream()
+            .anyMatch(s -> s.name().equals(input.name()));
+        if (!exists) {
+            subscriptionStore.store(input);
+        }
     }
 }
 ```
+
+---
+
+## Per-Repo Connector Configuration
+
+Issue #16 requires: "connector targets configurable per-repo (which Slack channel gets which repo's notifications)."
+
+devtown uses `PreferenceProvider` (parent#26 ✅ CLOSED) scoped by repository for channel target resolution.
+
+**Preference keys** (in `devtown-domain`, pure Java):
+
+```java
+public final class NotificationPreferenceKeys {
+    public static final PreferenceKey<String> SLACK_CHANNEL =
+        PreferenceKey.of("notification.slack-channel", String.class, "#devtown-ops");
+    public static final PreferenceKey<String> TEAMS_CHANNEL =
+        PreferenceKey.of("notification.teams-channel", String.class, null);
+    public static final PreferenceKey<Boolean> NOTIFICATIONS_ENABLED =
+        PreferenceKey.of("notification.enabled", Boolean.class, true);
+}
+```
+
+**Resolution path:** Each `SubscribableEvent` POJO carries `repoId`. The connector bridge (connectors#86) resolves the delivery destination via `PreferenceProvider.resolve(scope).get(SLACK_CHANNEL)` where `scope` is the repository path (e.g., `casehubio/devtown`). Repository A can target `#team-a-alerts`; repository B targets `#team-b-alerts`.
+
+**Default behaviour:** `#devtown-ops` (the default in the preference key definition) applies when no per-repo override is configured.
 
 ---
 
@@ -138,12 +270,10 @@ public class DevtownSubscriptionRegistrar {
 
 | Module | Dependency | Scope | Purpose |
 |--------|-----------|-------|---------|
-| `review/pom.xml` | `casehub-platform-api` | compile | `SubscribableEvent`, `SubscriptionStore`, `NotificationTemplate` |
-| `app/pom.xml` | `casehub-platform` | runtime | `NotificationDispatcher`, `SubscriptionEngine`, in-app deliverer |
-| `app/pom.xml` | `connectors-notification-bridge` | runtime | connectors#86 — external channel delivery |
-| `app/pom.xml` | `notifications-inmem` | test | In-memory notification store for `@QuarkusTest` |
+| `review/pom.xml` | `casehub-platform-api` | compile | `SubscribableEvent`, `NotificationTemplate`, `NotificationTarget` |
+| `app/pom.xml` | `casehub-platform` | runtime | Subscription engine, notification dispatcher (when shipped) |
+| `app/pom.xml` | `connectors-notification-bridge` | runtime | connectors#86 — external channel delivery (when shipped) |
 | `app/pom.xml` | `subscriptions-inmem` | test | In-memory subscription store for `@QuarkusTest` |
-| `app/pom.xml` | `delivery-tracking-inmem` | test | In-memory delivery tracking for `@QuarkusTest` |
 
 ---
 
@@ -152,23 +282,32 @@ public class DevtownSubscriptionRegistrar {
 ### Unit tests (review/, no Quarkus)
 
 - Each `SubscribableEvent` record: `type()` returns correct event type string, `tenancyId()` propagates
-- Each bridge observer: given a foundation event, verify correct `SubscribableEvent` produced with all fields mapped. Mock subscription engine insertion.
-- `DevtownSubscriptionRegistrar`: verify all 6 subscriptions registered with correct event types, targets, templates, severities
+- Scenario-specific field mapping assertions
+
+### Unit tests (app/, no Quarkus)
+
+- Each bridge observer: given a foundation event, verify correct `SubscribableEvent` produced with all fields mapped. Use capturing `Event<T>` stub.
+- `DevtownSubscriptionRegistrar`: verify all 6 subscriptions registered with correct event types, targets, templates (all 8 fields), severities, scopes
 
 ### Integration tests (app/, @QuarkusTest)
 
-- End-to-end: fire a foundation event → verify `Notification` appears in the in-memory `NotificationStore` with correct title, body, category, severity
-- Use in-memory platform stores — no real Slack, no real database
-- Use `TestSlackConnector` to capture `ConnectorMessage` payloads and verify content
+- Bridge observer CDI wiring: fire a foundation event → verify `SubscribableEvent` CDI event captured by a test observer
+- Subscription idempotency: register twice → verify single subscription in store
+- Use in-memory platform stores (subscriptions-inmem)
 - Suppress Twilio/WhatsApp connectors via `quarkus.arc.exclude-types` (GE-20260521-45e61c)
+
+### End-to-end pipeline test (activates when platform ships SubscriptionEngine)
+
+- Fire a foundation event → verify `Notification` appears in the in-memory `NotificationStore` with correct title, body, category, severity
+- Use `TestSlackConnector` to capture `ConnectorMessage` payloads and verify content
 
 ### What devtown does NOT test
 
 - Platform dispatch pipeline internals (suppression, digest, channel routing) — platform's responsibility
 - Connector delivery (Slack HTTP, Teams webhook) — connectors' responsibility
-- The notification bridge — connectors#86's responsibility
+- The notification bridge module — connectors#86's responsibility
 
-devtown tests the seam: domain event in → correct notification out.
+devtown tests the seam: foundation event in → correct `SubscribableEvent` fired with correct fields + correct subscriptions registered with correct definitions.
 
 ---
 
@@ -176,7 +315,7 @@ devtown tests the seam: domain event in → correct notification out.
 
 | Entry | Applies to | Rule |
 |-------|-----------|------|
-| GE-20260427-893862 | All bridge observers | `@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)` pairing |
+| GE-20260427-893862 | **Synchronous** bridge observers only | `@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)`. Async source events (`CaseLifecycleEvent`, `WatchdogAlertEvent`) use `@ObservesAsync` + `@Transactional(NOT_SUPPORTED)` instead. |
 | GE-20260521-45e61c | Test configuration | `quarkus.arc.exclude-types` for Twilio/WhatsApp in test `application.properties` |
 | GE-20260607-0bfc83 | connectors#86 (not devtown) | Never regress delivery state inside connector try-catch |
 
@@ -187,7 +326,7 @@ devtown tests the seam: domain event in → correct notification out.
 > A failed merge bisect delivers a Slack message identifying the faulty PR. A stalled agent triggers an ops channel alert automatically.
 
 With this design:
-- Merge failure → `MergeFailedEvent` → subscription match → platform dispatch → connectors#86 bridge → `SlackConnector.send()` → Slack message with PR title, author, failure reason
-- Stalled commitment → `StalledCommitmentEvent` → subscription match → platform dispatch → connectors#86 bridge → ops channel alert with reviewer name, PR number, elapsed time
+- Merge failure → `MergeFailedEvent` fired as CDI event → subscription engine match → platform dispatch → connectors#86 bridge → `SlackConnector.send()` → Slack message with PR title, author, failure reason
+- Stalled commitment → `StalledCommitmentEvent` fired from `WatchdogAlertEvent(OBLIGATION_FAN_OUT)` → subscription engine match → platform dispatch → connectors#86 bridge → ops channel alert with condition type, target, summary
 
-Both acceptance criteria satisfied when connectors#86 is on the classpath and a Slack webhook is configured as a delivery channel.
+Both acceptance criteria satisfied when: (1) platform ships `SubscriptionEngine` + `NotificationDispatcher`, (2) connectors#86 is on the classpath, and (3) a Slack webhook is configured as a delivery channel with per-repo `PreferenceProvider` overrides.
