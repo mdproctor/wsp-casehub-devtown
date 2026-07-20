@@ -93,7 +93,7 @@ Six notification scenarios, each mapping to a `SubscribableEvent` POJO, a `Subsc
 
 GE-20260427-893862 (`@Observes(during = AFTER_SUCCESS)` + `@Transactional(NOT_SUPPORTED)`) applies to **synchronous** source events only. Async source events use `@ObservesAsync` + `@Transactional(NOT_SUPPORTED)`.
 
-**Scenario 1 — review assignment scope:** `WorkItemLifecycleEvent(CREATED)` covers human review assignments (WorkItem with `types` containing `human-decision:pr-approval`). Agent review dispatch notification requires a commitment lifecycle CDI event that does not yet exist — tracked as devtown#163.
+**Scenario 1 — review assignment scope:** `WorkItemLifecycleEvent(CREATED)` covers human review assignments (WorkItem with `types` containing `human-decision:pr-approval`). Agent review dispatch notification requires a commitment lifecycle CDI event that does not yet exist — tracked as devtown#166.
 
 **Scenario 4 — watchdog condition filter:** The bridge filters `WatchdogAlertEvent.conditionType()` for `OBLIGATION_FAN_OUT` (unresponded obligations past deadline) and `CONVERSATION_STALL` (stalled correlations on a channel). Other condition types (`BARRIER_STUCK`, `AGENT_STALE`, `QUEUE_DEPTH`, etc.) are excluded — they are infrastructure concerns, not reviewer-facing notifications. The existing Qhorus channel dispatch (`messageService.dispatch()`) notifies agents; this notification path notifies human operators. Dual delivery is intentional — different audiences.
 
