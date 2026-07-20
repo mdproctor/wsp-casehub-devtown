@@ -196,7 +196,7 @@ public class ReviewAssignmentNotificationBridge {
         if (event.eventType() != WorkEventType.CREATED) return;
         if (!event.types().contains("human-decision:pr-approval")) return;
         String targetChannel = preferenceProvider
-            .resolve(SettingsScope.of(event.tenancyId()))
+            .resolve(SettingsScope.of(event.workItem().scope))
             .getOrDefault(NotificationPreferenceKeys.SLACK_CHANNEL).value();
         reviewAssignedEvents.fire(new ReviewAssignedEvent(
             event.workItemId().toString(),
