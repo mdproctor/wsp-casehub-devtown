@@ -1,1 +1,1 @@
-# Design Journal — issue-41-layer2-sla-breach-policy
+# Design Journal — issue-172-pages-upgrade-oklch-theme
