@@ -1,3 +1,5 @@
+*Updated: #119, #171 closed — removed from backlog. connectors#86 and blocks-ui#89 closed — cross-module blockers cleared.*
+
 # HANDOFF — 2026-07-22
 
 ## Last Session
@@ -56,12 +58,10 @@ pages-runtime 0.2.3 depends on (all `workspace:*`): pages-component, pages-data,
 |------|--------|-------|-------|------------|
 | 8 | `issue-89-trust-workbench` | blocks-ui#89 | blocks-ui | Build trust-workbench composite |
 | 11 | `issue-123-worker-session-mgmt` | devtown#123 | devtown, engine | Implement EntityStateContributor SPIs |
-| 17 | `issue-119-caseplanmodel-browser` | devtown#119 | devtown, engine | CasePlanModel browser — engine APIs + frontend |
 
 ## Cross-Module
 
 **Blocked by:**
-- `connectors` — connectors#86 (notification delivery bridge) · M · Med
 - `platform` — SubscriptionEngine + NotificationDispatcher · L · High
 
 ## What's Next
@@ -69,8 +69,7 @@ pages-runtime 0.2.3 depends on (all `workspace:*`): pages-component, pages-data,
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
 | #172 | pages 0.2.3 upgrade + npm BOM | M | Med | OKLCH theme, dataset API migration, BOM |
-| #119 | CasePlanModel browser | L | Med | Slot 17 — engine + devtown |
-| #98 | Trust visibility UI | S | Low | Blocked on blocks-ui#89 — slot 8 |
+| #98 | Trust visibility UI | S | Low | blocks-ui#89 closed — unblocked |
 | #120 | Case dependency graph | M | Med | Needs blocks-ui issue filed |
 | #123 | Worker session mgmt UI | M | Med | Slot 11 |
 
