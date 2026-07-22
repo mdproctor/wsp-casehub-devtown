@@ -22,6 +22,21 @@ Discovered a deeper issue: devtown is on pages-runtime/pages-ui 0.2.0 (old hex-b
 
 3. **Adapt to removed `dataset()` API** — the `dataset()` helper function was removed between 0.2.0 and 0.2.3. devtown's `datasets.ts` uses it for all 12 datasets. Current pages uses YAML-based dataset definitions or a different programmatic approach. Check pages examples for the new pattern.
 
+### Critical finding: `file:` symlinks don't work with esbuild
+
+The current `file:` references in package.json create npm symlinks into the pages monorepo. This causes a fundamental esbuild resolution problem:
+
+- **Without `preserveSymlinks`** (current): esbuild follows symlinks to the pages monorepo and resolves transitive deps from the pages root `node_modules`. This mostly works, BUT `pages-ui-tokens` (the theme system) gets silently dropped — `injectTheme()` and `generateThemeCSS()` are missing from the bundle. The app loads and renders but dark mode doesn't switch because no CSS variables are generated.
+
+- **With `preserveSymlinks: true`**: esbuild resolves from devtown's `node_modules`, which is correct for `@casehubio/*` packages. But ALL transitive deps (`pages-component`, `pages-viz`, `pages-table`, `zod`, `js-yaml`, `jsonata`, `marked`, `lit`, `echarts`) fail to resolve because they aren't installed in devtown's node_modules — they live in the pages monorepo's hoisted node_modules.
+
+**The fix must be one of:**
+- Publish properly to GitHub Packages (eliminates symlinks entirely)
+- Use `npm pack` in each pages package, then `npm install ./pages-runtime-0.2.3.tgz` (packs flatten workspace deps)
+- Add ALL transitive deps to devtown's package.json as explicit `file:` references (fragile, defeats the purpose of a BOM)
+
+**How to verify theme injection works:** In the browser console, `document.querySelector('style[data-pages-theme]')` should return a `<style>` element with ~5000+ chars containing both `.pages-theme-light` and `.pages-theme-dark` rulesets. If it returns null, the theme system isn't bundled.
+
 4. **Adapt theme code** — old API vs new API:
    - `DARK_THEME` / `LIGHT_THEME` / `CasehubTheme` → `ThemeConfig` + `DEFAULT_THEME` (from `pages-ui-tokens`)
    - `applyTheme(element, theme)` → `injectTheme(config, target)` + `applyThemeMode(element, mode)`
