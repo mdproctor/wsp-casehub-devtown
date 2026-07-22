@@ -52,6 +52,61 @@ Discovered a deeper issue: devtown is on pages-runtime/pages-ui 0.2.0 (old hex-b
 
 pages-runtime 0.2.3 depends on (all `workspace:*`): pages-component, pages-data, pages-table, pages-ui, pages-ui-tokens, pages-viz. These in turn need: lit, echarts, zrender, zod, jsonata, js-yaml, marked, tslib. When installing from `file:` refs, npm doesn't resolve `workspace:*` transitive deps — you need to either publish properly or add all transitives to devtown's package.json.
 
+## Running the Demo
+
+### Start the app
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn quarkus:dev -pl app -Dsurefire.skip=true
+```
+
+Wait ~45 seconds. Confirm ready: `curl -s http://localhost:8080/q/health/ready` should return `{"status":"UP"}`.
+
+The UI is at http://localhost:8080 — seven tabs (Operations, Reviews, Merge Queue, Reviewers, Triage, System, Definitions).
+
+### Submit a PR to populate data
+
+The webhook secret in dev mode is `demo`. Compute the HMAC and POST:
+
+```bash
+BODY='{"action":"opened","number":42,"repository":{"full_name":"casehubio/devtown","name":"devtown","owner":{"login":"casehubio"}},"pull_request":{"number":42,"title":"feat: add caching layer","draft":false,"merged":false,"head":{"sha":"abc123def456","ref":"feature/cache"},"base":{"ref":"main"},"user":{"login":"demo-dev"},"additions":120,"deletions":30,"changed_files":5},"sender":{"login":"demo-dev"}}'
+
+SIG=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "demo" | awk '{print $2}')
+
+curl -s -X POST http://localhost:8080/api/github/webhook \
+  -H 'Content-Type: application/json' \
+  -H 'X-GitHub-Event: pull_request' \
+  -H "X-Hub-Signature-256: sha256=$SIG" \
+  -d "$BODY"
+```
+
+Expected response: `{"action":"case-started","status":"accepted"}`
+
+### Verify
+
+- Reload http://localhost:8080 — Operations tab shows PR #42 in Active Reviews table, event in Event Stream
+- System tab shows Active Cases: 1
+- Other tabs show EMPTY_RESULT (correct — no merge queue entries, no reviewers with trust scores, no triage items)
+
+### Governance API endpoints (all @PermitAll in dev mode)
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /api/governance/queue-status` | Active reviews with status counts |
+| `GET /api/governance/system-health` | Fleet size, trust averages, open commitments |
+| `GET /api/governance/recent-events?limit=100` | Event stream |
+| `GET /api/governance/problems` | Stalled cases, expired commitments, worker failures |
+| `GET /api/governance/reviewers` | Reviewer fleet with trust scores |
+| `GET /api/governance/merge-queue` | Queued PRs and active batches |
+| `GET /api/governance/merge-queue/metrics` | Queue depth, wait times, throughput |
+| `GET /api/governance/triage` | Pending human decisions |
+
+### Known limitations (current state)
+
+- Theme uses old pages-viz 0.2.0 hex system — flat white/dark, no grey scales or surface depth (#172 fixes this)
+- `POST /api/reviews` returns 500 in dev mode (use webhook path instead)
+- Some components in dark mode may show UNKNOWN_COLUMN for fields that reference nested Map values (trustByCapability) — these can't be flattened with the current pages-ui col() API
+
 ## Active Work Slots
 
 | Slot | Branch | Issue | Repos | What to do |
