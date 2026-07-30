@@ -1,4 +1,5 @@
-# Branch Closed — issue-59-s-xs-cleanup
-**Date:** 2026-06-01
-**Issue:** #59
-**Scheduled for deletion:** 2026-06-15
+# Branch Closed: issue-166-sla-cdi-merge-queue
+
+**Date:** 2026-07-30
+**Issues:** 166,154,151,168
+**Status:** merged to main
