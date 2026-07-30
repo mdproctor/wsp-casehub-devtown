@@ -1,37 +1,37 @@
-*Updated: #247 does not exist — removed from backlog.*
-
-# HANDOFF — 2026-07-29
+# HANDOFF — 2026-07-30
 
 ## Last Session
 
-CI fix session. Took CI from red to green across five root causes: Yarn auth/immutable defaults, fragile monorepo frontend build (replaced with stub), platform SNAPSHOT API migration (sync returns, Preference interface, ExpressionEvaluator package move), silent SettingsScope path prefix bug (11 callers fixed), and engine CatchAllExceptionMapper swallowing JAX-RS status codes.
+Four-issue branch: #166 (agent dispatch notification via MessageObserver — qhorus API change + devtown bridge), #168 (merge-queue-entry.yaml case definition), #154 (SLA calibration persistence — JPA entity + V102 migration), #151 (SLA override preference keys + context write). Also fixed engine SNAPSHOT drift (GateRequired quorum param). All 547 devtown tests green.
 
 ## Immediate Next Step
 
-CI is green. Two integration tests disabled pending a test-scoped `WorkerProvisioner` stub.
+All four issues closed. CI should be green. Pick up new work — run `/work` to start.
 
 ## Cross-Module
 
 **Enabled:**
-- `engine` — CatchAllExceptionMapper fix landed on main (`51e94e8`), SNAPSHOT published · XS · Low
+- `qhorus` — MessageReceivedEvent gains `target` + `actorType` (`qhorus@79a1627f`), SNAPSHOT published · XS · Low
 
 **Blocked by:**
+- `work` — `WorkItemService.updateDeadline()` needed for SLA override enforcement (work#324) · S · Low
 - `platform` — SubscriptionEngine + NotificationDispatcher · L · High
 
 ## What's Left
 
-- Frontend CI build — currently stubbed; needs `@casehubio` npm packages published with versioned deps (not `file:`) before real frontend CI is viable · M · Med
+- SLA override enforcement — devtown preference keys and context write are ready; needs work#324 (`updateDeadline()`) · S · Low
+- Frontend CI build — stubbed; needs `@casehubio` npm packages with versioned deps · M · Med
 
 ## What's Next
 
 | # | Description | Scale | Complexity | Notes |
 |---|-------------|-------|------------|-------|
-| #172 | Pages upgrade OKLCH theme | M | Med | Branch exists, stash has WIP changes |
+| #172 | Pages upgrade OKLCH theme | M | Med | Workspace branch exists |
 | #98 | Trust visibility UI | S | Low | blocks-ui#89 closed — unblocked |
 | #120 | Case dependency graph | M | Med | |
 
 ## References
 
-- Blog: `blog/2026-07-29-mdp10-five-root-causes-one-red-ci.md`
-- Garden: `GE-20260729-5c56d9` (Yarn CI immutable), `GE-20260729-66f060` (scope path), `GE-20260729-392052` (exception mapper)
-- Demo instructions: *Unchanged — `git show HEAD~1:HANDOFF.md`*
+- Garden: `GE-20260730-71e232` (MessageReceivedEvent misdiagnosis gotcha)
+- Cross-repo: qhorus@79a1627f (MessageReceivedEvent target+actorType)
+- Follow-up: casehubio/work#324 (WorkItemService.updateDeadline)
