@@ -1,0 +1,9 @@
+branch: issue-166-sla-cdi-merge-queue
+project-sha: 82ae3f73337eba2a9bcf9a9720fd2c9d880977d5
+date: 2026-07-30
+issue: 166
+issue-repo: casehubio/devtown
+covers: 166,154,151,168
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 4d2cc5ab:##
