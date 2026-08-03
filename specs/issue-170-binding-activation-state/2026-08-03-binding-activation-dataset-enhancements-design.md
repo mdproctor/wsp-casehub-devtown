@@ -304,8 +304,7 @@ public class GovernancePreferencesResource {
         return Map.of(
             "refresh.operational", resolve("devtown.dashboard.refresh.operational", "10second"),
             "refresh.metrics",    resolve("devtown.dashboard.refresh.metrics", "30second"),
-            "refresh.caseDetail", resolve("devtown.dashboard.refresh.case-detail", "5second"),
-            "events.mode",        resolve("devtown.dashboard.events.mode", "websocket"));
+            "refresh.caseDetail", resolve("devtown.dashboard.refresh.case-detail", "5second"));
     }
 
     private String resolve(String path, String defaultValue) {
