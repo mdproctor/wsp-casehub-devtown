@@ -28,10 +28,13 @@ Add `activationContext` as the final field. Null when the dispatch is not trigge
 In `rules()`, after a binding passes filter/when evaluation and before dispatch, snapshot the changed layer:
 
 ```java
-JsonNode activationSnapshot = contextSnapshot.layer(changedLayer) != null
+JsonNode activationSnapshot = changedLayer != null
+        && contextSnapshot.layer(changedLayer) != null
     ? contextSnapshot.layer(changedLayer).asJsonNode()
     : null;
 ```
+
+When `changedLayer` is null (e.g., initial case start via `CaseStartedEventHandler`), `activationSnapshot` is null. Bindings can fire in this case — those with null `listenLayer` pass the layer filter in `rules()`. But there is no layer-specific context to capture; the activation trigger is the case start signal itself, not a layer mutation. Null activation context means "no layer-scoped trigger."
 
 Thread through the existing call chain:
 - `rules()` → pass `activationSnapshot` to `publishByTarget()`
@@ -77,10 +80,18 @@ This **replaces** `PlanItemCompletedEvent`. The existing event fires only on COM
 
 If `PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (referenced in the lifecycle-alignment spec), they are consolidated into this single event. Filed as engine#861 for audit of all existing plan item event observers.
 
-Published from:
-- `PlanItemCompletionHandler` — terminal transitions (COMPLETED, FAULTED, CANCELLED, REJECTED, OBSOLETE)
-- Plan item creation path — PENDING creation
-- Existing status transition points in the planning module
+Published from every handler that transitions PlanItem status:
+
+| Handler | Transition | Replaces |
+|---------|-----------|----------|
+| `PlanItemCompletionHandler` | RUNNING/DELEGATED → COMPLETED | `PlanItemCompletedEvent` |
+| `WorkerOutcomeResolvedHandler` | * → FAULTED | `PlanItemFaultedEvent` |
+| `ActionGateExpiredPlanItemHandler` | * → FAULTED | `PlanItemFaultedEvent` |
+| `ActionGateRejectedPlanItemHandler` | * → FAULTED | `PlanItemFaultedEvent` |
+| `SubCaseCompletionService.cancelPlanItemOnRejected()` | * → CANCELLED | (none — no event fired today) |
+| Plan item creation path (BlackboardRegistry) | → PENDING | (none — new) |
+
+REJECTED and OBSOLETE have no production callers currently — `PlanItem.markRejected()` and `markObsolete()` are called only in tests. When handlers are added for these transitions, they fire `PlanItemStateChangedEvent` from the start.
 
 **`CaseContextUpdatedEvent`:**
 ```java
@@ -229,6 +240,8 @@ public class CaseStreamResource {
 
 Multiplexed — plan item transitions and context changes on one SSE connection per case. SSE `event:` field carries the type; `data:` carries the JSON payload.
 
+**Design constraint — SSE event ordering:** CDI `@ObservesAsync` observers execute on the managed executor service with no ordering guarantee. If a plan item transitions PENDING → RUNNING → COMPLETED in rapid succession, SSE events may arrive at the client in any order. SSE events are notifications that trigger REST re-fetch of the authoritative endpoint, not an ordered state log. Clients must not build state machines from SSE event order.
+
 ### Part C: Dataset Enhancements (devtown)
 
 #### C1. datasets.ts refactor
@@ -265,8 +278,8 @@ export const datasets = [
   rest("merge-queue-metrics", "/api/governance/merge-queue/metrics", { expression: "[$]" }),
   rest("reviewers", "/api/governance/reviewers", { dataPath: "items" }),
 
-  // Event stream — WebSocket push with accumulate
-  ws("recent-events", "ws:///api/governance/events", { accumulate: true }),
+  // Event stream — REST poll (WebSocket deferred: requires pages-data support for initial state, accumulation cap, and dataPath extraction)
+  rest("recent-events", "/api/governance/recent-events", { dataPath: "events" }),
 
   // Static — no refresh
   rest("case-definitions", "/api/v1/case-definitions"),
@@ -278,7 +291,9 @@ export const datasets = [
 ];
 ```
 
-**Note on SSE for per-case datasets:** The SSE stream (`/api/v1/cases/{caseId}/stream`) sends lightweight notifications, not full dataset snapshots. pages-data does not currently support "re-fetch on SSE event" — only fixed-interval polling via `refreshTime`. The 5-second poll provides near-real-time visibility. A future pages-data enhancement could connect SSE events to immediate dataset refresh, replacing polling entirely. Filed separately.
+**Note on SSE for per-case datasets:** The SSE stream (`/api/v1/cases/{caseId}/stream`) sends lightweight notifications, not full dataset snapshots. pages-data does not currently support "re-fetch on SSE event" — only fixed-interval polling via `refreshTime`. The default 5-second poll (from preferences) provides near-real-time visibility. A future pages-data enhancement could connect SSE events to immediate dataset refresh, replacing polling entirely. Filed separately.
+
+**Per-case polling fan-out:** Three per-case datasets (`plan-items`, `goal-status`, `case-context`) poll at the `refresh.caseDetail` interval (default 5s). Each expanded case in a table creates three independent polling loops: 3 × N × (60/interval) requests per minute. For 10 expanded cases at 5s: 360 req/min. The devtown dashboard is an internal tool with typically 1–5 concurrent users expanding 2–5 cases. At worst case (5 users × 10 expanded cases × 36 req/min): 1,800 req/min — trivial for Quarkus on virtual threads. The preferences endpoint (C3) allows operators to increase the interval if needed. SSE-triggered refresh is the planned replacement.
 
 #### C3. Platform preferences for refresh intervals
 
