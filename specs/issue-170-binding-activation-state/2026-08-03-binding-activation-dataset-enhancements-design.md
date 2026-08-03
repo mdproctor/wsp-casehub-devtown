@@ -78,7 +78,7 @@ public record PlanItemStateChangedEvent(
 
 This **replaces** `PlanItemCompletedEvent`. The existing event fires only on COMPLETED (success), creating a gap for FAULTED, REJECTED, and CANCELLED transitions. The generalised event carries `previousStatus`/`newStatus`, forcing every observer to declare which transitions it cares about. This is a breaking change — existing `PlanItemCompletedEvent` observers (`CompoundCompletionEvaluator`, `ReviewOutcomeObserver`) must migrate to observe `PlanItemStateChangedEvent` and filter on `newStatus == COMPLETED`.
 
-If `PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (referenced in the lifecycle-alignment spec), they are consolidated into this single event. Filed as engine#861 for audit of all existing plan item event observers.
+`PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (in `engine-common/spi/event/`) and are consolidated into this single event. Filed as engine#861 for audit of all existing plan item event observers.
 
 Published from every handler that transitions PlanItem status:
 
@@ -248,17 +248,10 @@ Multiplexed — plan item transitions and context changes on one SSE connection 
 
 ```typescript
 import { bind, restSource } from "@casehubio/pages-ui";
-import { wsSource, sseSource } from "@casehubio/pages-data";
 import type { DataSetId } from "@casehubio/pages-data";
 
 function rest(id: string, url: string, opts?: { dataPath?: string; expression?: string; refreshTime?: string }) {
   return bind(id, restSource(url, id as DataSetId, opts));
-}
-function ws(id: string, url: string, opts?: { dataPath?: string; accumulate?: boolean }) {
-  return bind(id, wsSource(url, id as DataSetId, opts));
-}
-function sse(id: string, url: string, opts?: { dataPath?: string; accumulate?: boolean }) {
-  return bind(id, sseSource(url, id as DataSetId, opts));
 }
 ```
 
@@ -364,7 +357,7 @@ Phase 3 — Devtown backend (parallel with Phase 2)
   2. Tests for preferences endpoint
 
 Phase 4 — Devtown frontend (depends on Phase 2 + 3)
-  1. datasets.ts refactor — add ws(), sse() helpers
+  1. datasets.ts refactor — rest() helper, import cleanup
   2. Apply refreshTime to operational/metrics/case-detail datasets
   3. Configure recent-events REST source with refreshTime from preferences
   4. Add activationContext column to plan items table
