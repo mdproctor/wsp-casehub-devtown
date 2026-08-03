@@ -75,7 +75,7 @@ public record PlanItemStateChangedEvent(
 
 This **replaces** `PlanItemCompletedEvent`. The existing event fires only on COMPLETED (success), creating a gap for FAULTED, REJECTED, and CANCELLED transitions. The generalised event carries `previousStatus`/`newStatus`, forcing every observer to declare which transitions it cares about. This is a breaking change — existing `PlanItemCompletedEvent` observers (`CompoundCompletionEvaluator`, `ReviewOutcomeObserver`) must migrate to observe `PlanItemStateChangedEvent` and filter on `newStatus == COMPLETED`.
 
-If `PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (referenced in the lifecycle-alignment spec), they are consolidated into this single event. Filed as devtown#TBD for audit of all existing plan item event observers.
+If `PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (referenced in the lifecycle-alignment spec), they are consolidated into this single event. Filed as engine#861 for audit of all existing plan item event observers.
 
 Published from:
 - `PlanItemCompletionHandler` — terminal transitions (COMPLETED, FAULTED, CANCELLED, REJECTED, OBSOLETE)
