@@ -76,7 +76,9 @@ public record PlanItemStateChangedEvent(
     String tenancyId) {}
 ```
 
-This **replaces** `PlanItemCompletedEvent`. The existing event fires only on COMPLETED (success), creating a gap for FAULTED, REJECTED, and CANCELLED transitions. The generalised event carries `previousStatus`/`newStatus`, forcing every observer to declare which transitions it cares about. This is a breaking change — existing `PlanItemCompletedEvent` observers (`CompoundCompletionEvaluator`, `ReviewOutcomeObserver`) must migrate to observe `PlanItemStateChangedEvent` and filter on `newStatus == COMPLETED`.
+This **replaces** `PlanItemCompletedEvent`. The existing event fires only on COMPLETED (success), creating a gap for FAULTED, REJECTED, and CANCELLED transitions. The generalised event carries `previousStatus`/`newStatus`, forcing every observer to declare which transitions it cares about. This is a breaking change — existing `PlanItemCompletedEvent` observers must migrate to observe `PlanItemStateChangedEvent` and filter on `newStatus == COMPLETED`:
+- **`ReviewOutcomeObserver`** (devtown-app, production): observes `PlanItemCompletedEvent` to extract review outcomes and fire typed `ReviewCompletedEvent`. Must migrate to `PlanItemStateChangedEvent` with `newStatus == COMPLETED` filter.
+- **`MixedWorkersBlackboardTest.WorkerCompletionObserver`** (engine, test): test helper that captures completion events. Must migrate to `PlanItemStateChangedEvent`.
 
 `PlanItemRejectedEvent` and `PlanItemFaultedEvent` also exist in the codebase (in `engine-common/spi/event/`) and are consolidated into this single event. Filed as engine#861 for audit of all existing plan item event observers.
 
@@ -101,7 +103,7 @@ public record CaseContextUpdatedEvent(
     String tenancyId) {}
 ```
 
-Published from `CaseContextChangedEventHandler.onCaseStateContextChangedEventHandler()` — the single Vert.x consumer for all `CaseContextChangedEvent` publications. `CaseContextChangedEvent` is not published from `CaseHubRuntime` directly; it is published from multiple internal handlers (`SignalReceivedEventHandler`, `WorkflowExecutionCompletedHandler`, `PlanItemCompletionHandler`, `CaseStartedEventHandler`, milestone handlers, etc.), all of which fan into this single consumer. Inject `Event<CaseContextUpdatedEvent>` into `CaseContextChangedEventHandler` and fire it via `fireAsync()` at the start of the method. Lightweight — carries case ID and layer name only.
+Published from `CaseContextChangedEventHandler.evaluateAndDispatch()` — the internal method called after state and layer guards. `CaseContextChangedEvent` is not published from `CaseHubRuntime` directly; it is published from multiple internal handlers (`SignalReceivedEventHandler`, `WorkflowExecutionCompletedHandler`, `PlanItemCompletionHandler`, `CaseStartedEventHandler`, milestone handlers, etc.), all of which fan into this single consumer. Inject `Event<CaseContextUpdatedEvent>` into `CaseContextChangedEventHandler` and fire it via `fireAsync()` at the start of `evaluateAndDispatch()`, **only when `changedLayer` is non-null**. When `changedLayer` is null (e.g., initial case start via `CaseStartedEventHandler`), no `CaseContextUpdatedEvent` fires — a context-updated notification without a layer name provides no actionable information to SSE clients. Lightweight — carries case ID and layer name only.
 
 **Architectural rationale:** The internal `CaseContextChangedEvent` is a Vert.x event bus message (`EventBusAddresses.CONTEXT_CHANGED`), not observable by CDI modules outside the engine. `CaseContextUpdatedEvent` is the SPI-layer CDI event following the same dual-path pattern as `CaseLifecycleEvent` — Vert.x for intra-engine dispatch, CDI `@ObservesAsync` for cross-module observation.
 
@@ -196,7 +198,10 @@ public class CaseStreamResource {
         caseSinks.add(sink);
         sink.onClose(() -> {
             Set<SseEventSink> set = sinks.get(caseId);
-            if (set != null) { set.remove(sink); if (set.isEmpty()) sinks.remove(caseId); }
+            if (set != null) {
+                set.remove(sink);
+                sinks.computeIfPresent(caseId, (k, s) -> s.isEmpty() ? null : s);
+            }
         });
     }
 
@@ -227,7 +232,7 @@ public class CaseStreamResource {
         }
         if (!dead.isEmpty()) {
             caseSinks.removeAll(dead);
-            if (caseSinks.isEmpty()) sinks.remove(caseId);
+            sinks.computeIfPresent(caseId, (k, s) -> s.isEmpty() ? null : s);
         }
     }
 }
@@ -343,8 +348,22 @@ Phase 1 — Engine runtime (no dependencies)
   2. Thread activationContext through CaseContextChangedEventHandler call chain
   3. Persist activationContext in WorkerScheduleEventHandler.buildEventLog() metadata
   4. Add PlanItemStateChangedEvent and CaseContextUpdatedEvent CDI events
-  5. Publish CDI events from PlanItemCompletionHandler, WorkerScheduleEventHandler, CaseContextChangedEventHandler
-  6. Tests for all of the above
+  5. Publish PlanItemStateChangedEvent from all six handlers:
+     - PlanItemCompletionHandler (COMPLETED)
+     - WorkerOutcomeResolvedHandler (FAULTED)
+     - ActionGateExpiredPlanItemHandler (FAULTED)
+     - ActionGateRejectedPlanItemHandler (FAULTED)
+     - SubCaseCompletionService (CANCELLED)
+     - BlackboardRegistry (PENDING — new)
+  6. Publish CaseContextUpdatedEvent from CaseContextChangedEventHandler.evaluateAndDispatch() (null changedLayer guard)
+  7. Delete PlanItemCompletedEvent, PlanItemRejectedEvent, PlanItemFaultedEvent classes
+  8. Migrate MixedWorkersBlackboardTest.WorkerCompletionObserver to PlanItemStateChangedEvent
+  9. Tests for all of the above
+
+Phase 1b — Devtown observer migration (depends on Phase 1)
+  1. Migrate ReviewOutcomeObserver to observe PlanItemStateChangedEvent, filter on newStatus == COMPLETED
+  2. Migrate ReviewOutcomeObserverTest and CaseMemoryIntegrationTest
+  3. Verify no observers in ops or aml (confirmed: none exist)
 
 Phase 2 — Engine REST (depends on Phase 1)
   1. Extend PlanItemResponse with activationContext field (direct from PlanItemRecord)
