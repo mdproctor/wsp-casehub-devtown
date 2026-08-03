@@ -326,7 +326,7 @@ dataTable({
 }),
 ```
 
-`activationContext` renders as a JSON key-value display in the table cell. The changed layer content is typically compact — a handful of keys like `{ "pr.analysis.security.critical": 3, "pr.analysis.security.confidence": 0.92 }`.
+`activationContext` renders as a JSON key-value display in the table cell. The changed layer content is a snapshot of the triggering layer at evaluation time. For early-lifecycle bindings (e.g., initial analysis), this is compact — a handful of keys. For bindings that fire late in a case lifecycle (e.g., after multiple review rounds), the layer may contain dozens of accumulated keys. The JSON display should be collapsible or truncated for readability.
 
 ## Implementation Order
 
@@ -336,14 +336,13 @@ Phase 1 — Engine runtime (no dependencies)
   2. Thread activationContext through CaseContextChangedEventHandler call chain
   3. Persist activationContext in WorkerScheduleEventHandler.buildEventLog() metadata
   4. Add PlanItemStateChangedEvent and CaseContextUpdatedEvent CDI events
-  5. Publish CDI events from PlanItemCompletionHandler, WorkerScheduleEventHandler, CaseHubRuntime
+  5. Publish CDI events from PlanItemCompletionHandler, WorkerScheduleEventHandler, CaseContextChangedEventHandler
   6. Tests for all of the above
 
 Phase 2 — Engine REST (depends on Phase 1)
-  1. Extend PlanItemResponse with activationContext field
-  2. Server-side join in CaseInstanceResource.getPlanItems()
-  3. CaseStreamResource SSE endpoint
-  4. Tests for plan-items enrichment and SSE streaming
+  1. Extend PlanItemResponse with activationContext field (direct from PlanItemRecord)
+  2. CaseStreamResource SSE endpoint
+  3. Tests for plan-items endpoint and SSE streaming
 
 Phase 3 — Devtown backend (parallel with Phase 2)
   1. GovernancePreferencesResource
@@ -405,12 +404,12 @@ Phase 4 — Devtown frontend (depends on Phase 2 + 3)
 | devtown | 119 | Parent — CasePlanModel browser (activation state was deferred from here) |
 | devtown | 167 | Related — WebSocket/SSE live updates (this spec partially addresses) |
 | devtown | 172 | Prerequisite — pages upgrade (completed, base for dataset refactor) |
-| pages | — | Future — SSE-triggered dataset refresh (pages-data enhancement, not filed yet) |
+| pages | — | Future — SSE-triggered dataset refresh (pages-data enhancement, to be filed before implementation begins) |
 
 ## Out of Scope
 
 - SSE-triggered immediate dataset refresh (pages-data feature, not available — using refreshTime polling)
-- Full context snapshot as activation context (changed layer is sufficient and bounded)
+- Full multi-layer context snapshot as activation context (capturing the single triggering layer provides the relevant data at manageable size — the layer grows with case lifecycle but remains far smaller than a full multi-layer snapshot)
 - Condition-referenced key extraction from JQ expressions (complex, diminishing returns over changed layer)
 - Per-case SSE topic filtering in pages-data (SSE endpoint multiplexes, frontend receives all events for subscribed case)
 - Preference persistence UI (preferences are set via API or platform admin, not governance dashboard)
