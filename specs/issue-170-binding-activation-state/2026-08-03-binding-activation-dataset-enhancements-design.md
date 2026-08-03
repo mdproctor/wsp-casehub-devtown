@@ -366,7 +366,7 @@ Phase 3 — Devtown backend (parallel with Phase 2)
 Phase 4 — Devtown frontend (depends on Phase 2 + 3)
   1. datasets.ts refactor — add ws(), sse() helpers
   2. Apply refreshTime to operational/metrics/case-detail datasets
-  3. Convert recent-events to WebSocket source
+  3. Configure recent-events REST source with refreshTime from preferences
   4. Add activationContext column to plan items table
   5. Wire preferences to dataset construction
   6. TypeScript type-check + build
@@ -398,7 +398,7 @@ Phase 4 — Devtown frontend (depends on Phase 2 + 3)
 - `npm run build` passes
 - Visual: activation context visible in plan items table
 - Visual: operational datasets refresh at configured intervals
-- Visual: recent-events streams via WebSocket with accumulation
+- Visual: recent-events refreshes at configured interval via REST poll
 - Visual: preferences control refresh rates
 
 ## Garden Entries Referenced
