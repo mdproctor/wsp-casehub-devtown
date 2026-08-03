@@ -356,14 +356,14 @@ Phase 1 — Engine runtime (no dependencies)
      - SubCaseCompletionService (CANCELLED)
      - BlackboardRegistry (PENDING — new)
   6. Publish CaseContextUpdatedEvent from CaseContextChangedEventHandler.evaluateAndDispatch() (null changedLayer guard)
-  7. Delete PlanItemCompletedEvent, PlanItemRejectedEvent, PlanItemFaultedEvent classes
-  8. Migrate MixedWorkersBlackboardTest.WorkerCompletionObserver to PlanItemStateChangedEvent
-  9. Tests for all of the above
+  7. Migrate MixedWorkersBlackboardTest.WorkerCompletionObserver to PlanItemStateChangedEvent
+  8. Tests for all of the above
 
-Phase 1b — Devtown observer migration (depends on Phase 1)
+Phase 1b — Observer migration + old event cleanup (depends on Phase 1)
   1. Migrate ReviewOutcomeObserver to observe PlanItemStateChangedEvent, filter on newStatus == COMPLETED
   2. Migrate ReviewOutcomeObserverTest and CaseMemoryIntegrationTest
   3. Verify no observers in ops or aml (confirmed: none exist)
+  4. Delete PlanItemCompletedEvent, PlanItemRejectedEvent, PlanItemFaultedEvent classes
 
 Phase 2 — Engine REST (depends on Phase 1)
   1. Extend PlanItemResponse with activationContext field (direct from PlanItemRecord)
