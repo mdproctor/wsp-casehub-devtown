@@ -51,49 +51,65 @@ the trust-workbench component.
 | GET | `/api/governance/trust/{actorId}/routing-history` | `List<RoutingDecisionSummary>` |
 | GET | `/api/governance/trust/{actorId}/routing-history/{entryId}` | `RoutingDecisionDetail` |
 
+All endpoints use `@RolesAllowed` matching `GovernanceResource` (read-only
+governance data — no admin restriction).
+
+The routing history endpoint accepts an optional `?capability=X` query
+parameter to filter by capability tag (the trust-workbench sends this when
+a capability is selected in the score panel). Pagination: `?limit=N&offset=M`
+with a default limit of 50.
+
 ### Score proxy
 
 Delegates to `TrustGateService`:
-- `currentScore(actorId)` → globalScore
+- `currentScore(actorId)` → globalScore (nullable — `OptionalDouble.empty()` → JSON `null`)
 - `allCapabilityScores(actorId)` → capabilityScores map
 - `allDimensionScores(actorId)` → dimensionScores map
 
-Returns `TrustScoreResponse` matching the TypeScript interface in
-`trust-score-panel/src/types.ts`.
+Returns 200 with nullable `globalScore` when the actor exists but has no
+global score computed. Returns 404 only when the actor is entirely unknown.
 
 ### Routing history
 
 Queries `LedgerEntryRepository` for `WorkerDecisionEntry` records where
-`actorId` matches.
+`actorId` matches. The query must filter by entry type — `findByActorId`
+returns all ledger entry types, not just `WorkerDecisionEntry`.
 
-**RoutingDecisionSummary** (list item):
-- `id` — entry UUID
-- `capabilityTag` — which capability was routed
-- `trustScoreAtRouting` — score snapshot at decision time
-- `thresholdApplied` — policy threshold used
-- `outcome` — DONE / DECLINED / FAILED
-- `timestamp` — when the decision was made
-- `caseId` — parent case reference
+### DTOs — TypeScript types are authoritative
 
-**RoutingDecisionDetail** (detail pane):
-- `rationale` — `RoutingRationaleData` with selected candidate info and policy
-  summary. Populated from the `WorkerDecisionEntry` fields. Alternatives array
-  may be empty if the ledger doesn't store the full candidate set — the
-  trust-workbench renders this gracefully.
-- `feedback` — `List<GateDecision>` from `LedgerAttestation` records on this
-  entry. Each carries decision, actor, attestation verdict, trustScoreBefore,
-  trustScoreAfter, dimension.
+The Java DTOs must produce JSON matching the TypeScript interfaces in
+casehub-packages exactly. The authoritative type definitions are:
 
-### DTOs
+- `trust-score-panel/src/types.ts` → `TrustScoreResponse`
+- `trust-workbench/src/types.ts` → `RoutingDecisionSummary`, `RoutingDecisionDetail`
+- `routing-rationale/src/types.ts` → `RoutingRationaleData`, `CandidateScore`, `RoutingPolicySummary`
+- `trust-feedback-display/src/types.ts` → `GateDecision`
 
-Java records in `io.casehub.devtown.app.governance`:
-- `TrustScoreResponse(String actorId, Double globalScore, Map<String, Double> capabilityScores, Map<String, Double> dimensionScores)`
-- `RoutingDecisionSummary(UUID id, String capabilityTag, double trustScoreAtRouting, double thresholdApplied, String outcome, Instant timestamp, UUID caseId)`
-- `RoutingDecisionDetail(RoutingRationaleData rationale, List<GateDecision> feedback)`
-- `RoutingRationaleData(String capabilityTag, String strategyId, CandidateScore selected, List<CandidateScore> alternatives, RoutingPolicySummary policy)`
-- `CandidateScore(String workerId, double trustScore, double workloadScore, String phase, int observations, double finalScore, String exclusionReason, String rationale)`
-- `RoutingPolicySummary(double threshold, double borderlineMargin, double blendFactor, Map<String, Double> qualityFloors)`
-- `GateDecision(String decision, String actor, String attestation, double trustScoreBefore, double trustScoreAfter, String dimension)`
+Key fields that diverge from naive ledger mapping:
+
+**RoutingDecisionSummary** — the TS interface expects:
+`id (string)`, `timestamp (string)`, `capabilityTag`, `selectedWorkerId`,
+`finalScore`, `phase` (BOOTSTRAP|QUALIFIED|BORDERLINE|EXCLUDED_PHASE2B|EXCLUDED_PHASE3).
+Not: trustScoreAtRouting, thresholdApplied, outcome, caseId. Derive
+`selectedWorkerId`, `finalScore`, and `phase` from `WorkerDecisionEntry` fields.
+
+**RoutingPolicySummary** — the TS interface requires 7 fields:
+`threshold`, `borderlineMargin`, `blendFactor`, `minimumObservations`,
+`qualityFloors`, `cbrWeight`, `bootstrapEscalationRequired`.
+Populate from `DevtownTrustRoutingPolicyProvider.forCapability()` at query
+time (the policy is deterministic for a given capability tag).
+
+**CandidateScore** — `trustScore` is `number | null` (not primitive double).
+`phase` is a string enum, not free-form. `exclusionReason`, `rationale`,
+and `additionalScores` are optional. Alternatives array may be empty if the
+ledger doesn't store the full candidate set — trust-workbench renders
+"selected" without alternatives gracefully.
+
+**GateDecision** — `trustScoreBefore` and `trustScoreAfter` are not stored
+on `LedgerAttestation` directly. Compute by querying the actor's trust score
+at the attestation timestamp (from materialized score snapshots) or
+approximate from the attestation's `dimensionScore` and confidence fields.
+If not computable, use the current score for both (no delta shown).
 
 ---
 
@@ -105,8 +121,15 @@ Replace the flat `dataTable` in `reviewers.ts` with a split-pane layout:
 
 - **Left pane:** Reviewer fleet table (existing columns + new inline trust badge)
   - Add `trustScore` column using `<blocks-trust-score-panel mode="compact">`
-    with pre-fetched score and trustLevel from the `/api/governance/reviewers`
-    response (avoids redundant fetch)
+  - The `/api/governance/reviewers` response already includes per-reviewer
+    trust data (trust-by-capability from `TrustExportService` and
+    `TrustGateService`). Pass `score` and `trust-level` attributes directly
+    from the reviewer row data — trust-score-panel's compact mode renders
+    from pre-fetched attributes without an additional fetch when both
+    `score` and `trustLevel` properties are set (see `_hasPreFetchedData()`)
+  - `GovernanceQueryService.reviewerFleet()` must include a `globalScore`
+    field in its response for this to work. If missing, add it — it's a
+    single `TrustGateService.currentScore()` call per reviewer
   - Row selection emits pages event with actorId
 
 - **Right pane:** `<blocks-trust-workbench>` bound to selected actorId
