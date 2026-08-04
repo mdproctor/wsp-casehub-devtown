@@ -2,10 +2,11 @@
 
 ## Last Session
 
-Completed #153 — governance SLA comparison view. Added `slaComparison()` to GovernanceQueryService joining SlaCalibrationStore (estimated medians from precedent cases) with PreferenceProvider (configured SLA hours). REST endpoint at `GET /api/governance/sla-comparison`, frontend SLA Calibration table in the System view with per-capability breakdown and deviation percentage. Branch closed — squashed to 1 commit, pushed to fork and upstream. 1 garden entry submitted (IntelliJ MCP import optimization gotcha).
+Closed #98 — trust visibility UI. TrustQueryService with 4 REST endpoints wired into reviewer drill-down via blocks-ui trust-workbench. Browser-verified on quarkus:dev (slot 79). Engine routing-rationale commit (V2002 migration) cherry-picked to engine main. Filed pages#287 for UNKNOWN_COLUMN empty-data regression.
 
 ## Known Issues
 
-- **Quinoa npm install** fails during Quarkus augmentation — pre-existing frontend build issue
-- **CaseMemoryObserver** binary incompatibility with neocortex SNAPSHOT — resolves when engine is rebuilt
-- **reviewerId always "unknown"** in ReviewOutcomeObserver — PlanItemStateChangedEvent doesn't carry executor identity (accepted scope reduction; needs PlanItemRecord query to resolve)
+- **engine#862** — `SelectionContext` not populated from routing strategy; routing_rationale always null until this ships
+- **CbrReviewerMatchingIntegrationTest** — 2 failures from upstream `ImplementationSelection` API change (not #98)
+- **pages#287** — `group-eval.ts` throws UNKNOWN_COLUMN on empty datasets; every empty-db page shows error banners
+- **reviewerId always "unknown"** in ReviewOutcomeObserver — PlanItemStateChangedEvent doesn't carry executor identity
