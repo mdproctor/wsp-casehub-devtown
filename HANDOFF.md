@@ -2,7 +2,7 @@
 
 ## Last Session
 
-Completed Tasks 10-12 from the binding activation state plan (#170, #173). Engine: PlanItemResponse extended with activationContext field, CaseStreamResource SSE endpoint (BroadcastProcessor + Multi<T> pattern), 31 engine-rest tests green. Devtown: GovernancePreferencesResource for operator-configurable dashboard refresh intervals, frontend datasets refactored to fetch preferences at load, Plan Items table includes activationContext column. Fixed pre-existing bugs: ReviewOutcomeObserver string-vs-TaskStatus enum comparison (silent failure from Task 9 migration), stale Jandex index in casehub-work-engine-adapter. Branch closed — squashed to 1 commit, pushed to fork and upstream. 2 garden entries submitted (Jandex stale index gotcha, BroadcastProcessor SSE technique).
+Completed #153 — governance SLA comparison view. Added `slaComparison()` to GovernanceQueryService joining SlaCalibrationStore (estimated medians from precedent cases) with PreferenceProvider (configured SLA hours). REST endpoint at `GET /api/governance/sla-comparison`, frontend SLA Calibration table in the System view with per-capability breakdown and deviation percentage. Branch closed — squashed to 1 commit, pushed to fork and upstream. 1 garden entry submitted (IntelliJ MCP import optimization gotcha).
 
 ## Known Issues
 
