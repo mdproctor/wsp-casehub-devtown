@@ -1,0 +1,10 @@
+branch: issue-191-remove-unnecessary-cdi
+state: scaffolded
+project-sha: 038c556739a4112486ef1d97ed0cf86106e7081f
+date: 2026-08-10
+issue: 191
+issue-repo: casehubio/devtown
+covers: 191
+flyway-next-v: none
+design-repo: project
+design-section-hashes: 
