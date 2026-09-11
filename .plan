@@ -1,0 +1,15 @@
+# Work Plan — issue-202-github-contributor-conf
+
+## State
+branch: issue-202-github-contributor-conf
+state: scaffolded
+project-sha: 1f1fb5ec70429ba0723289a3aef19e36de2926c0
+date: 2026-09-11
+issue-repo: casehubio/devtown
+covers: 202
+design-repo: workspace
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [ ] casehubio/devtown#202 — Issue #202 ← active
