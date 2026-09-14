@@ -17,8 +17,9 @@ ignores.
 ## Solution
 
 Bootstrap contributor trust from GitHub PR history. Cache per-contributor
-per-repo signal data with adaptive TTL. Seed the Bayesian Beta prior via
-`TrustBootstrapSource` for historical data. Continue using
+per-repo signal data with adaptive TTL. Import historical scores eagerly
+via `TrustImportService` and serve them on-demand via
+`TrustBootstrapSource` (pull SPI). Continue using
 `ContributorAttestationPolicy` for live PR observations. Classify repo
 quality into confidence tiers that modulate how much weight historical data
 carries.
@@ -31,20 +32,39 @@ carries.
 
 ```
 PR webhook arrives
-  → ContributorIntelligenceService.onPrOpened(contributorLogin, repo)
+  → PrPayload.contributor() / PrPayload.contributorNumericId()
   → is contributor profile cached and fresh?
       YES → no action (live attestation pipeline handles scoring)
       NO  → classify PR as TRIAGE immediately (safe default)
-          → fire async CDI event: BootstrapContributorEvent(login, repo)
-          → ContributorIntelligenceService.bootstrap(login, repo)
-              → ContributorHistoryClient.fetchPrHistory(login, repo)
-              → ContributorHistoryClient.fetchRepoMetadata(repo)
+          → fire async CDI event: BootstrapContributorEvent(login, numericId, repo)
+          → ContributorBootstrapWriter observes the event (app/):
+              → deduplicate (skip if bootstrap already in-flight for this login)
+              → ContributorHistoryClient.fetchHistory(login, repo, Instant.MIN)
+              → ContributorHistoryClient.fetchRepoMetadata(owner, repo)
               → build ContributorGitHubProfile (aggregate cache)
               → build/update RepoConfidenceProfile (tier assignment)
               → compute α/β from merge/reject ratio × repo tier multiplier
-              → TrustBootstrapSource.seed(actorId, capability, α, β)
-              → Bayesian Beta prior updated
-          → next PR from this contributor uses cached score
+              → construct TrustExportPayload with capability + dimension scores
+              → TrustImportService.importTrust(payload) — eager import
+              → persist ContributorGitHubProfile and RepoConfidenceProfile
+          → next PR from this contributor uses imported score
+
+TrustScoreJob (24h schedule) discovers new actors
+  → TrustBootstrapService.bootstrapIfNew(newActorIds)
+  → TrustBootstrapSource.fetchPriorTrust(actorId) — pull SPI
+      → devtown implementation reads cached ContributorGitHubProfile
+      → returns TrustExportPayload (or empty if no cached profile)
+      → TrustImportService.importTrust(payload) — idempotent
+
+Full end-to-end path (bootstrap → intake classification):
+  GitHub PR history
+  → ContributorHistoryClient.fetchHistory()
+  → ContributorGitHubProfile (cached)
+  → TrustImportService.importTrust(TrustExportPayload)
+  → ActorTrustScore (materialized: capability + dimension scores)
+  → TrustGateService.allCapabilityScores(actorId)
+  → ContributorIntakePolicy.classify(score, observations)
+  → IntakeClassification(lane=FAST_TRACK|STANDARD|TRIAGE)
 ```
 
 ### Module placement
@@ -57,13 +77,15 @@ Following the hexagonal port/adapter pattern established by
 | `ContributorHistoryClient` (SPI interface) | `domain/` | Port — service depends on this, not the adapter |
 | `ContributorGitHubProfile` (domain record) | `domain/` | Pure Java, no framework deps |
 | `RepoConfidenceTier` (enum) | `domain/` | HIGH / MEDIUM / LOW with confidence multipliers |
-| `ContributorIntelligenceService` | `review/` | Integration logic, calls SPI |
+| `BootstrapScoreComputer` (pure computation) | `domain/` | Computes α/β and dimension scores from profile + tier — no framework deps |
 | `GitHubContributorHistoryClient` | `github/` | Adapter — implements the SPI via GitHub REST API |
 | `GitHubRepoApi` (REST client interface) | `github/` | New interface for repo metadata endpoint |
 | `ContributorGitHubProfileEntity` (JPA) | `app/` | Persistence |
 | `RepoConfidenceProfileEntity` (JPA) | `app/` | Persistence |
+| `ContributorBootstrapWriter` | `app/` | CDI observer, persists profiles, calls `TrustImportService` — follows `ContributorOutcomeLedgerWriter` pattern |
+| `DevtownTrustBootstrapSource` | `app/` | Implements `TrustBootstrapSource` SPI, reads from cached profiles — displaces `NoOpTrustBootstrapSource @DefaultBean` via CDI |
 | `NoOpContributorHistoryClient` (`@DefaultBean`) | `app/` | Fallback when GitHub not configured |
-| CDI event wiring, bootstrap observer | `app/` | Application-tier glue |
+| `BootstrapContributorEvent` (CDI event) | `review/` | Event type — domain integration boundary |
 
 ### Extensibility points
 
@@ -82,12 +104,12 @@ revision count. Extension points:
    cacheMaturity). This migration is safe — the entity is a cache that can
    be rebuilt from the API.
 
-3. **α/β computation** — for v1, inline: α = mergedCount × tier multiplier,
-   β = closedCount × tier multiplier. When signal 3+ arrives, extract into
-   a `SignalWeightPolicy` that maps signal values to Bayesian update
-   parameters. New signals register their weight contribution. The policy
-   becomes the single place where "what does this signal mean for trust?"
-   is answered.
+3. **α/β computation** — for v1, `BootstrapScoreComputer` in domain/ computes
+   capability-level α/β (α = mergedCount × tier multiplier,
+   β = closedCount × tier multiplier) and dimension-level scores
+   (MERGE_RATE = mergedCount / observationCount). When signal 3+ arrives,
+   extract into a `SignalWeightPolicy` that maps signal values to Bayesian
+   update parameters. New signals register their weight contribution.
 
 4. **Repo confidence tier criteria** — the threshold rules (age >1yr, >5
    contributors, >50 PRs) are configurable via `PreferenceKey`. New criteria
@@ -105,15 +127,15 @@ rebuildable from the GitHub API.
 ```java
 // domain/ — pure Java record
 public record ContributorGitHubProfile(
-    String login,           // GitHub username (natural key)
-    String repo,            // owner/repo (natural key)
-    String actorId,         // deterministic UUID: github:<login>
-    int mergedCount,        // PRs merged
-    int closedCount,        // PRs closed without merge
-    int totalForcePushes,   // total force-pushes across all PRs (revision proxy)
-    int observationCount,   // mergedCount + closedCount
-    Instant lastRefreshAt,  // last successful API fetch
-    CacheMaturity maturity  // computed from observationCount
+    String login,             // GitHub username (natural key)
+    long contributorNumericId, // GitHub numeric user ID
+    String repo,              // owner/repo (natural key)
+    String actorId,           // "github-id:" + contributorNumericId (matches attestation pipeline)
+    int mergedCount,          // PRs merged
+    int closedCount,          // PRs closed without merge
+    int observationCount,     // mergedCount + closedCount
+    Instant lastRefreshAt,    // last successful API fetch
+    CacheMaturity maturity    // computed from observationCount
 ) {}
 
 public enum CacheMaturity {
@@ -177,13 +199,14 @@ public interface ContributorHistoryClient {
 // Returned by fetchHistory — extensible record for signal data
 public record ContributorHistorySnapshot(
     String login,
+    long contributorNumericId,  // GitHub user.id from PR listing
     String repo,
     int mergedCount,
     int closedCount,
-    int forcePushCount,
     Instant oldestPrAt,
     Instant newestPrAt
-    // Future signals: int ciPassCount, int ciFailCount,
+    // Future signals: int forcePushCount (needs per-PR timeline API),
+    //                 int ciPassCount, int ciFailCount,
     //                 int reviewCommentTotal, Duration avgTimeToApproval
 ) {}
 
@@ -199,20 +222,40 @@ public record RepoMetadataSnapshot(
 
 ### Identity mapping
 
-GitHub login → devtown actor ID via deterministic UUID:
+GitHub numeric ID → devtown actor ID, matching the existing attestation
+pipeline identity scheme established in `PrReviewCaseService.closePr()`:
 
 ```java
-public static UUID actorIdFromGitHubLogin(String login) {
-    return UUID.nameUUIDFromBytes(("github:" + login).getBytes(StandardCharsets.UTF_8));
+public static String actorIdFromGitHubNumericId(long numericId) {
+    return "github-id:" + numericId;
 }
 ```
 
-Consistent across repos — the same GitHub user contributing to multiple repos
-produces the same actor ID, enabling future org-level aggregation.
+This produces the same `actorId` format as the live attestation pipeline
+(`"github-id:" + event.senderId()` in `PrLifecycleAttestationObserver`),
+ensuring that bootstrapped scores and live attestation scores combine
+under a single identity. The numeric ID is stable across GitHub login
+renames. `PrPayload.contributorNumericId()` provides the value at PR
+intake time; the GitHub PR listing API returns `user.id` for each PR.
 
 ---
 
 ## GitHub API integration
+
+**Note on issue #202 deliverable 5:** The issue references "casehub-connectors
+GitHub adapter." No GitHub-specific adapter exists in casehub-connectors (which
+provides webhook, Slack, Discord, email, etc.). devtown already has a `github/`
+module with 4 REST client interfaces (`GitHubPullRequestApi`, `GitHubChecksApi`,
+`GitHubPayloadMapper`, `GitHubCiStatusClient`). This spec follows the
+established pattern. Issue #202 should be updated to reflect this.
+
+**Force-push data deferred to follow-up:** The GitHub PR list endpoint
+(`/repos/{owner}/{repo}/pulls`) does not include force-push events. Force-push
+data requires the timeline endpoint (`/repos/{owner}/{repo}/issues/{pr}/timeline`),
+a separate API call per PR. For a contributor with 100 PRs, this means 100
+additional API calls. Per decision D1 ("proves the pipeline end-to-end with
+minimal API surface"), force-push is deferred. The `FIRST_ATTEMPT_QUALITY`
+dimension will only be populated by live attestations, not by bootstrap.
 
 ### GitHubPullRequestApi — extended
 
@@ -280,37 +323,61 @@ Bootstrap is async (D8) so rate-limit pauses don't affect the intake path.
 ### Initial bootstrap (first encounter)
 
 1. PR arrives from unknown contributor (no `ContributorGitHubProfile` for
-   this login+repo)
+   this login+repo). Source: `PrPayload.contributor()` (login) and
+   `PrPayload.contributorNumericId()` (numeric ID).
 2. PR classified as TRIAGE immediately (safe default)
-3. `BootstrapContributorEvent(login, repo)` fired as async CDI event
-4. `ContributorIntelligenceService` observes the event:
-   a. Call `ContributorHistoryClient.fetchHistory(login, repo, Instant.MIN)`
+3. `BootstrapContributorEvent(login, contributorNumericId, repo)` fired as
+   async CDI event
+4. `ContributorBootstrapWriter` (app/) observes the event:
+   a. Deduplication check — if bootstrap already in-flight for this login
+      (tracked via `ConcurrentHashMap<String, CompletableFuture>`), skip.
+      Coalesce concurrent requests: return existing future, don't fire a
+      second API fetch.
+   b. Call `ContributorHistoryClient.fetchHistory(login, repo, Instant.MIN)`
       — full history
-   b. Call `ContributorHistoryClient.fetchRepoMetadata(owner, repo)` if no
+   c. Call `ContributorHistoryClient.fetchRepoMetadata(owner, repo)` if no
       fresh `RepoConfidenceProfile` exists
-   c. Build `ContributorGitHubProfile` from snapshot
-   d. Assign `RepoConfidenceTier` from repo metadata (or read admin override)
-   e. Compute α/β:
+   d. Build `ContributorGitHubProfile` from snapshot using
+      `actorId = "github-id:" + contributorNumericId`
+   e. Assign `RepoConfidenceTier` from repo metadata (or read admin override)
+   f. Compute scores via `BootstrapScoreComputer` (domain/):
       ```
       α_raw = mergedCount
       β_raw = closedCount
       multiplier = tier.confidenceMultiplier()
       α_seeded = α_raw * multiplier
       β_seeded = β_raw * multiplier
+
+      // Dimension-level approximation
+      mergeRate = observationCount > 0
+          ? (double) mergedCount / observationCount
+          : 0.5  // uninformative prior
       ```
-   f. Call `TrustBootstrapSource.seed(actorId, PR_CONTRIBUTION, α_seeded, β_seeded)`
-   g. Persist `ContributorGitHubProfile` and `RepoConfidenceProfile`
-5. Next PR from this contributor: cache is fresh, score reflects GitHub history
+   g. Construct `TrustExportPayload` containing:
+      - `CapabilityScoreExport(PR_CONTRIBUTION, α_seeded, β_seeded, ...)`
+      - `DimensionScoreExport(MERGE_RATE, mergeRate, observationCount, ...)`
+      - `CapabilityDimensionScoreExport(PR_CONTRIBUTION, MERGE_RATE, mergeRate, observationCount, ...)`
+      - No `FIRST_ATTEMPT_QUALITY` — cannot be approximated from PR list
+        data alone (requires per-PR timeline API; deferred to follow-up)
+   h. Call `TrustImportService.importTrust(payload)` — eager import,
+      writes `ActorTrustScore` records immediately. `JpaTrustImportService`
+      only seeds actors not already present (idempotent).
+   i. Persist `ContributorGitHubProfile` and `RepoConfidenceProfile`
+   j. Remove login from in-flight dedup map
+5. Next PR from this contributor: cache is fresh, `TrustGateService` returns
+   the imported score, `ContributorIntakePolicy.classify()` uses it for
+   lane assignment
 
 ### Incremental refresh
 
 When a PR arrives and the cached profile is stale (per adaptive TTL):
 
-1. Fire async refresh event
+1. Fire async refresh event (same dedup applies)
 2. `fetchHistory(login, repo, profile.lastRefreshAt())` — incremental, new PRs only
-3. Update aggregate counts: add new merged/closed/force-push counts
-4. Recompute α/β and re-seed via `TrustBootstrapSource`
-5. Update `lastRefreshAt` and potentially promote `CacheMaturity`
+3. Update aggregate counts: add new merged/closed counts
+4. Recompute α/β and dimension scores via `BootstrapScoreComputer`
+5. Construct `TrustExportPayload` and call `TrustImportService.importTrust()`
+6. Update `lastRefreshAt` and potentially promote `CacheMaturity`
 
 ### Adaptive TTL
 
@@ -340,11 +407,11 @@ for months), rebuild from scratch on next PR — same as initial bootstrap.
 public class ContributorGitHubProfileEntity {
     @Id @GeneratedValue UUID id;
     @Column(nullable = false) String login;
+    @Column(nullable = false) long contributorNumericId;
     @Column(nullable = false) String repo;
-    @Column(nullable = false) String actorId;  // deterministic UUID string
+    @Column(nullable = false) String actorId;  // "github-id:" + contributorNumericId
     int mergedCount;
     int closedCount;
-    int totalForcePushes;
     int observationCount;
     Instant lastRefreshAt;
     @Enumerated(EnumType.STRING) CacheMaturity maturity;
@@ -387,12 +454,11 @@ public record ContributorDetail(
 public record GitHubIntelligence(
     int mergedCount,
     int closedCount,
-    int forcePushCount,
     double mergeRatio,              // mergedCount / observationCount
     String repoConfidenceTier,      // HIGH / MEDIUM / LOW
     String cacheMaturity,           // COLD / WARM / HOT / MATURE
     Instant lastRefreshed,
-    boolean bootstrapped,           // true if TrustBootstrapSource was seeded
+    boolean bootstrapped,           // true if trust was imported from GitHub history
     String bootstrapSummary         // "bootstrapped from 47 PRs in casehubio/engine"
 ) {}
 ```
@@ -400,6 +466,12 @@ public record GitHubIntelligence(
 The frontend extends the existing contributor detail panel with a
 "GitHub Intelligence" section showing these fields. No new navigation
 target — the data appears inline in the existing contributor view.
+
+**Known limitation:** `TrustQueryService.trustTrend()` currently returns
+empty (`TrustScoreSnapshot` removed from ledger — replacement entity
+pending). Bootstrapped contributors show GitHub intelligence fields
+but have no trust trend history until `TrustScoreSnapshot` is restored.
+This affects all contributors, not just bootstrapped ones.
 
 ---
 
@@ -427,26 +499,36 @@ target — the data appears inline in the existing contributor view.
 
 - `CacheMaturity.isStale()` — boundary conditions for each tier
 - `RepoConfidenceTier` assignment from metadata thresholds
-- α/β computation from profile + tier multiplier
-- Identity mapping determinism (same login → same UUID)
+- `BootstrapScoreComputer` — α/β and dimension score computation from
+  profile + tier multiplier
+- Identity mapping: `actorIdFromGitHubNumericId()` produces `"github-id:N"`
+  format matching existing attestation pipeline
 
 ### Integration tests (app/)
 
 - Bootstrap flow: mock `ContributorHistoryClient`, verify
-  `TrustBootstrapSource.seed()` called with correct α/β
+  `TrustImportService.importTrust()` called with correct `TrustExportPayload`
+  containing capability, dimension, and capability-dimension scores
+- `DevtownTrustBootstrapSource.fetchPriorTrust()` — returns payload from
+  cached profile, empty if no profile exists
 - Incremental refresh: verify delta fetch since `lastRefreshAt`
 - Adaptive TTL: verify refresh triggers at correct maturity boundaries
 - Cache expiry: verify full rebuild after max-age expiry
 - JPA entity round-trip: persist and retrieve profiles
 - Async event: verify `BootstrapContributorEvent` fires and completes
+- Deduplication: concurrent events for same login coalesced into single
+  API fetch
 
 ### Edge cases
 
 - Contributor with zero PRs (new account) — profile created with zero counts,
-  no bootstrap seed (α/β both 0 has no effect on prior)
-- Contributor with only merged PRs — β=0, α=N×multiplier
+  no import (α/β both 0 has no effect on prior)
+- Contributor with only merged PRs — β=0, α=N×multiplier, mergeRate=1.0
 - Repo with admin-overridden tier — verify override respected
-- Concurrent bootstrap for same contributor — idempotent (upsert)
+- Concurrent bootstrap for same contributor — dedup prevents duplicate API
+  calls; persistence uses idempotent upsert
+- Identity consistency: bootstrapped actorId matches actorId produced by
+  `PrReviewCaseService.closePr()` for same contributor
 
 ---
 
@@ -455,35 +537,51 @@ target — the data appears inline in the existing contributor view.
 ### In scope
 
 - Cache schema (two JPA entities)
-- Historical bootstrap via GitHub API (merge ratio + revision count)
+- Historical bootstrap via GitHub API (merge ratio)
+- Eager trust import via `TrustImportService` for immediate score availability
+- `TrustBootstrapSource` pull SPI implementation for trust job integration
 - Incremental refresh with adaptive TTL
 - Repo confidence tiers (HIGH/MEDIUM/LOW) with admin override
-- TrustBootstrapSource integration for seeding Bayesian Beta prior
+- Dimension-level bootstrap scores (MERGE_RATE)
 - UI: extend ContributorDetail with GitHub intelligence fields
-- Async bootstrap trigger from PR intake
+- Async bootstrap trigger from PR intake with deduplication
+- Bootstrap event deduplication (concurrent PR requests coalesced)
 
 ### Not in scope (follow-up candidates)
 
+Each deferred item is tracked as a GitHub issue (see issue references below):
+
+- Force-push count / FIRST_ATTEMPT_QUALITY bootstrap — requires per-PR
+  timeline API (`/repos/{owner}/{repo}/issues/{pr}/timeline`), significant
+  API cost (D3 — casehubio/devtown#TBD)
 - Additional signals (CI pass rate, review comment volume, time-to-approval)
-  — CI pass rate is easiest, API already exists (D1)
-- Org-level score fallback when per-repo observations are insufficient (D2)
-- Vouching system (contributor trust proposal §Vouching)
-- Score decay for dormant accounts
-- Cross-deployment trust export/import (P2.1)
-- Bulk pre-seed on deployment
+  — CI pass rate is easiest, API already exists (D1 — casehubio/devtown#TBD)
+- Org-level score fallback when per-repo observations are insufficient
+  (D2 — casehubio/devtown#TBD)
+- Vouching system (contributor trust proposal §Vouching — casehubio/devtown#TBD)
+- Score decay for dormant accounts (casehubio/devtown#TBD)
+- Cross-deployment trust export/import (P2.1 — casehubio/devtown#TBD)
+- Bulk pre-seed on deployment (casehubio/devtown#TBD)
 
 ---
 
 ## References
 
 - [ContributorAttestationPolicy.java](app/src/main/java/io/casehub/devtown/app/trust/ContributorAttestationPolicy.java) — existing attestation mapping
+- [ContributorOutcomeLedgerWriter.java](app/src/main/java/io/casehub/devtown/app/ledger/ContributorOutcomeLedgerWriter.java) — app-tier writer pattern (model for ContributorBootstrapWriter)
+- [PrReviewCaseService.java:194](app/src/main/java/io/casehub/devtown/app/PrReviewCaseService.java) — `"github-id:" + numericId` identity scheme
 - [ContributorIntakePolicy.java](domain/src/main/java/io/casehub/devtown/domain/ContributorIntakePolicy.java) — lane classification logic
 - [ContributorTrustDimension.java](domain/src/main/java/io/casehub/devtown/domain/ContributorTrustDimension.java) — MERGE_RATE, FIRST_ATTEMPT_QUALITY
+- [PrPayload.java](review/src/main/java/io/casehub/devtown/review/PrPayload.java) — `contributor()` (login), `contributorNumericId()` (ID)
+- [GitHubPayloadMapper.java](github/src/main/java/io/casehub/devtown/github/GitHubPayloadMapper.java) — maps webhook to PrPayload
 - [GitHubPullRequestApi.java](github/src/main/java/io/casehub/devtown/github/GitHubPullRequestApi.java) — existing REST client
 - [GitHubChecksApi.java](github/src/main/java/io/casehub/devtown/github/GitHubChecksApi.java) — existing check-runs API (CI pass rate future signal)
-- [GovernanceQueryService.java:144-154](app/src/main/java/io/casehub/devtown/app/governance/GovernanceQueryService.java) — ContributorFleetEntry, ContributorDetail
+- [GovernanceQueryService.java](app/src/main/java/io/casehub/devtown/app/governance/GovernanceQueryService.java) — ContributorFleetEntry, ContributorDetail
 - [2026-05-13-contributor-trust-open-source.md](docs/specs/2026-05-13-contributor-trust-open-source.md) — contributor trust proposal
-- TrustBootstrapSource SPI (casehub-ledger-api) — platform SPI for seeding Beta priors
+- TrustBootstrapSource SPI (casehub-ledger) — pull SPI: `fetchPriorTrust(actorId) → Optional<TrustExportPayload>`
+- TrustImportService (casehub-ledger) — `importTrust(TrustExportPayload)` writes ActorTrustScore records
+- TrustBootstrapService (casehub-ledger) — called by TrustScoreJob to bootstrap new actors
+- JpaTrustImportService (casehub-ledger) — seeds capability, dimension, and capability-dimension scores
 - TrustWeightedImplementationRoutingStrategy (casehub-ledger) — trust-weighted routing
 - [GE-20260530-fcc6c3] — ConcurrentHashMap TTL cache stale-entry gotcha
 - [GE-20260607-3defda] — Per-actor computation cache with event-driven invalidation
