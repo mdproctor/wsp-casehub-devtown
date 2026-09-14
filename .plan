@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-202-github-contributor-conf
-state: active
+state: closing:promoted
 project-sha: 1f1fb5ec70429ba0723289a3aef19e36de2926c0
 date: 2026-09-11
 issue-repo: casehubio/devtown
@@ -11,19 +11,6 @@ design-repo: workspace
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
-- [ ] casehubio/devtown#202 — Issue #202 ← active
-  - [x] Batch 1: Domain Foundation
-    - [x] Task 1: CacheMaturity and RepoConfidenceTier
-    - [x] Task 2: Domain records SPI and BootstrapScoreComputer
-  - [x] Batch 2: GitHub API + Persistence
-    - [x] Task 3: GitHubRepoApi and history adapter
-    - [x] Task 4: JPA entities Flyway and event
-  - [x] Batch 3: Bootstrap Integration
-    - [x] Task 5: ContributorBootstrapWriter and TrustBootstrapSource
-  - [x] Batch 4: PR Intake + UI
-    - [x] Task 6: Bootstrap trigger and GovernanceQueryService
-    - [x] Task 7: Full build verification and docs
-
-## Deferred
-- [ ] QuarkusTest JPA round-trip for contributor profile (XS / Low) [] — Test file committed and ready. Blocked by same upstream MemoryEmitter compilation error. Will pass once full build compiles.
+- [x] casehubio/devtown#202 — Issue #202
