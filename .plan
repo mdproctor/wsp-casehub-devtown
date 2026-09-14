@@ -24,3 +24,6 @@ flyway-next-v: unknown
   - [x] Batch 4: PR Intake + UI
     - [x] Task 6: Bootstrap trigger and GovernanceQueryService
     - [x] Task 7: Full build verification and docs
+
+## Deferred
+- [ ] QuarkusTest JPA round-trip for contributor profile (XS / Low) [] — Test file committed and ready. Blocked by same upstream MemoryEmitter compilation error. Will pass once full build compiles.
