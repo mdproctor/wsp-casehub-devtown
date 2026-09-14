@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-202-github-contributor-conf
-state: scaffolded
+state: active
 project-sha: 1f1fb5ec70429ba0723289a3aef19e36de2926c0
 date: 2026-09-11
 issue-repo: casehubio/devtown
@@ -13,14 +13,14 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/devtown#202 — Issue #202 ← active
-  - [ ] Batch 1: Domain Foundation
-    - [ ] Task 1: CacheMaturity and RepoConfidenceTier
-    - [ ] Task 2: Domain records SPI and BootstrapScoreComputer
-  - [ ] Batch 2: GitHub API + Persistence
-    - [ ] Task 3: GitHubRepoApi and history adapter
-    - [ ] Task 4: JPA entities Flyway and event
-  - [ ] Batch 3: Bootstrap Integration
-    - [ ] Task 5: ContributorBootstrapWriter and TrustBootstrapSource
-  - [ ] Batch 4: PR Intake + UI
-    - [ ] Task 6: Bootstrap trigger and GovernanceQueryService
-    - [ ] Task 7: Full build verification and docs
+  - [x] Batch 1: Domain Foundation
+    - [x] Task 1: CacheMaturity and RepoConfidenceTier
+    - [x] Task 2: Domain records SPI and BootstrapScoreComputer
+  - [x] Batch 2: GitHub API + Persistence
+    - [x] Task 3: GitHubRepoApi and history adapter
+    - [x] Task 4: JPA entities Flyway and event
+  - [x] Batch 3: Bootstrap Integration
+    - [x] Task 5: ContributorBootstrapWriter and TrustBootstrapSource
+  - [x] Batch 4: PR Intake + UI
+    - [x] Task 6: Bootstrap trigger and GovernanceQueryService
+    - [x] Task 7: Full build verification and docs
