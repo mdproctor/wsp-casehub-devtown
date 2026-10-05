@@ -13,3 +13,12 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/devtown#226 — Issue #226 ← active
+  - [ ] Batch 1: Agents
+    - [ ] Task 1: CodeAnalysisAgentStub diff-aware
+    - [ ] Task 2: Reviewer stubs diff-aware
+    - [ ] Task 3: Fix lineRange serialization
+  - [ ] Batch 2: API
+    - [ ] Task 4: Enrich reviewDetail()
+  - [ ] Batch 3: Frontend
+    - [ ] Task 5: Components and timeline strategy
+    - [ ] Task 6: Manual verification
