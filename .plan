@@ -1,0 +1,15 @@
+# Work Plan — issue-226-dashboard-review-detail
+
+## State
+branch: issue-226-dashboard-review-detail
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 226,227,228,229
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/devtown#226 — Issue #226 ← active
