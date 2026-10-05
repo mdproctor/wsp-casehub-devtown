@@ -5,78 +5,61 @@
 
 ## Summary
 
-Enrich the PR review detail view to show routing decisions, AI review findings, and a rich event timeline. Update the dev-mode simulation to produce realistic structured review content so the dashboard has meaningful data to display.
+Enrich the PR review detail view to show routing decisions, AI review findings, and a rich event timeline. Make the existing dev-mode reviewer agents produce diff-aware findings so the dashboard has meaningful data to display during simulation.
 
-## Domain Model
+## Existing Infrastructure (no changes needed)
 
-### ReviewFinding
+The agent review pipeline is already fully wired:
 
-New record in `devtown-domain`:
+- **`ReviewFinding`** (`devtown-domain`) — `Severity` enum (CRITICAL/HIGH/MEDIUM/LOW/INFO), `category`, `filePath`, `LineRange`, `message`, `confidence`
+- **`ReviewerAgent`** interface → `ReviewerOutcome.Completed(List<ReviewFinding>)`
+- **`PrReviewCaseHub.adaptReview()`** — serializes findings into `WorkerResult`, which the engine stores in the EventLog
+- **`DevModePrDiffService`** — generates synthetic diffs from `SyntheticPatches`
+- **`PrDiffCache`** — caches diffs; `ReviewContext` carries the diff to agents
 
-```java
-public record ReviewFinding(
-    String capability,
-    String file,
-    int line,
-    String severity,       // "critical", "warning", "info"
-    String title,
-    String description,
-    double confidence
-) {}
-```
+The engine workers run automatically when `startReview()` is called. The scenario's `approve()` steps signal human review, not agent review — agents execute independently via the engine's worker infrastructure.
 
-Findings are serialized into the case context under `reviewFindings.<capabilityContextKey>` as a JSON array. The existing `CAPABILITY_CONTEXT_KEYS` map in `GovernanceQueryService` provides the mapping (e.g., `security-review` → `securityReview`, so findings land at `reviewFindings.securityReview`).
+## Changes
 
-CasePlanModel bindings can evaluate findings — e.g., a binding condition can check for critical security findings and trigger human oversight.
+### 1. Diff-Aware Dev-Mode Agents (#229)
 
-### RoutingDecision
+The existing stub agents return hardcoded findings regardless of diff content. Make them inspect `ReviewContext.diff()`:
 
-New record in `devtown-domain`:
+**`CodeAnalysisAgentStub`** — currently returns `securitySensitive=false` always. Change to:
+- Scan file paths for security patterns (`auth/*`, `Security*`, `session/*`, `token/*`) → `securitySensitive=true`
+- Detect cross-module changes (files in 3+ different top-level directories) → `architectureCrossing=true`
+- Count total lines changed → `scope` classification (small/medium/large)
+- Return `flaggedFiles` matching security/architecture patterns
+- Return `crossingPoints` (pairs of modules with cross-references)
 
-```java
-public record RoutingDecision(
-    String capability,
-    String reason,
-    double confidence,
-    String bindingName
-) {}
-```
+**`SecurityReviewAgent`** — currently returns one hardcoded finding. Change to:
+- Read `ReviewContext.diff()` and filter for security-relevant files
+- Pattern-match patch content for common security issues (hardcoded credentials, SQL concatenation, missing input validation, session handling)
+- Produce findings with actual file paths and line numbers from patch hunk headers
+- Return empty findings for PRs with no security-relevant files
 
-Routing decisions are written to the case context under `routingDecisions` when bindings fire, capturing WHY each capability was assigned.
+**`ArchitectureReviewAgent`** — currently always declines. Change to:
+- Analyze for module boundary crossings, new module creation, dependency changes
+- Produce findings for large PRs (>500 lines) with separation of concerns analysis
+- Decline only when no architecture-relevant changes detected
 
-## Dev-Mode Agent Analysis (#229)
+**`StyleReviewAgent`** — currently returns one hardcoded finding. Change to:
+- Scan patch content for naming inconsistencies (camelCase vs snake_case, inconsistent prefixes)
+- Check for missing Javadoc on public API additions
+- Produce file-specific findings with actual paths
 
-### DevModeReviewAnalyzer
+**`TestCoverageReviewAgent`** and **`PerformanceAnalysisAgent`** — same pattern: inspect the diff, produce findings relevant to the PR content.
 
-New `@ApplicationScoped` service in `app/` that takes a `PrDiff` and a capability name, pattern-matches against file paths and patch content, and returns `List<ReviewFinding>`.
+Each agent's `handle()` method follows the same structure:
+1. Get diff from `context.diff()`
+2. Filter `diff.files()` for capability-relevant paths
+3. Scan patch content for patterns
+4. Build `ReviewFinding` list with actual file paths, line numbers from hunk headers, descriptive messages
+5. Return `Completed(findings)` or `Declined` if no relevant files
 
-Analysis rules per capability:
+### 2. Enriched ReviewDetail API (#226/#228)
 
-| Capability | Trigger patterns | Finding types |
-|-----------|-----------------|---------------|
-| `security-review` | `auth/*`, `Security*`, `RBAC*`, `session/*`, `token/*` | Credential exposure, session fixation, input validation |
-| `code-analysis` | Cross-module imports, methods >50 lines, deep nesting | Coupling warnings, complexity findings, dead code |
-| `style-review` | Inconsistent naming, missing Javadoc on public API | Naming convention violations, formatting issues |
-| `architecture-review` | Module boundary crossings, new module creation, `pom.xml` changes | Separation of concerns, dependency direction violations |
-| `test-coverage` | Source files without corresponding test files | Missing test coverage |
-| `performance-analysis` | N+1 query patterns, unbounded collections, missing pagination | Performance hotspots |
-
-The analyzer inspects `PrDiff.FileDiff` entries — file paths for capability matching, patch content for specific finding patterns. Each finding includes file path, line number (from patch hunk headers), severity, and a descriptive explanation.
-
-### Scenario Integration
-
-The scenario's review completion steps (cases 4-7 in `ScenarioResource.executeStep`) change from simple `signalReviewSubmitted("approved")` to:
-
-1. Fetch the PR's diff via `DevModePrDiffService`
-2. Run `DevModeReviewAnalyzer` for the relevant capability
-3. Write findings to the case context via `caseHub.signal(caseId, "reviewFindings.<key>", findings)`
-4. Signal review completion with findings summary in the outcome
-
-This ensures every scenario run produces realistic, varied findings that the dashboard can display.
-
-## Enriched ReviewDetail API (#226/#228)
-
-### Expanded Records
+**Expanded records in `GovernanceQueryService`:**
 
 ```java
 public record ReviewDetail(
@@ -85,7 +68,7 @@ public record ReviewDetail(
     List<TimelineEvent> timeline,
     List<CapabilityStatus> capabilities,
     RoutingSummary routing,
-    Map<String, List<ReviewFinding>> findings
+    Map<String, List<FindingEntry>> findings
 ) {}
 
 public record RoutingSummary(
@@ -93,139 +76,121 @@ public record RoutingSummary(
     Map<String, Object> featureVector
 ) {}
 
+public record RoutingDecision(
+    String capability,
+    String reason,
+    double confidence,
+    String bindingName
+) {}
+
 public record TimelineEvent(
     Instant timestamp,
-    String category,     // "lifecycle", "binding", "agent", "workitem", "trust", "ci"
+    String category,
     String eventType,
     String actor,
     String summary,
     Map<String, Object> metadata
 ) {}
+
+public record FindingEntry(
+    String severity,
+    String category,
+    String filePath,
+    String message,
+    double confidence,
+    Integer startLine,
+    Integer endLine
+) {}
 ```
 
-### Query Changes
+**`reviewDetail()` query changes:**
 
-`GovernanceQueryService.reviewDetail()` expands to query:
+1. **All EventLog event types** — expand from lifecycle-only to include `BINDING_EVALUATED`, `WORK_SUBMITTED`, `WORKER_EXECUTION_COMPLETED`, `WORKER_EXECUTION_FAILED`, `WORKER_OUTCOME_DECLINED`, `CONTEXT_UPDATED`, `GOAL_SATISFIED`
+2. **Worker outputs → findings** — extract `WorkerResult` from `WORKER_EXECUTION_COMPLETED` events, read the `findings` list from the output map
+3. **Binding evaluations → routing decisions** — extract binding name, capability, condition match reason from `BINDING_EVALUATED` events
+4. **Code analysis output → feature vector** — extract `securitySensitive`, `architectureCrossing`, `scope`, `flaggedFiles` from the code-analysis worker's output
+5. **Human-readable summaries** — map each event type to descriptive text (e.g., "Security review completed — 3 findings (1 high, 2 medium)" instead of raw `WORKER_EXECUTION_COMPLETED`)
+6. **Category classification** — tag events as `lifecycle`, `binding`, `agent`, `workitem`, `trust`, or `ci`
 
-1. **All EventLog event types** — not just lifecycle. Includes `BINDING_EVALUATED`, `WORK_SUBMITTED`, `WORKER_EXECUTION_COMPLETED`, `WORKER_EXECUTION_FAILED`, `WORKER_OUTCOME_DECLINED`, `CONTEXT_UPDATED`, `GOAL_SATISFIED`.
-2. **WorkItem state transitions** — query `WorkItemStore` for work items associated with the case, map status transitions to timeline events.
-3. **Case context** — read `routingDecisions` for the routing summary, `reviewFindings.*` for each capability's findings.
-4. **Human-readable summaries** — each `TimelineEvent` gets a descriptive summary based on its type and metadata (e.g., "Security review binding fired — auth paths detected in 4 files" instead of raw `BINDING_EVALUATED`).
-5. **Category classification** — each event is tagged with a category for timeline filtering.
+### 3. Frontend Decomposition (#226/#227/#228)
 
-### REST Endpoint
-
-The existing `/api/devtown/governance/review-detail/{caseId}` endpoint returns the expanded `ReviewDetail`. No new endpoints needed — the existing structure just carries more data.
-
-## Frontend Decomposition (#226/#227/#228)
-
-### Component Architecture
+**Component architecture:**
 
 ```
 review-workbench (orchestrator)
-├── blocks-split-workbench (layout primitive)
+├── blocks-split-workbench (layout — selection-topic="review")
 │   ├── slot="list" → devtown-review-list
 │   └── slot="detail" → devtown-review-detail
+│       ├── PR header + metadata (inline)
 │       ├── devtown-routing-summary
 │       ├── devtown-findings-panel
-│       └── blocks-timeline (with review strategy)
+│       ├── blocks-timeline (with reviewTimelineStrategy)
+│       └── Action buttons (inline)
 ```
 
-### devtown-review-list
+**devtown-review-list** — Extracted from current review-workbench. Renders PR table, emits `review:selected`/`review:deselected` via pages event bus.
 
-Extracted from the current review-workbench list panel. A focused component that:
-- Fetches `/api/devtown/governance/queue-status`
-- Renders the PR table with pages-table
-- Emits `review:selected` with `{ caseId }` when a row is activated
-- Emits `review:deselected` when selection is cleared
+**devtown-review-detail** — Receives `caseId`, fetches enriched `/api/devtown/governance/review-detail/{caseId}`, distributes data:
+- PR header + metadata: inline rendering
+- `.routing` → `<devtown-routing-summary>`
+- `.findings` → `<devtown-findings-panel>`
+- `.timeline` → `<blocks-timeline .strategy=${reviewTimelineStrategy}>`
 
-### devtown-review-detail
+**devtown-routing-summary** — Receives `RoutingSummary`. Renders:
+- Capability badges with confidence indicators (color-coded by threshold)
+- Binding name that triggered assignment
+- Reason text from code analysis
+- Collapsible feature vector (security-sensitive, architecture-crossing, scope, flagged files)
 
-Receives `caseId` prop (set by review-workbench on selection). Fetches the enriched `reviewDetail()` and distributes data to sub-components:
-- PR header and metadata (inline)
-- `<devtown-routing-summary .routing=${detail.routing}>`
-- `<devtown-findings-panel .findings=${detail.findings}>`
-- `<blocks-timeline .strategy=${reviewTimelineStrategy} .data=${detail.timeline}>`
-- Action buttons (approve, request changes, enqueue) — inline
+**devtown-findings-panel** — Receives `Map<string, FindingEntry[]>`. Renders:
+- Grouped by capability, each group collapsible with count badge
+- Each finding: severity badge (CRITICAL=red, HIGH=orange, MEDIUM=amber, LOW=blue, INFO=gray), file:line, message, confidence bar
+- Sorted by severity within each group
 
-### devtown-routing-summary
-
-Renders the routing decisions:
-- Each assigned capability as a badge with confidence indicator
-- Binding name that triggered the assignment
-- Reason text (e.g., "auth paths detected: src/auth/*, src/config/Security*")
-- Feature vector summary — collapsible section showing the code analysis results
-
-### devtown-findings-panel
-
-Renders AI review findings:
-- Grouped by capability, each group collapsible
-- Count badge per group (e.g., "Security Review (3)")
-- Each finding: severity badge (critical=red, warning=amber, info=blue), title, file:line reference, description, confidence bar
-- Findings sorted by severity within each group
-
-### Review Timeline Strategy
-
-A `TimelineStrategy` implementation for `blocks-timeline`:
-
-```typescript
-const reviewTimelineStrategy: TimelineStrategy = {
-  defaultLayout: 'vertical',
-  filterCategories: ['lifecycle', 'binding', 'agent', 'workitem', 'trust', 'ci'],
-  toNodes: (events: TimelineEvent[]) => events.map(e => ({
-    key: `${e.timestamp}-${e.eventType}`,
-    timestamp: e.timestamp,
-    category: e.category,
-    label: e.summary,
-    icon: categoryIcon(e.category),
-    metadata: e.metadata,
-  })),
-  renderNode: (node) => html`...`,  // category-specific rendering
-};
-```
-
-Filter categories map to visual treatments:
-- **lifecycle** — case started, completed, failed (neutral)
-- **binding** — binding evaluated, fired (blue/accent)
-- **agent** — agent dispatched, completed, declined (green/amber/red)
-- **workitem** — work item created, claimed, completed (purple)
-- **trust** — trust score updated (teal)
-- **ci** — CI status change (gray)
+**reviewTimelineStrategy** — `TimelineStrategy` for `blocks-timeline`:
+- `filterCategories`: lifecycle, binding, agent, workitem, trust, ci
+- `toNodes()`: maps `TimelineEvent` → `TimelineNode` with category-specific icons
+- `renderNode()`: category-specific rendering with actor and summary
 
 ## Data Flow
 
 ```
-Scenario step
-  → DevModeReviewAnalyzer.analyze(diff, capability)
-  → caseHub.signal(caseId, "reviewFindings.<key>", findings)
-  → Engine writes to case context → EventLog records context update
-  → WebSocket broadcasts context.update
+startReview(prPayload)
+  → Engine starts case
+  → code-analysis worker runs → CodeAnalysisAgentStub analyses diff → routing bindings evaluate
+  → review workers fire per binding → SecurityReviewAgent / StyleReviewAgent / etc. analyse diff
+  → WorkerResult(findings) written to EventLog
+  → GovernanceEventBridge broadcasts events via WebSocket
 
-Page load / refresh:
-  review-workbench → review:selected event
-  → devtown-review-detail fetches /api/devtown/governance/review-detail/{caseId}
-  → GovernanceQueryService.reviewDetail() queries:
-     - EventLog (all event types) → timeline
-     - Case context (routingDecisions) → routing summary
-     - Case context (reviewFindings.*) → findings
-  → Data distributed to sub-components
+reviewDetail(caseId) query:
+  EventLog → all event types → TimelineEvent list
+  WORKER_EXECUTION_COMPLETED metadata → FindingEntry maps
+  BINDING_EVALUATED metadata → RoutingDecision list
+  code-analysis output → feature vector
+
+Frontend:
+  review:selected → devtown-review-detail fetches reviewDetail(caseId)
+  → routing-summary renders routing decisions
+  → findings-panel renders grouped findings
+  → blocks-timeline renders rich event timeline with filters
 ```
 
 ## Testing
 
-- `DevModeReviewAnalyzerTest` — unit tests: each capability produces expected findings for known synthetic diffs. Security PR → security findings, simple rename → no security findings.
-- `GovernanceQueryServiceTest` — verify enriched `reviewDetail()` returns routing decisions, findings, and rich timeline events.
-- `ScenarioResource` integration — run full scenario, verify findings appear in case context and are queryable via the review detail API.
-- Frontend: manual verification via `quarkus:dev` — run scenario, check review detail pane shows routing summary, findings panel, and rich timeline.
+- **Agent tests** — unit test each dev-mode agent: security PR diff → security findings, simple rename diff → no security findings, architecture PR → architecture findings
+- **GovernanceQueryServiceTest** — verify enriched `reviewDetail()` extracts routing decisions, findings, and rich timeline from EventLog
+- **Integration** — run full scenario via `ScenarioResource`, verify findings appear in review detail API response
+- **Frontend** — manual via `quarkus:dev`: run scenario, verify routing summary, findings panel, and rich timeline render correctly
 
 ## References
 
-- `GovernanceQueryService.java` — existing reviewDetail() to extend
-- `DevModePrDiffService.java` — synthetic diff generator (input to review analysis)
-- `ScenarioResource.java` — scenario steps to enhance with findings
-- `GovernanceEventBridge.java` — WebSocket bridge already broadcasting rich events
+- `ReviewFinding.java` (devtown-domain:1) — existing domain type
+- `ReviewerAgent.java` / `ReviewerOutcome.java` (review) — existing agent pipeline
+- `PrReviewCaseHub.java:94-119` — existing worker→finding serialization
+- `SecurityReviewAgent.java`, `ArchitectureReviewAgent.java`, `StyleReviewAgent.java` — stubs to make diff-aware
+- `CodeAnalysisAgentStub.java` — stub to make diff-aware
+- `GovernanceQueryService.java:318-368` — existing reviewDetail() to extend
+- `DevModePrDiffService.java` — synthetic diff generator
 - `blocks-split-workbench` — layout composition primitive
 - `blocks-timeline` — strategy-driven timeline component
 - `orchestration-workbench` — composition pattern example
-- `review-workbench.ts` — current component to decompose
-- `operations-workbench.ts` — parallel pattern for operations view (also benefits from enriched events)
