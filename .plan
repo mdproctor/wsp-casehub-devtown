@@ -1,0 +1,25 @@
+# Work Plan — issue-226-dashboard-review-detail
+
+## State
+branch: issue-226-dashboard-review-detail
+state: closing:promoted
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 226,227,228,229
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+evidence-era: true
+## Queue
+- [ ] casehubio/devtown#226 — Issue #226 ← active
+  - [x] Batch 1: Agents
+    - [x] Task 1: CodeAnalysisAgentStub diff-aware
+    - [x] Task 2: Reviewer stubs diff-aware
+    - [x] Task 3: Fix lineRange serialization
+  - [x] Batch 2: API
+    - [x] Task 4: Enrich reviewDetail()
+  - [x] Batch 3: Frontend
+    - [x] Task 5: Components and timeline strategy
+    - [x] Task 6: Manual verification
