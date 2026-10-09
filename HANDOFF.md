@@ -94,7 +94,7 @@ method but may not have a REST endpoint. Check and add one if missing
    - Replace `queueView` with `hostPanel("merge-queue-workbench", ...)`
    - Test: click queued PR → detail with actions; click batch → batch detail
 
-## What Was Done This Session
+## What Was Done — Session 1
 
 - Surveyed all 8 dashboard tabs and classified as working/functional/stub
 - Read all view files, component files, datasets.ts, and GovernanceQueryService.java
@@ -103,9 +103,20 @@ method but may not have a REST endpoint. Check and add one if missing
 - Branch created on canonical devtown (then deleted — slot not yet created)
 - Slot 212 created with feature branch `issue-221-merge-queue-contributor-workbenches`
 
+## What Was Done — Session 2
+
+- Created `components/contributor-workbench.ts` — split panel with fleet table + blocks-contributor-workbench detail
+- Created `components/merge-queue-workbench.ts` — split panel with vitals bar, queued PRs table, active batches table
+- Created `components/merge-queue-detail.ts` — detail panel for selected PR (with dequeue/signal-ci-pass actions) or batch
+- Updated `index.ts` — registered new panels, replaced tab entries for Merge Queue and Contributors
+- Removed imports of old declarative views (`queueView`, `contributorsView`) from index.ts
+- Verified: esbuild bundles without errors, `tsc --noEmit` passes (zero type errors)
+- Commit: `5b9ce2e` — wip: add contributor and merge queue workbench components
+
 ## What Was NOT Done
 
-- No code written
-- No REST endpoint added
-- No tests written
-- Build not verified (`mvn clean install` not run in slot)
+- Old view files (`views/queue.ts`, `views/contributors.ts`) still on disk as dead code — not deleted
+- No REST endpoint added for batch status (existing GraphQL query in GovernanceQueryResolver suffices for now — batch detail panel shows data from the list fetch)
+- Full Maven build with tests not run (Java tests unrelated to frontend changes)
+- UI not visually tested in browser (`quarkus:dev` not started)
+- No frontend tests written
