@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-221-merge-queue-contributor-workbenches
-state: closing:verified
+state: closing:promoted
 project-sha: slot-creation
 date: 2026-10-09
 issue-repo: casehubio/devtown
