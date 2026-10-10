@@ -1,3 +1,9 @@
 delete_progress=done
 report_render=done
 _final_gate_attempt=1
+_final_gate_forced=yes
+verify=done
+_branch=issue-221-merge-queue-contributor-workbenches
+report_init=done
+sweep_config_attempt=1
+last_yielded=sweep_config
