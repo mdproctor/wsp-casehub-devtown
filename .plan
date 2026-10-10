@@ -1,0 +1,16 @@
+# Work Plan — issue-221-merge-queue-contributor-workbenches
+
+## State
+branch: issue-221-merge-queue-contributor-workbenches
+state: scaffolded
+project-sha: slot-creation
+date: 2026-10-09
+issue-repo: casehubio/devtown
+covers: 221
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [x] casehubio/devtown#221 — Issue #221
+- [ ] casehubio/devtown#231 — Unify_detail_panels_with_shared_composable_components ← active
