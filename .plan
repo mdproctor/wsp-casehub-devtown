@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-221-merge-queue-contributor-workbenches
-state: active
+state: closing:review
 project-sha: slot-creation
 date: 2026-10-09
 issue-repo: casehubio/devtown
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 - [x] casehubio/devtown#221 — Issue #221
 - [ ] casehubio/devtown#231 — Unify_detail_panels_with_shared_composable_components ← active
