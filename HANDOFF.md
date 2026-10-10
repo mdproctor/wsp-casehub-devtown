@@ -149,6 +149,35 @@ Also: add review history cards to Merge Queue PR detail — show what agents fou
 
 See devtown#231 for full plan.
 
+## Mock Server — What It Is and What Needs to Happen
+
+### What it is
+`app/src/main/webui/mock-server.mjs` is a lightweight Node HTTP server that serves the real frontend bundle alongside canned JSON API responses from `mock-fixtures.json`. The frontend code is real — the same Lit components that run against Quarkus. Only the data source is fake.
+
+Run with `npm run dev:mock` from `app/src/main/webui/`. No Java, no Quarkus, no database.
+
+### Why it matters
+The fixture data tells a coherent story: alice is a trusted fast-track contributor, carol is risky with enhanced review, agent-sec-01 has a high false-positive rate, a batch is bisecting with PR #97 as the suspect. This data is what makes the UI evaluable — without it, every tab shows empty or "No data". **Do not delete the fixtures.** They are the reference dataset for UI development.
+
+### Path to real backend with the same views
+
+The UI currently works against hand-crafted fixture JSON. To get the same views from the real Quarkus backend, these gaps need closing:
+
+| What the UI expects | Backend status | What needs to happen |
+|---------------------|---------------|---------------------|
+| `ActiveBatchEntry.ciStatus` | Defaults to `"RUNNING"` | Wire real CI status from merge batch case context |
+| `ActiveBatchEntry.suspectedPr` | Always `null` | Implement bisection tracking in `MergeBatchCaseHub` |
+| `ReviewerHealth.recentOutcomes[].pr` | Not returned | Enrich outcomes with PR context in `GovernanceQueryService.reviewerHealth()` by cross-referencing caseId → PrReviewCaseTracker |
+| `ReviewerHealth.recentOutcomes[].findingSummary` | Not returned | Extract finding summaries from worker output events in the event log |
+| `ReviewerHealth.recentOutcomes[].feedbackOutcome` | Not returned | Track whether findings were accepted/rejected — needs a feedback signal (not yet designed) |
+| Contributor detail `recentOutcomes` | Returned but basic | Already works with real data — no change needed |
+
+### Seeded dev-mode data
+
+For Quarkus dev mode to show populated dashboards (not just empty tables), devtown needs a dev-mode data seeder — a `@Startup` observer that creates synthetic cases, batches, trust scores, and review outcomes in the in-memory stores. This doesn't exist yet. Until then, the mock server is the only way to see populated views.
+
+**Recommendation:** Build a `DevModeDataSeeder` that populates the same data as `mock-fixtures.json` into the real services at startup. Then `quarkus:dev` shows the same dashboard as `npm run dev:mock`, but through the real code path.
+
 ## What Was NOT Done
 
 - Full Maven build with tests not run (Java tests unrelated to frontend changes)
