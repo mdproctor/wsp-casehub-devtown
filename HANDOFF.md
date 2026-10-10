@@ -103,20 +103,56 @@ method but may not have a REST endpoint. Check and add one if missing
 - Branch created on canonical devtown (then deleted — slot not yet created)
 - Slot 212 created with feature branch `issue-221-merge-queue-contributor-workbenches`
 
-## What Was Done — Session 2
+## What Was Done — Session 2 (12 commits)
 
-- Created `components/contributor-workbench.ts` — split panel with fleet table + blocks-contributor-workbench detail
-- Created `components/merge-queue-workbench.ts` — split panel with vitals bar, queued PRs table, active batches table
-- Created `components/merge-queue-detail.ts` — detail panel for selected PR (with dequeue/signal-ci-pass actions) or batch
-- Updated `index.ts` — registered new panels, replaced tab entries for Merge Queue and Contributors
-- Removed imports of old declarative views (`queueView`, `contributorsView`) from index.ts
-- Verified: esbuild bundles without errors, `tsc --noEmit` passes (zero type errors)
-- Commit: `5b9ce2e` — wip: add contributor and merge queue workbench components
+### New components
+- `components/contributor-workbench.ts` — split panel with fleet table + contributor-detail
+- `components/contributor-detail.ts` — narrative panel: summary, lane position with proximity card, quality dimensions, trend assessment
+- `components/merge-queue-workbench.ts` — split panel with vitals bar (6 metrics), queued PRs table, active batches table (PRs/CI/Risk columns)
+- `components/merge-queue-detail.ts` — PR detail with trust narrative explaining lane assignment, trust bar with threshold markers, contributor history, recent outcomes, dependencies, actions (dequeue/signal-ci-pass). Batch detail with bisection narrative and suspected PR
+- `components/reviewer-detail.ts` — narrative panel: capability trust bars, quality dimensions, status card, review history cards with PR context, findings, and feedback badges (accepted/rejected/partial)
+
+### Updated components
+- `reviewer-workbench.ts` — replaced blocks-trust-workbench with reviewer-detail, passes maturity phase
+- `index.ts` — registered new panels, replaced tab entries for Merge Queue and Contributors
+
+### Backend
+- `GovernanceQueryService.ActiveBatchEntry` — added ciStatus, prNumbers, startedAt, suspectedPr fields (wired from BatchRecord)
+
+### Dev tooling
+- `mock-server.mjs` — Node mock server serving fixtures + static files
+- `mock-fixtures.json` — seeded data for all dashboard endpoints (reviews, merge queue, contributors, reviewers, triage, SLA, sessions, definitions, per-reviewer detail with review history)
+- `npm run dev:mock` — builds frontend then starts mock server on :8280
+
+### Cleanup
+- Deleted dead view files (`views/queue.ts`, `views/contributors.ts`)
+
+### Key design decisions
+- Detail panels use **narrative text** to explain trust scores, not just display numbers — e.g. "alice has submitted 34 PRs — 32 merged, 2 closed. Trust score 88% exceeds fast-track threshold"
+- **Proximity cards** show actionable context: "8 points above threshold, a few rejected PRs could demote"
+- Reviewer history shows **findings and feedback** — connecting trust dimensions to observable evidence
+- Replaced all three blocks-ui detail components (blocks-contributor-workbench, blocks-trust-workbench, blocks-split-workbench kept) with custom components that render contextual narratives
+
+## What Comes Next — #231
+
+**Unify Merge Queue and Reviewers detail panels with shared composable components.**
+
+The three detail panels (merge-queue-detail, contributor-detail, reviewer-detail) share duplicated patterns:
+- Trust bar with thresholds
+- Status/proximity cards
+- Quality dimensions grid
+- Review history cards
+
+Extract 4 shared components and rewire the detail panels as thin compositions. The difference between Merge Queue (PR-centric) and Reviewers (agent-centric) should be which perspective the shared components render from, not different UI structures.
+
+Also: add review history cards to Merge Queue PR detail — show what agents found on this PR, not just the contributor's trust profile.
+
+See devtown#231 for full plan.
 
 ## What Was NOT Done
 
-- Old view files (`views/queue.ts`, `views/contributors.ts`) still on disk as dead code — not deleted
-- No REST endpoint added for batch status (existing GraphQL query in GovernanceQueryResolver suffices for now — batch detail panel shows data from the list fetch)
 - Full Maven build with tests not run (Java tests unrelated to frontend changes)
-- UI not visually tested in browser (`quarkus:dev` not started)
+- Quarkus dev mode not successfully started (port conflict with hortora engine + IntelliJ heap pressure)
 - No frontend tests written
+- Mock data shapes for ActiveBatchEntry have fields (ciStatus, suspectedPr) that default to RUNNING/null in the real backend — bisection status tracking needs real implementation
+- Reviewer history enrichment (`pr`, `findingCount`, `findingSummary`, `feedbackOutcome` on outcomes) needs backend support in `GovernanceQueryService.reviewerHealth()`
