@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-231-unify-detail-panel-composables
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -11,5 +11,6 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#231 — Issue #231 ← active
