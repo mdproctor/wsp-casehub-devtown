@@ -52,3 +52,4 @@ squash_attempt=1
 squash=done
 squash_produced=1
 report_squash=done
+land:devtown_mechanical_attempt=1
