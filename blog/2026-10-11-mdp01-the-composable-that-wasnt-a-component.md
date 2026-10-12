@@ -5,7 +5,7 @@ date: 2026-10-11
 entry_type: note
 subtype: diary
 projects: [casehubio/devtown]
-tags: [frontend, lit, composition, refactoring]
+tags: [frontend, lit, composition, refactoring, workbench-unification]
 ---
 
 # The Composable That Wasn't a Component
@@ -24,4 +24,14 @@ The merge-queue detail also gained something new: review activity cards showing 
 
 One thing the code review caught: when I unified the `_fillClass` helper across panels, the reviewer-detail's original version used three tiers (high/mid/low) while the shared `trustFillClass` uses four (adding `very-low` for scores below 0.40). The panel-specific capability bar CSS didn't have a `.cap-fill.very-low` variant. Scores below 0.40 are rare for agent capabilities, but the missing class would have rendered an invisible bar — the kind of visual bug you only notice when the data finally hits that range.
 
-The net result: 327 lines removed from three files, 286 lines added across eight new shared files. Each rendering pattern exists exactly once now. The three panels are shorter and the duplication is gone, but the real payoff is that the next detail panel — whatever it turns out to be — can import `renderTrustBar` and `renderStatusCard` instead of copying them a fourth time.
+The net result: 327 lines removed from three files, 286 lines added across eight new shared files. Each rendering pattern exists exactly once now.
+
+But the composable extraction was just the opening move. Once the detail panels shared the same visual language, a bigger question surfaced: why are Reviews, Merge Queue, and Triage separate tabs at all?
+
+A PR in the Reviews tab is being actively reviewed. The same PR in the Merge Queue tab has passed review and is queued for merge. The Triage tab shows PRs that need a human decision — a subset of active reviews. Three tabs, one entity, different lifecycle stages. The detail panels are now identical. The only things that differ are the action buttons (approve vs dequeue) and some queue-specific context (wait time, batch membership, dependencies).
+
+We extended the shared composables to the fourth detail panel — `review-detail` — and added the same trust context, routing decisions, capability checks, and findings that merge-queue-detail already showed. Then we went the other direction: enriched merge-queue-detail with routing decisions, the findings panel, and the event timeline that had been review-only. Both panels now show everything. Same PR, same depth, different lifecycle buttons.
+
+The routing summary's "Show code analysis" section was dumping a raw Java `toString()` string — `{securitySensitive=true, scope=multi-module, flaggedFiles=[auth/TokenHandler.java]}`. A small parser turns it into a key-value table. The Workers tab was empty because the mock fixtures used `sessionId`/`agentId` fields while the `blocks-session-list` component expects `id`/`name`/`workingDir` — a field-name mismatch, not a missing feature.
+
+The realisation that three tabs are the same view led to a design for a unified PR Cases workbench (#233) — one split-pane with filter chips replacing three separate tabs. The work queue model from blocks-ui already handles the triage filtering. Batches fold in as secondary context under the "Queued" filter rather than a competing list. The composable foundation we built makes this possible — the detail panel is already unified, so the workbench unification is about the list, vitals, and filter state.
