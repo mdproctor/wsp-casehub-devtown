@@ -1,16 +1,15 @@
-# Work Plan — issue-231-unify-detail-panel-composables
+# Work Plan — issue-233-unify-pr-cases-workbench
 
 ## State
-branch: issue-231-review-detail-composables
-state: drained
+branch: issue-233-unify-pr-cases-workbench
+state: scaffolded
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
-covers: 231
+covers: 233
 design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
-evidence-era: true
 
 ## Queue
-- [ ] casehubio/devtown#231 — Issue #231 ← active
+- [ ] casehubio/devtown#233 — Issue #233 ← active
