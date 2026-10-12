@@ -1,0 +1,24 @@
+# Work Plan — issue-233-unify-pr-cases-workbench
+
+## State
+branch: issue-233-unify-pr-cases-workbench
+state: active
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 233
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+evidence-era: true
+## Queue
+- [ ] casehubio/devtown#233 — Issue #233 ← active
+  - [x] Batch 1: Shared infra
+    - [x] Task 1: Work-item alert and vitals composables
+  - [x] Batch 2: Unified workbench
+    - [x] Task 2: PR cases workbench with data merge
+  - [x] Batch 3: Unified detail
+    - [x] Task 3: PR detail with lifecycle actions
+  - [x] Batch 4: Wiring and cleanup
+    - [x] Task 4: Rewire index and delete old components
