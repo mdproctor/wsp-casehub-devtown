@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-233-unify-pr-cases-workbench
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#233 — Issue #233 ← active
   - [x] Batch 1: Shared infra
