@@ -13,11 +13,11 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/devtown#233 — Issue #233 ← active
-  - [ ] Batch 1: Shared infra
-    - [ ] Task 1: Work-item alert and vitals composables
-  - [ ] Batch 2: Unified workbench
-    - [ ] Task 2: PR cases workbench with data merge
-  - [ ] Batch 3: Unified detail
-    - [ ] Task 3: PR detail with lifecycle actions
-  - [ ] Batch 4: Wiring and cleanup
-    - [ ] Task 4: Rewire index and delete old components
+  - [x] Batch 1: Shared infra
+    - [x] Task 1: Work-item alert and vitals composables
+  - [x] Batch 2: Unified workbench
+    - [x] Task 2: PR cases workbench with data merge
+  - [x] Batch 3: Unified detail
+    - [x] Task 3: PR detail with lifecycle actions
+  - [x] Batch 4: Wiring and cleanup
+    - [x] Task 4: Rewire index and delete old components
