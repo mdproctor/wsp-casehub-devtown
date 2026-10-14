@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-237-test-adaptation-defaultbean-migrations
-state: scaffolded
+state: active
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -13,3 +13,7 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/devtown#237 — Issue #237 ← active
+- [ ] casehubio/devtown#238 — DevtownRestSecurityTest 10 tests still 404
+- [ ] casehubio/devtown#239 — REST tests return 403 after McpDomain changes
+- [ ] casehubio/devtown#240 — Ledger test failures after ledger 221
+- [ ] casehubio/devtown#241 — PrReviewQhorusLifecycleTest enforcement NPE
