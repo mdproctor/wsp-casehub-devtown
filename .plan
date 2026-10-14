@@ -12,8 +12,9 @@ design-section-hashes:
 flyway-next-v: 
 
 ## Queue
-- [ ] casehubio/devtown#237 — Issue #237 ← active
-- [ ] casehubio/devtown#238 — DevtownRestSecurityTest 10 tests still 404
-- [ ] casehubio/devtown#239 — REST tests return 403 after McpDomain changes
-- [ ] casehubio/devtown#240 — Ledger test failures after ledger 221
-- [ ] casehubio/devtown#241 — PrReviewQhorusLifecycleTest enforcement NPE
+- [x] casehubio/devtown#237 — Issue #237
+- [x] casehubio/devtown#238 — DevtownRestSecurityTest 10 tests still 404
+- [x] casehubio/devtown#239 — REST tests return 403 after McpDomain changes
+- [x] casehubio/devtown#240 — Ledger test failures after ledger 221
+- [x] casehubio/devtown#241 — PrReviewQhorusLifecycleTest enforcement NPE
+- [ ] casehubio/devtown#242 — TrustFeedbackClosedLoopTest FLAGGED attestation score unchanged ← active
