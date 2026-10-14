@@ -1,63 +1,65 @@
-# Handoff — devtown slot 208
+# Handoff — Epic #237: test adaptation after upstream migrations
 
-**Date:** 2026-10-05
-**Branch:** `main` (wip/demo-readiness merged as `eb2145d`)
-**Last commit:** `06e6c71` merge commit on main
+**Date:** 2026-10-14
+**Branch:** `issue-237-test-adaptation-defaultbean-migrations`
+**Last commit:** `e495980` fix: fix in-memory/JPA data split in ledger tests
+**Baseline:** 46 failing tests (36F + 10E) → **13 remaining** (11F + 2E)
 
 ## What happened this session
 
-### Issues closed: #209, #211, #214, #215
+### Issues completed: #238, #239 (fully), #240 (partial)
 
-**#209 — GitHub approvals advance the case:**
-- `signalReviewSubmitted("approved")` now records approval in case context and completes matching human-decision WorkItems via `WorkItemOperations`
-- Dev-mode approve button uses the same code path
+**#238 + #239 — REST security after @McpDomain migration (24 tests fixed):**
+- Root cause: `deny-unannotated-endpoints=true` in test config + `@McpDomain` generated REST resources had no security annotations
+- Fix: Added method-level `@RolesAllowed` to all `@McpDomain` API classes (`DevtownGovernanceApi`, `DevtownReviewApi`, `DevtownComplianceApi`, `DevtownTrustApi`) — the annotation processor propagates these to generated JAX-RS resources
+- Security model: governance/trust queries → all authenticated roles; submitReview → ENGINEER/ADMIN/SERVICE; recordFeedback → ADMIN; erasure → DATA_CONTROLLER/ADMIN; eraseContributor → ADMIN
+- Updated test URLs: webhook `/api/github/webhook` → `/api/github/receive`; erasure `/api/actors/{id}/erasure` → `/api/devtown/compliance/erasure/{id}`; incident feedback `/api/incident-feedback` → `/api/devtown/reviews/feedback`
+- Switched erasure/memory-erase tests from JSON body to `queryParam()` (generated resources map simple params as `@QueryParam`)
+- Added `@TestSecurity` to `GovernancePreferencesResourceTest` and `TrustEndpointTest`
+- Added GDPR erasure logging to `DevtownComplianceApi.eraseContributor` (migrated from deleted `MemoryAdminResource`)
 
-**#211 — WorkItem completion API:**
-- Triage claim/decide REST endpoints added to `DevtownGovernanceApi`
-- `triageItems()` includes PENDING, ASSIGNED, and typeless judgment WorkItems
+**#240 — Ledger test failures (9 tests fixed, 7 remaining):**
+- Root cause 1: `IncidentFeedbackService.resolveMergeDecision()` used `EntityManager` named query (queries H2) while `InMemoryLedgerEntryRepository` stores data in memory
+- Fix: Replaced `EntityManager` query with `ledgerRepo.findByTimeRange()` + type filter scan; injected `CurrentPrincipal` for tenancy
+- `InMemoryLedgerEntryRepository`: implemented stub methods (findAttestationsByEntryId, findAttestationsByAttestorIdAndCapabilityTag, findAttestationsByEntryIdGlobal, findByActorId, findByTimeRange); auto-assign UUIDs on save/saveAttestation
+- `MergeDecisionObserverTest`: replaced `EntityManager.createQuery()` with `ledgerRepo.findBySubjectId()` + filter
+- CDI fix: excluded `LegacyTrustGateShim` — `LedgerCoreProducer` now provides `TrustGateService`; the shim's `@DefaultBean` didn't yield because CDI compares declared return types, not bean type hierarchy
 
-**#214 — Dev-mode action buttons:**
-- claim-workitem and decide-workitem action endpoints on `DevModeStubResource`
-- Approve button now produces visible state changes
-
-**#215 — Simulation script + scenario controller:**
-- `simulate.sh` rewritten as 7-phase lifecycle with --auto flag
-- `ScenarioResource`: 11-step backend at `/scenario/*`
-- Standalone scenario runner at `/scenario.html` with step/auto-run/reset
-- Idempotent — reset cleans merge queue entries and stale WorkItems
-- **Validated end-to-end: 11/11 steps pass, both fresh and repeated runs**
-
-### Dev-mode infrastructure fixes
-- Removed `casehub-engine-rest` (duplicate REST endpoints causing DeploymentException)
-- `DevClaimSlaPolicy` + `DevWorkerSelectionStrategy` + `DevWorkStrategyContributor`
-- Excluded JPA ledger repositories (SNAPSHOT drift broke @DefaultBean)
-- esbuild target bumped to es2024 (TC39 decorator support for pages-aria)
-- IPv4 default (127.0.0.1) for Java 26 Netty SO_KEEPALIVE bug
-
-### Cross-repo: engine#1216 filed + reproducer test
-- CasePlanModel eviction race in JudgmentWorkItemScheduler — now fixed
-- Reproducer test at `work-adapter/src/test/java/.../JudgmentWorkItemSchedulerRegistryTest.java`
+### Key discovery: @McpDomain annotation processor security propagation
+The `GraphQLResolverProcessor` reads `@RolesAllowed` and `@PermitAll` from **method-level** annotations on `@McpDomain` classes and propagates them to generated REST resources. Class-level annotations are NOT propagated. `@PlatformWebhook` methods automatically get `@PermitAll`.
 
 ## What needs to happen next
 
-### New issues filed (#226-#229) — dashboard data visibility
+### #240 — 7 remaining ledger test failures
 
-The simulation drives the full lifecycle but the dashboard doesn't surface the interesting data:
+| Test | Failure | Root cause | Fix |
+|------|---------|-----------|-----|
+| IncidentFeedbackServiceTest.ambiguousPr_throws409 | 404 instead of 409 | findByTimeRange scan doesn't find seeded merge decisions (unclear why — timing or test ordering) | Debug why `findByTimeRange` returns empty for these 2 tests when happyPath works |
+| IncidentFeedbackServiceTest.disambiguatedWithCaseId | 404 not found | Same root cause as above | Same |
+| CodeReviewComplianceServiceTest | Unknown | Likely old REST URL or in-memory data split | Check surefire report |
+| ComplianceErasureDetectionTest | Assertion failure | TokenisationEnabledTestProfile — tokenisation not working | Investigate ActorIdentityProvider tokenisation setup |
+| GdprErasureResourceTest.erasure_pseudonymisesActor | token == rawActorId | Tokenisation assertion — actorIdentityProvider.tokeniseForQuery returns raw ID | Same tokenisation profile issue |
+| TrustFeedbackClosedLoopTest | SOUND→FLAGGED | Verdict computation changed in ledger #221 | Trace verdict calculation path, update expected value |
+| TrustGatedAttestationPolicyActivationTest | Unknown | Needs investigation | Check surefire report |
 
-| Issue | Title | Scale |
-|-------|-------|-------|
-| #226 | Dashboard: routing decisions visible in Review detail | M |
-| #227 | Dashboard: AI review findings as inline comments | L |
-| #228 | Dashboard: rich event timeline with binding and agent events | M |
-| #229 | Scenario: produce realistic AI review findings | M |
+### #241 — 6 PrReviewQhorusLifecycleTest failures
 
-### Starting dev mode
+**Root cause diagnosed:** Qhorus upgrade changed default `enforcementMode` from `ADVISORY` to `BLOCKING` when `enforcementMode` is `null` on channel creation. `QhorusPrReviewService` creates channels via old constructor that passes `null` for enforcement mode.
+
+**Fix options:**
+1. **(Recommended) Keep BLOCKING:** Update advisory tests to expect `EnforcementBlocked` exception. Tests like `observeChannel_advisoryOnSpeechActDispatch` send disallowed message types expecting soft warnings — now they get hard blocks.
+2. **Explicit ADVISORY:** Pass `EnforcementMode.ADVISORY` in channel creation if advisory mode is intentionally wanted.
+
+The `QhorusPrReviewService` creates channels at lines ~197/204/211 using the old 15-arg `ChannelCreateRequest` constructor.
+
+### .plan queue status
+- [x] #237 (epic parent)
+- [~] #238 (done but .plan shows active)
+- [ ] #239 (done)
+- [ ] #240 (partial — 7 of 13 remaining)
+- [ ] #241 (not started — 6 tests)
+
+### Build command
 ```bash
-JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn quarkus:dev -pl app -Dquarkus.console.enabled=false
-# Then open http://127.0.0.1:8080/scenario.html
+JAVA_HOME=$(/usr/libexec/java_home -v 26) mvn clean install
 ```
-
-### Known issues
-- Merge queue batch PK violation when enqueueing multiple PRs sequentially (handled gracefully — reports "batch formation deferred")
-- `BlocksBeans` excluded from CDI — upstream blocks needs @DefaultBean on producers
-- Test suite: CDI wiring failures in @QuarkusTest (test-specific Jandex config stale)
