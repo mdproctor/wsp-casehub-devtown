@@ -62,3 +62,5 @@ squash_attempt=1
 squash=done
 squash_produced=0
 report_squash=done
+_landed_sha:devtown=27872259025ba04a8425a6311f50278062dc7f4c
+land_mechanical_attempt=1
