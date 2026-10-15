@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-246-xs-s-batch
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -11,6 +11,7 @@ design-repo:
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#246 — Issue #246 ← active
 - [ ] casehubio/devtown#244 — Reviewer fleet should filter by ActorType
