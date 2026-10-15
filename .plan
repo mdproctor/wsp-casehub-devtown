@@ -13,3 +13,7 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/devtown#246 — Issue #246 ← active
+- [ ] casehubio/devtown#244 — Reviewer fleet should filter by ActorType
+- [ ] casehubio/devtown#219 — Webhook replay endpoint
+- [ ] casehubio/devtown#213 — Dev-mode CI pass-through
+- [ ] casehubio/devtown#212 — Dev-mode PrDiffService stub
