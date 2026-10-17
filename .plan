@@ -1,0 +1,15 @@
+# Work Plan — issue-251-deploy-public-webhook
+
+## State
+branch: issue-251-deploy-public-webhook
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 251
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/devtown#251 — Issue #251 ← active
