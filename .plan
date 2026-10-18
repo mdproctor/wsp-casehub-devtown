@@ -1,0 +1,15 @@
+# Work Plan — issue-254-writeback-hardening
+
+## State
+branch: issue-254-writeback-hardening
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 254
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/devtown#254 — Issue #254 ← active
