@@ -1,39 +1,15 @@
-# Handoff — #231 Composable Unification + Panel Parity
+# HANDOFF — devtown
 
-## What was done
+## Last Session
 
-### Branch 1: issue-231-unify-detail-panel-composables (landed)
+Closed #254 (write-back observer hardening) — five items: memory leak on FAULTED/OBSOLETE, defensive severity parsing, `action_required` check run conclusion for HIGH/CRITICAL findings, `devtown/review-status` aggregate check run, severity count summary on completion. Landed as `ab6e8cc` on main, pushed, issue closed. Blog entry written on branch (may need cherry-pick to workspace main).
 
-Extracted shared render functions from merge-queue-detail, contributor-detail, and reviewer-detail into `src/components/shared/`:
+## Immediate Next Step
 
-- `renderTrustBar`, `renderDimensionGrid`, `renderStatusCard`, `renderReviewCard`, `renderBadge`
-- `shared-styles.ts` (8 CSS fragment exports), `helpers.ts` (trustFillClass, formatDimension, feedbackClass, feedbackLabel)
-- `types.ts` barrel re-export
+`work start #252` — Configure reviewer agent manifests. Then #253 (end-to-end on real PRs) depends on both #252 and #254 being complete.
 
-All three original panels rewired to use shared composables. Merge-queue-detail gained review activity cards via cross-reference fetch to `reviewDetail(caseId)`.
+## References
 
-### Branch 2: issue-231-review-detail-composables (landed)
-
-Extended composable unification to review-detail (the Reviews tab's detail panel). Then enriched merge-queue-detail to show everything review-detail shows — routing decisions, findings panel, event timeline. Closed all information gaps between the two panels so both show identical depth for the same PR.
-
-Additional fixes:
-- Feature vector rendering: parsed raw Java toString() into key-value table
-- Mock session fixtures: aligned field names with SessionResponse interface
-- Mock server: added /output, /git-status, /service-health sub-endpoints for Workers tab
-- Post-action data refresh in merge-queue-detail
-
-## What was filed
-
-**casehubio/devtown#233** — Unify Reviews, Merge Queue, and Triage into a single PR Cases workbench. Comprehensive design issue with entity model analysis, filter-chip architecture, batch integration approach, data layer strategy, migration path, and 5 tension points with resolutions. Scale: M, Complexity: Med.
-
-## Current state
-
-- On `main` with 7 clean commits (4 from branch 1 + 3 from branch 2)
-- All four detail panels (merge-queue, contributor, reviewer, review) share the same composables
-- Reviews and Merge Queue show identical information for the same PR — only lifecycle actions differ
-- `npm run typecheck` passes clean
-- `npm run dev:mock` serves all tabs with full mock data including Workers
-
-## What to do next
-
-Start #233 — the unified PR Cases workbench. The composable foundation is complete. The work is about the list/workbench layer: merging three data sources, adding filter chips, adapting the vitals row, and integrating batch context inline under the Queued filter.
+- Blog: `blog/2026-10-18-mdp01-five-things-between-review-and-gate.md` (on closed branch, check workspace)
+- Observer source: `app/src/main/java/io/casehub/devtown/app/github/GitHub*Observer.java`
+- Prior webhook work (#251): `PublicEndpointResolver`, `scripts/tunnel.sh`, `docs/guides/webhook-setup.md`
