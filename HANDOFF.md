@@ -8,7 +8,10 @@ Parent POM bumped from 0.3 to 0.4-SNAPSHOT in this session. `PrReviewQhorusLifec
 
 ## Immediate Next Step
 
-`work start #253` — End-to-end on real PRs. Both prerequisites (#252 Eidos descriptors, #254 write-back observers) are merged. This validates the full pipeline: webhook → case → agent review → GitHub write-back.
+#253 (epic) closed this session — all 5 child issues done. Next candidates:
+- #223 (Agents post findings on GitHub PRs) — L/Med, extends the write-back observers
+- #225 (Multi-user testing + production auth) — M/Med, builds on #220 auth work
+- #247 (Wire real LLM agents) — XL/High, production agent wiring
 
 ## References
 
