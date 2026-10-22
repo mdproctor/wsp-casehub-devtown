@@ -1,0 +1,15 @@
+# Work Plan — issue-257-activate-manifest-agent-routing
+
+## State
+branch: issue-257-activate-manifest-agent-routing
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 257
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/devtown#257 — Issue #257 ← active
