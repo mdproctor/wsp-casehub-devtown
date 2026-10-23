@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-257-activate-manifest-agent-routing
-state: scaffolded
+state: active
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
