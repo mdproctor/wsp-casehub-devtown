@@ -1,0 +1,15 @@
+# Work Plan — issue-262-fix-jackson-instant-serialization
+
+## State
+branch: issue-262-fix-jackson-instant-serialization
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 262
+design-repo: 
+design-section-hashes: 
+flyway-next-v: none
+
+## Queue
+- [ ] casehubio/devtown#262 — Issue #262 ← active
