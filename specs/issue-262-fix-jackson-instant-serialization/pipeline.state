@@ -1,6 +1,6 @@
 format_version: 1
-state: DECISION_CAPTURE
-entered: 2026-10-25T12:05:00Z
+state: SPEC_WRITING
+entered: 2026-10-25T12:10:00Z
 decision_count: 2
 dimensions_completed: 0
 dimensions_total: 0
