@@ -13,3 +13,11 @@ flyway-next-v: none
 
 ## Queue
 - [ ] casehubio/devtown#262 — Issue #262 ← active
+  - [ ] Batch 1: Factory+test
+    - [ ] Task 1: Create EngineMappers with unit test
+  - [ ] Batch 2: common-core
+    - [ ] Task 2: Replace ObjectMapper in common-core
+  - [ ] Batch 3: runtime-core
+    - [ ] Task 3: Replace ObjectMapper in runtime-core
+  - [ ] Batch 4: planning+build
+    - [ ] Task 4: Replace in planning-core and full build
