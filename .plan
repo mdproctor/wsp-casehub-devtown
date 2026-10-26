@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-267-production-manifest-backends
-state: active
+state: closing:review
 project-sha: 6a6876f
 date: 2026-10-26
 issue-repo: casehubio/devtown
@@ -11,5 +11,6 @@ design-repo:
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#267 — Issue #267 ← active
