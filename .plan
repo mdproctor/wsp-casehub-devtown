@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-262-fix-jackson-instant-serialization
-state: closing:verified
+state: closing:promoted
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
