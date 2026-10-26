@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-267-production-manifest-backends
-state: scaffolded
+state: active
 project-sha: 6a6876f
 date: 2026-10-26
 issue-repo: casehubio/devtown
