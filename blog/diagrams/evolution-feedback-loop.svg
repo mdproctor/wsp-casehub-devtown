@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400" font-family="'Inter', 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="400" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="360" y="32" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">Evolution Conductor Feedback Loop</text>
+
+  <!-- Outer cycle: four boxes -->
+  <!-- Box 1: Assess Health -->
+  <rect x="40" y="60" width="160" height="70" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="120" y="87" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Assess Health</text>
+  <text x="120" y="104" text-anchor="middle" font-size="10" fill="#64748b">CapabilityArea.assess()</text>
+  <text x="120" y="118" text-anchor="middle" font-size="10" fill="#64748b">health = successes / total</text>
+
+  <!-- Box 2: Compute Adjustment -->
+  <rect x="280" y="60" width="160" height="70" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="360" y="87" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Compute Adjustment</text>
+  <text x="360" y="104" text-anchor="middle" font-size="10" fill="#64748b">AdjustmentStrategy</text>
+  <text x="360" y="118" text-anchor="middle" font-size="10" fill="#64748b">.compute(gap, bounds)</text>
+
+  <!-- Box 3: Write Preference -->
+  <rect x="520" y="60" width="160" height="70" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="600" y="87" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Write Preference</text>
+  <text x="600" y="104" text-anchor="middle" font-size="10" fill="#64748b">PreferenceWriter</text>
+  <text x="600" y="118" text-anchor="middle" font-size="10" fill="#64748b">.write(scope, ns, key, val)</text>
+
+  <!-- Box 4: Observe Outcomes -->
+  <rect x="280" y="290" width="160" height="70" rx="6" fill="#fff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="360" y="317" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Observe Outcomes</text>
+  <text x="360" y="334" text-anchor="middle" font-size="10" fill="#64748b">EvolutionOutcomeRecord</text>
+  <text x="360" y="348" text-anchor="middle" font-size="10" fill="#64748b">healthBefore → healthAfter</text>
+
+  <!-- Arrows: cycle -->
+  <line x1="200" y1="95" x2="278" y2="95" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="440" y1="95" x2="518" y2="95" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M 600 130 L 600 325 L 442 325" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M 280 325 L 120 325 L 120 132" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- CBR branch: dashed from Observe to Compute -->
+  <path d="M 360 290 L 360 132" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="6 3" fill="none" marker-end="url(#arrow-accent)"/>
+  <text x="372" y="210" font-size="10" fill="#2563eb" font-weight="500">CBR precedents</text>
+  <text x="372" y="222" font-size="10" fill="#2563eb">inform next cycle</text>
+
+  <!-- Decision diamond -->
+  <polygon points="360,155 405,185 360,215 315,185" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="360" y="182" text-anchor="middle" font-size="9" font-weight="600" fill="#1e293b">enough</text>
+  <text x="360" y="192" text-anchor="middle" font-size="9" font-weight="600" fill="#1e293b">precedents?</text>
+
+  <!-- Labels on decision outputs -->
+  <text x="310" y="178" text-anchor="end" font-size="9" fill="#16a34a" font-weight="600">yes</text>
+  <text x="410" y="178" font-size="9" fill="#dc2626" font-weight="600">no</text>
+
+  <!-- CBR box -->
+  <rect x="180" y="168" width="120" height="34" rx="4" fill="#eff6ff" stroke="#2563eb" stroke-width="1"/>
+  <text x="240" y="183" text-anchor="middle" font-size="10" font-weight="600" fill="#2563eb">CBR-Informed</text>
+  <text x="240" y="195" text-anchor="middle" font-size="9" fill="#2563eb">best precedent wins</text>
+  <line x1="315" y1="185" x2="302" y2="185" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-accent)"/>
+
+  <!-- Proportional box -->
+  <rect x="420" y="168" width="120" height="34" rx="4" fill="#fff7ed" stroke="#ea580c" stroke-width="1"/>
+  <text x="480" y="183" text-anchor="middle" font-size="10" font-weight="600" fill="#ea580c">Proportional</text>
+  <text x="480" y="195" text-anchor="middle" font-size="9" fill="#ea580c">gap × stepFactor</text>
+  <line x1="405" y1="185" x2="418" y2="185" stroke="#ea580c" stroke-width="1.5"/>
+
+  <!-- Five workers label band -->
+  <rect x="80" y="373" width="560" height="22" rx="4" fill="#f1f5f9"/>
+  <text x="360" y="388" text-anchor="middle" font-size="10" fill="#475569">Reviewer Calibration · Routing · SLA Tuning · Gate Strictness · Queue Priority</text>
+</svg>

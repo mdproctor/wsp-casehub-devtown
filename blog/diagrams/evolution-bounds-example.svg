@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" font-family="'Inter', 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5" markerWidth="7" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="640" height="300" fill="#fafafa" rx="8"/>
+  <text x="320" y="28" text-anchor="middle" font-size="14" font-weight="600" fill="#1e293b">AdjustmentBounds — SLA Critical Example</text>
+
+  <!-- Number line -->
+  <line x1="60" y1="100" x2="580" y2="100" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Floor tick -->
+  <line x1="100" y1="88" x2="100" y2="112" stroke="#64748b" stroke-width="1.5"/>
+  <text x="100" y="80" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">30 min</text>
+  <text x="100" y="128" text-anchor="middle" font-size="10" fill="#94a3b8">floor</text>
+
+  <!-- Current tick -->
+  <line x1="220" y1="88" x2="220" y2="112" stroke="#1e293b" stroke-width="2"/>
+  <text x="220" y="80" text-anchor="middle" font-size="11" fill="#1e293b" font-weight="600">60 min</text>
+  <text x="220" y="128" text-anchor="middle" font-size="10" fill="#1e293b">current</text>
+
+  <!-- maxStep zone -->
+  <rect x="220" y="93" width="156" height="14" rx="3" fill="#dbeafe" opacity="0.6"/>
+  <text x="298" y="148" text-anchor="middle" font-size="9" fill="#2563eb">maxStep = 60 min</text>
+
+  <!-- New value tick (after adjustment) -->
+  <line x1="376" y1="88" x2="376" y2="112" stroke="#16a34a" stroke-width="2"/>
+  <text x="376" y="80" text-anchor="middle" font-size="11" fill="#16a34a" font-weight="600">120 min</text>
+  <text x="376" y="128" text-anchor="middle" font-size="10" fill="#16a34a">adjusted</text>
+
+  <!-- Ceiling tick -->
+  <line x1="540" y1="88" x2="540" y2="112" stroke="#64748b" stroke-width="1.5"/>
+  <text x="540" y="80" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">240 min</text>
+  <text x="540" y="128" text-anchor="middle" font-size="10" fill="#94a3b8">ceiling</text>
+
+  <!-- Direction arrow -->
+  <line x1="220" y1="100" x2="370" y2="100" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- Second example: Reviewer Calibration -->
+  <text x="320" y="190" text-anchor="middle" font-size="14" font-weight="600" fill="#1e293b">AdjustmentBounds — Trust Threshold Example</text>
+
+  <!-- Number line -->
+  <line x1="60" y1="240" x2="580" y2="240" stroke="#cbd5e1" stroke-width="1"/>
+
+  <!-- Floor -->
+  <line x1="100" y1="228" x2="100" y2="252" stroke="#64748b" stroke-width="1.5"/>
+  <text x="100" y="220" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">0.30</text>
+  <text x="100" y="268" text-anchor="middle" font-size="10" fill="#94a3b8">floor</text>
+
+  <!-- Current -->
+  <line x1="340" y1="228" x2="340" y2="252" stroke="#1e293b" stroke-width="2"/>
+  <text x="340" y="220" text-anchor="middle" font-size="11" fill="#1e293b" font-weight="600">0.70</text>
+  <text x="340" y="268" text-anchor="middle" font-size="10" fill="#1e293b">current</text>
+
+  <!-- maxStep zone -->
+  <rect x="340" y="233" width="60" height="14" rx="3" fill="#dbeafe" opacity="0.6"/>
+  <text x="370" y="288" text-anchor="middle" font-size="9" fill="#2563eb">maxStep = 0.10</text>
+
+  <!-- New value -->
+  <line x1="400" y1="228" x2="400" y2="252" stroke="#16a34a" stroke-width="2"/>
+  <text x="400" y="220" text-anchor="middle" font-size="11" fill="#16a34a" font-weight="600">0.76</text>
+  <text x="400" y="268" text-anchor="middle" font-size="10" fill="#16a34a">adjusted</text>
+
+  <!-- Ceiling -->
+  <line x1="540" y1="228" x2="540" y2="252" stroke="#64748b" stroke-width="1.5"/>
+  <text x="540" y="220" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">0.95</text>
+  <text x="540" y="268" text-anchor="middle" font-size="10" fill="#94a3b8">ceiling</text>
+
+  <!-- Direction arrow -->
+  <line x1="340" y1="240" x2="394" y2="240" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arr)"/>
+</svg>

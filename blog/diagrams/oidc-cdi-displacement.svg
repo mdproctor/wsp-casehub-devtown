@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" font-family="'Inter', 'Segoe UI', system-ui, sans-serif">
+  <rect width="680" height="320" fill="#fafafa" rx="8"/>
+  <text x="340" y="28" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">CDI Bean Displacement — Security Beans by Profile</text>
+
+  <!-- Dev profile column -->
+  <rect x="40" y="55" width="280" height="230" rx="8" fill="#fff7ed" stroke="#fdba74" stroke-width="1" stroke-dasharray="6 3"/>
+  <text x="180" y="78" text-anchor="middle" font-size="13" font-weight="600" fill="#ea580c">Dev Profile</text>
+  <text x="180" y="94" text-anchor="middle" font-size="10" fill="#ea580c">@IfBuildProfile("dev")</text>
+
+  <rect x="60" y="110" width="240" height="40" rx="5" fill="#fff" stroke="#fdba74" stroke-width="1.5"/>
+  <text x="180" y="127" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">DevCurrentPrincipal</text>
+  <text x="180" y="142" text-anchor="middle" font-size="9" fill="#64748b">fixed identity: "dev-user"</text>
+
+  <rect x="60" y="162" width="240" height="40" rx="5" fill="#fff" stroke="#fdba74" stroke-width="1.5"/>
+  <text x="180" y="179" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">DevGroupMembershipProvider</text>
+  <text x="180" y="194" text-anchor="middle" font-size="9" fill="#64748b">no-op — always empty teams</text>
+
+  <rect x="60" y="214" width="240" height="40" rx="5" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="180" y="231" text-anchor="middle" font-size="11" fill="#94a3b8">GitHubSecurityAugmentor</text>
+  <text x="180" y="245" text-anchor="middle" font-size="9" fill="#94a3b8">excluded — not instantiated</text>
+  <line x1="60" y1="234" x2="300" y2="234" stroke="#dc2626" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Production column -->
+  <rect x="360" y="55" width="280" height="230" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1" stroke-dasharray="6 3"/>
+  <text x="500" y="78" text-anchor="middle" font-size="13" font-weight="600" fill="#2563eb">Production Profile</text>
+  <text x="500" y="94" text-anchor="middle" font-size="10" fill="#2563eb">@UnlessBuildProfile("dev")</text>
+
+  <rect x="380" y="110" width="240" height="40" rx="5" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="500" y="127" text-anchor="middle" font-size="11" fill="#94a3b8">DevCurrentPrincipal</text>
+  <text x="500" y="142" text-anchor="middle" font-size="9" fill="#94a3b8">excluded — not instantiated</text>
+  <line x1="380" y1="130" x2="620" y2="130" stroke="#dc2626" stroke-width="1.5" opacity="0.4"/>
+
+  <rect x="380" y="162" width="240" height="40" rx="5" fill="#fff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="500" y="179" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">GitHubGroupMembershipProvider</text>
+  <text x="500" y="194" text-anchor="middle" font-size="9" fill="#64748b">real GitHub Teams API calls</text>
+
+  <rect x="380" y="214" width="240" height="40" rx="5" fill="#fff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="500" y="231" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">GitHubSecurityAugmentor</text>
+  <text x="500" y="245" text-anchor="middle" font-size="9" fill="#64748b">org check → roles + tenancyId</text>
+
+  <!-- Annotations -->
+  <text x="340" y="308" text-anchor="middle" font-size="10" fill="#475569">Tests use @TestSecurity — neither column. Augmentor excluded via quarkus.arc.exclude-types.</text>
+</svg>
