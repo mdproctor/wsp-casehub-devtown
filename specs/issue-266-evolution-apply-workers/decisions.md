@@ -50,3 +50,16 @@
 **Sources:** self-improvement.yaml binding chain (introspect→implement→submit-pr→review→integrate→record-outcome), ImprovementOutcomeWorkerFunction (record-outcome stage)
 **Exploration:** quick
 **Status:** captured
+
+## D5: Module placement — app/evolution/
+
+**Choice:** Workers live in `app/src/main/java/io/casehub/devtown/app/evolution/worker/` alongside existing evolution infrastructure
+**Alternatives:**
+- review/ module — alongside PrReviewApplicationService. But review/ doesn't own evolution today, and workers need CDI injection of PreferenceProvider which is wired at app level.
+- New evolution/ module — separate build module for evolution workers. Clean boundary but adds build complexity for 5 small classes that belong with their existing evolution peers (DevtownProposalSource, capability areas, etc.).
+**Rationale:** Follows the existing pattern. All evolution infrastructure (DevtownProposalSource, 5 capability areas, DevtownCategoryProvider, DevtownConflictStrategy, DevtownDenyPatternProvider, DevtownRegressionEvaluator) already lives in `app/evolution/`. Workers are the natural companion — they execute what the proposal source proposes. A `worker/` subdirectory keeps them visually distinct.
+**Trade-offs:** App module grows slightly. Acceptable — the evolution package is already the largest logical group in app/ and adding 5 focused workers doesn't change its cohesion.
+**Depends on:** D3 (one worker per category)
+**Sources:** app/src/main/java/io/casehub/devtown/app/evolution/ (22 existing files), three-tier module rule in CLAUDE.md
+**Exploration:** quick
+**Status:** captured
