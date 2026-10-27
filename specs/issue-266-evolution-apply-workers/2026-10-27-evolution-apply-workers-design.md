@@ -34,7 +34,9 @@ Every preference change is auditable through multiple channels:
 
 ### Self-Improvement Template Compatibility
 
-The engine's `self-improvement.yaml` routes operational improvements through: `introspect → implement → submit-pr → review → integrate → record-outcome`. Since preference writes don't produce PRs, the implement worker applies the change and emits the `improvement:pr-submitted` signal with status `MERGED`. Downstream bindings (review, integrate, record-outcome) resolve cleanly without engine template changes.
+The engine's `self-improvement.yaml` routes operational improvements through: `introspect → implement → submit-pr → review → integrate → record-outcome`. Since preference writes don't produce PRs, the implement worker applies the change and writes `reviewOutcome: "approved"` and `status: "MERGED"` to the case working context. It then emits the `improvement:pr-submitted` signal via `WorkerScope.channel().signal("improvement:pr-submitted")`. This causes downstream bindings (review, integrate, record-outcome) to resolve cleanly without engine template changes.
+
+**Note on overlapping parameters:** ReviewerCalibrationWorker and RoutingAdjustmentWorker both touch blend factors and quality floors. `DevtownConflictStrategy` prevents concurrent improvements in the same category. The workers fire for different triggers (trust-drift vs review-quality-drift) and assess different capability areas, so concurrent execution within the same category cannot happen.
 
 ## Architecture
 
