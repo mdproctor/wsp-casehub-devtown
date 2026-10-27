@@ -6,10 +6,11 @@ state: scaffolded
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
-covers: 268
+covers: 268,230
 design-repo: 
 design-section-hashes: 
 flyway-next-v: 
 
 ## Queue
 - [ ] casehubio/devtown#268 — Issue #268 ← active
+- [ ] casehubio/devtown#230 — Surface evolution conductor UI
