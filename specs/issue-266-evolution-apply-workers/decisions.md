@@ -63,3 +63,16 @@
 **Sources:** app/src/main/java/io/casehub/devtown/app/evolution/ (22 existing files), three-tier module rule in CLAUDE.md
 **Exploration:** quick
 **Status:** captured
+
+## D6: Adjustment algorithm — proportional with CBR auto-promotion
+
+**Choice:** `AdjustmentStrategy` interface with two implementations. `ProportionalAdjustmentStrategy` is the default — adjusts values proportionally to the health gap with configurable bounds. `CbrInformedAdjustmentStrategy` activates automatically when precedent count >= configurable minimum (e.g. 5 per category). CBR queries past adjustment outcomes (same category, similar health gap) and recommends the value that produced the best health improvement. CBR recommendations are still constrained by proportional bounds (safety guardrail).
+**Alternatives:**
+- Weighted blend — always compute both, weight shifts as precedents grow. More complex (two algorithms always run) with marginal benefit over a clean threshold switch.
+- CBR with proportional fallback — always try CBR first, fall back when insufficient precedents. Unnecessary CBR queries during bootstrap when they'll always miss.
+**Rationale:** Mirrors devtown's trust maturity model — Phase 0 (no observations) uses simple routing, quality improves as attestations accumulate. Each completed improvement cycle records structured data (parameter, oldValue, newValue, healthBefore, healthAfter) via ImprovementOutcomeEventCapture, which bootstraps the CBR store. The engine already has ImprovementCbrProjector for this. SlaEstimator in devtown already uses the same CBR-from-precedents pattern.
+**Trade-offs:** Early adjustments use a simpler algorithm that may not be optimal. Acceptable — the observe stage and regression evaluator catch poor outcomes, and each outcome improves the CBR store for next time.
+**Depends on:** D1 (preference writes), D3 (per-category workers)
+**Sources:** ImprovementCbrProjector (engine), ImprovementOutcomeEventCapture (engine), SlaEstimator CBR pattern (devtown domain), trust maturity model (CLAUDE.md)
+**Exploration:** quick
+**Status:** captured
