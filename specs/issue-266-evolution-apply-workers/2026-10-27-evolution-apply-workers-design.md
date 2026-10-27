@@ -35,7 +35,37 @@ public interface PreferenceWriter {
 
 **Platform implementation:** A `JpaPreferenceWriter` in `casehub-platform-persistence-jpa-common` that persists `PreferenceEntry` records via `EntityManager`. The JPA entity and table (`platform_preference`) already exist with the correct schema (tenancy_id, scope, namespace, pref_name, sub_key, pref_value). The `PreferenceEntryRepository` (Spring JPA) already has `findByTenancyIdAndScopeAndNamespaceAndNameAndSubKey` — the Quarkus/Panache equivalent is a direct `EntityManager` query.
 
-**Cross-repo dependency:** This requires an issue filed against `casehub-platform-api` (for the SPI) and `casehub-platform-persistence-jpa-common` (for the JPA implementation). The devtown workers depend on this landing first.
+### Platform Prerequisite: LayeredPreferenceProvider
+
+Devtown's runtime uses `ConfigFilePreferenceProvider` — a YAML-backed implementation that loads all preferences from config files at construction time into an immutable in-memory map. Its `resolve()` reads from this map and never queries JPA. Writes via `JpaPreferenceWriter` to the `platform_preference` table would be invisible to any consumer reading through `ConfigFilePreferenceProvider`.
+
+This spec requires a `LayeredPreferenceProvider` that composes two sources:
+
+1. **JPA layer (primary):** Reads from the `platform_preference` table for runtime-written overrides. Uses `EntityManager` queries equivalent to `SpringPreferenceProvider.resolve()` — which already implements JPA-backed preference resolution with scope hierarchy walking.
+2. **YAML layer (fallback):** Reads from `ConfigFilePreferenceProvider` for defaults. Existing YAML config files (`trust-routing.yaml`, `trust-gate.yaml`, etc.) continue to provide operator-managed baseline values.
+
+Resolution order: for each key, JPA value wins if present; otherwise YAML default applies. This preserves the existing YAML-based workflow while enabling runtime writes.
+
+```java
+public class LayeredPreferenceProvider implements PreferenceProvider {
+    private final PreferenceProvider jpaProvider;   // reads from platform_preference table
+    private final PreferenceProvider yamlProvider;   // reads from config files
+
+    @Override
+    public Preferences resolve(SettingsScope scope) {
+        Preferences yamlPrefs = yamlProvider.resolve(scope);
+        Preferences jpaPrefs = jpaProvider.resolve(scope);
+        // JPA values override YAML defaults
+        Map<String, Object> merged = new HashMap<>(yamlPrefs.asMap());
+        merged.putAll(jpaPrefs.asMap());
+        return new MapPreferences(merged);
+    }
+}
+```
+
+**Platform implementation:** `LayeredPreferenceProvider` in `casehub-platform-persistence-jpa-common`, alongside `JpaPreferenceWriter`. The JPA read path mirrors `SpringPreferenceProvider` (which already resolves preferences from JPA with scope hierarchy) but uses `EntityManager` (Quarkus/Panache) instead of Spring's `JpaRepository`. Devtown's CDI configuration switches from `ConfigFilePreferenceProvider` to `LayeredPreferenceProvider` as the `PreferenceProvider` bean.
+
+**Cross-repo dependency:** This requires issues filed against `casehub-platform-api` (for the `PreferenceWriter` SPI) and `casehub-platform-persistence-jpa-common` (for `JpaPreferenceWriter` and `LayeredPreferenceProvider`). The devtown workers depend on both landing first.
 
 ### Tenancy Context
 
@@ -133,25 +163,25 @@ public class DevtownEvolutionCaseHub extends YamlCaseHub {
     definition.getWorkers().add(Worker.builder()
         .name("evolution-apply")
         .capabilityName("improvement-implement")
-        .function(this::dispatch)
+        .function(new WorkerFunction.Sync<>(Map.class, Map.class, this::dispatch))
         .build());
   }
 
-  WorkerResult dispatch(Map<String, Object> input) {
+  WorkerResult<Map<String, Object>> dispatch(Map<String, Object> input, WorkerScope scope) {
     String category = (String) input.get("category");
     return switch (category) {
-      case "reviewer-calibration" -> reviewerCalibration.apply(input);
-      case "routing-adjustment" -> routingAdjustment.apply(input);
-      case "sla-tuning" -> slaThreshold.apply(input);
-      case "gate-tightening" -> gateStrictness.apply(input);
-      case "queue-optimization" -> queuePriority.apply(input);
+      case "reviewer-calibration" -> reviewerCalibration.apply(input, scope);
+      case "routing-adjustment" -> routingAdjustment.apply(input, scope);
+      case "sla-tuning" -> slaThreshold.apply(input, scope);
+      case "gate-tightening" -> gateStrictness.apply(input, scope);
+      case "queue-optimization" -> queuePriority.apply(input, scope);
       default -> WorkerResult.failed("Unknown category: " + category);
     };
   }
 }
 ```
 
-This follows the same pattern as `MergeBatchCaseHub` and `PrReviewCaseHub`. One `Worker` registered for `improvement-implement` capability; the dispatch function routes by category to the appropriate CDI-injected worker bean.
+This follows the `augment()` pattern from `MergeBatchCaseHub` and `PrReviewCaseHub`, with one key difference: the dispatch function uses `new WorkerFunction.Sync<>(Map.class, Map.class, this::dispatch)` instead of the convenience `Builder.function(Function<Map, WorkerResult>)` overload. The convenience overload wraps the function as `(t, scope) -> fn.apply(t)` — discarding `WorkerScope`. Evolution workers need `scope.caseId()` (for signal emission) and `scope.accumulatedState()` (for tenancy context), so `WorkerScope` must be preserved. `MergeBatchCaseHub` uses the convenience overload correctly because its workers don't need `WorkerScope`.
 
 ### Worker Structure
 
@@ -166,8 +196,8 @@ public class ReviewerCalibrationWorker {
   @Inject ReviewerTrustCapabilityArea capabilityArea;
   @Inject AdjustmentStrategy adjustmentStrategy;
 
-  public WorkerResult apply(Map<String, Object> input) {
-    String tenancyId = (String) input.get("tenancyId");
+  public WorkerResult apply(Map<String, Object> input, WorkerScope scope) {
+    String tenancyId = (String) scope.accumulatedState().get("tenancyId");
     String capability = (String) input.get("target");
 
     // 1. Read current preference values
@@ -229,12 +259,34 @@ public interface AdjustmentStrategy {
 
 **`CbrInformedAdjustmentStrategy`** (auto-promotes):
 - Queries `ImprovementOutcomeStore.findByCategory()` for completed improvement outcomes in the same category
+- Reads CBR comparison data from `ImprovementOutcome.metadata()` (see CBR Metadata Contract below)
 - Filters for outcomes with similar health gap (within configurable tolerance, e.g. +/- 0.1)
 - If matching precedents >= configurable minimum (default 5): picks the adjustment that produced the best health improvement
 - CBR recommendation still constrained by proportional bounds (safety guardrail)
 - If insufficient precedents: delegates to `ProportionalAdjustmentStrategy`
 
 This reuses the engine's existing `ImprovementOutcomeStore` rather than querying `EventLogRepository` directly. `ImprovementCbrProjector` already projects outcomes to the store; the strategy reads from it.
+
+**CBR Metadata Contract:**
+
+`ImprovementOutcome` has `metadata: Map<String, String>` but `ImprovementOutcomeEventCapture` currently hardcodes it to `Map.of()`. Two changes are needed:
+
+1. **Workers write health data to output:** Each worker includes `healthBefore` (captured at adjustment time) in its output map. The observe stage (after apply) captures `healthAfter` from the capability area and writes it to the case context.
+
+2. **Engine event capture passes metadata through (cross-repo change):** `ImprovementOutcomeEventCapture.onOutcome()` must read well-known keys from `improvementData` (the `_improvement` context in the case file snapshot) and populate `ImprovementOutcome.metadata` instead of hardcoding `Map.of()`. The conductor enriches `_improvement` with the health/adjustment data from the apply stage output.
+
+Well-known metadata keys (string constants defined in devtown `domain/`):
+
+| Key | Type | Source |
+|-----|------|--------|
+| `evolution.healthBefore` | `Double` (as string) | Apply worker output |
+| `evolution.healthAfter` | `Double` (as string) | Observe stage output |
+| `evolution.adjustments` | JSON array (as string) | Apply worker output |
+| `evolution.category` | `String` | Case context |
+
+The `CbrInformedAdjustmentStrategy` parses these from `ImprovementOutcome.metadata()` with fallback to empty/absent (outcomes recorded before this change simply lack CBR data and are skipped during similarity filtering).
+
+**In-memory limitation:** `ImprovementOutcomeStore` uses `ConcurrentHashMap` with no persistence — CBR data is lost on application restart. The proportional fallback is safe (the strategy delegates to `ProportionalAdjustmentStrategy` when insufficient precedents), so this is a quality-of-learning limitation, not a correctness bug. For long-lived deployments, precedents accumulate naturally. For environments with frequent restarts, a persistent `ImprovementOutcomeStore` backing (JPA or file-based) is a follow-up item — file an issue against `casehub-engine` to track this.
 
 **`AdjustmentResult`** record:
 ```java
@@ -260,6 +312,8 @@ public record AdjustmentResult(
 The `AdjustmentStrategy` interface operates on `double` values. Different parameter types are handled as follows:
 
 **Duration parameters (SlaThresholdWorker):** SLA values are stored as `StringPreference` (e.g., `"PT1H"`). The worker converts Duration to minutes (`double`) for computation, then back to Duration ISO-8601 string for storage. Example: `PT1H` → `60.0` → compute → `75.0` → `PT1H15M`. The `AdjustmentResult.rationale` reports the Duration change (e.g., `"PT1H → PT1H15M"`) not the raw numeric delta.
+
+**Integer-typed parameters (QueuePriorityWorker, ReviewerCalibrationWorker):** Several preference keys use `IntPreference` (e.g., `MAX_BATCH_SIZE`, `MIN_BATCH_SIZE`, `FAILURE_RATE_WINDOW`, `DECAY_RATE_PER_HOUR`, `minimumObservations`). Since `AdjustmentStrategy` returns `double`, workers with integer-typed parameters round `AdjustmentResult.newValue()` to the nearest integer (`Math.round()`) before writing via `PreferenceWriter.write()`. The audit rationale reports the rounded value.
 
 **Discrete/enum parameters (GateStrictnessWorker, RoutingAdjustmentWorker):** `security-severity-threshold` (enum: HIGH/MEDIUM/LOW) and `fallback-type` are not tuned through the `AdjustmentStrategy`. They are adjusted by direct worker logic based on health score thresholds — e.g., if health < 0.4, tighten from HIGH to MEDIUM. The `AdjustmentStrategy` pattern is designed for continuous numeric parameters; forcing enum transitions through it would be artificial.
 
@@ -340,6 +394,8 @@ public record AdjustmentBounds(
 | Completion hours | `SlaPreferenceKeys.COMPLETION_HOURS` | `devtown.sla` / `completion-hours` | 24 | [8, 72] | INCREASE when low health |
 
 **Duration handling:** SLA values are stored as `StringPreference` (ISO-8601: `"PT1H"`, `"PT4H"`, etc.). The worker parses to `Duration`, converts to minutes for `AdjustmentStrategy` computation, then formats back to ISO-8601 string for `PreferenceWriter.write()`. The `AdjustmentResult.rationale` reports Duration changes in human-readable form.
+
+**SLA ordering constraint:** After computing all three lane adjustments independently, the worker enforces `CRITICAL < HIGH < NORMAL` with minimum separations: CRITICAL must be at least 30 minutes less than HIGH, and HIGH at least 60 minutes less than NORMAL. If an independent adjustment violates ordering, it is clamped to maintain the invariant. Example: if CRITICAL adjusts to 240min and HIGH adjusts to 200min, HIGH is clamped up to `240 + 30 = 270min`. The clamping is logged in the adjustment rationale so the audit trail shows both the computed and clamped values.
 
 **Preference scope paths:** `casehubio/devtown/merge-queue` (SLA keys) and `casehubio/devtown/sla` (escalation/completion)
 
@@ -443,7 +499,10 @@ The `status`, `reviewOutcome`, and `requiresPr` fields enable the self-improveme
 |------|--------|-----------|
 | `casehub-platform-api` | Add `PreferenceWriter` SPI interface | Yes — workers cannot write without it |
 | `casehub-platform-persistence-jpa-common` | Add `JpaPreferenceWriter` implementation | Yes |
+| `casehub-platform-persistence-jpa-common` | Add `LayeredPreferenceProvider` (JPA + YAML composition) | Yes — without it, writes are invisible to readers |
 | `casehub-engine` | Add `when` condition to `submit-pr` binding in `self-improvement.yaml` | Yes — without it, preference-only improvements trigger a PR submission worker |
+| `casehub-engine` | Update `ImprovementOutcomeEventCapture` to populate `metadata` from case context | No — CBR degrades gracefully (proportional fallback) |
+| `casehub-engine` | Persistent backing for `ImprovementOutcomeStore` | No — follow-up for CBR learning quality |
 | `casehub-engine` | Ensure `ImprovementOutcomeStore` is injectable in harness apps | No — may already work via CDI |
 
 ## Testing Strategy
@@ -504,7 +563,11 @@ Each worker tested in isolation with mocked `PreferenceProvider`, `PreferenceWri
 - `DefaultBatchCompositionPolicy.java` — hardcoded HIGH_RISK_THRESHOLD (migration target)
 - `PreferenceProvider.java` — read-only preference SPI (platform-api)
 - `PreferenceWriter.java` — write SPI (to be added to platform-api)
+- `LayeredPreferenceProvider.java` — JPA + YAML composed provider (to be added to platform-persistence-jpa-common)
+- `SpringPreferenceProvider.java` — existing JPA-backed provider (Spring) — reference for Quarkus JPA read implementation
+- `ConfigFilePreferenceProvider.java` — existing YAML-backed provider (devtown's current provider — to be replaced by LayeredPreferenceProvider)
 - `PreferenceEntry.java` — JPA entity for preference persistence
+- `WorkerFunction.Sync` — record preserving WorkerScope in dispatch (vs convenience overload that discards it)
 - `SettingsScope.java` — scope record (tenancyId, path, effectiveAt)
 - `SlaEstimator.java` — existing CBR-from-precedents pattern in devtown (different data model)
 - `DevtownConflictStrategy.java` — prevents concurrent improvements in same category
