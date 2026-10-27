@@ -13,4 +13,13 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/devtown#268 — Issue #268 ← active
+  - [ ] Batch 1: Backend safety
+    - [ ] Task 1: Fix bootstrap crash
+    - [ ] Task 2: Add deepLink field
+    - [ ] Task 3: Add conductor-origin endpoint
+  - [ ] Batch 2: Frontend routing
+    - [ ] Task 4: Wire packages + evolution page + routing
+  - [ ] Batch 3: Cross-app indicators
+    - [ ] Task 5: Conductor-origin badge
+    - [ ] Task 6: Deep link navigation
 - [ ] casehubio/devtown#230 — Surface evolution conductor UI
