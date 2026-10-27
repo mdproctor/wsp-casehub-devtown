@@ -11,3 +11,16 @@
 **Sources:** DevtownCategoryProvider stages (analyze→propose[gated]→review[gated]→apply→observe), self-improvement.yaml operational branch, PreferenceProvider JPA persistence (platform#24), CaseLedgerEntry (devtown#73)
 **Exploration:** quick
 **Status:** captured
+
+## D2: Hardcoded value migration scope — migrate as needed
+
+**Choice:** Migrate hardcoded tuning values to PreferenceProvider incrementally, as each worker needs them
+**Alternatives:**
+- Preferences only — workers only adjust existing PreferenceProvider values; hardcoded values tracked as separate issue. Reduces scope but leaves some workers unable to tune their primary targets.
+- Migrate all upfront — migrate all hardcoded tuning values before building workers. Clean but adds significant scope and delays worker delivery.
+**Rationale:** Each worker knows exactly which values it needs. Migrating per-worker keeps the change focused and avoids migrating values no worker actually adjusts. The migration is mechanical (add PreferenceKeys constant, read from PreferenceProvider with hardcoded default as fallback).
+**Trade-offs:** Migration happens across multiple worker implementations rather than as a clean preparatory step. Acceptable because each migration is small and self-contained.
+**Depends on:** D1 (direct preference writes — migration only needed because workers write preferences)
+**Sources:** DevtownCapabilityRegistry.POLICIES (domain module), DefaultBatchCompositionPolicy.HIGH_RISK_THRESHOLD (queue module), MergeQueuePreferenceKeys (already preference-based)
+**Exploration:** quick
+**Status:** captured
