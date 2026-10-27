@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-266-evolution-apply-workers
-state: closing:pushed
+state: closing:merged
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
