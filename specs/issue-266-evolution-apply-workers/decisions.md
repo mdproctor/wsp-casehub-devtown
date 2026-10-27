@@ -24,3 +24,16 @@
 **Sources:** DevtownCapabilityRegistry.POLICIES (domain module), DefaultBatchCompositionPolicy.HIGH_RISK_THRESHOLD (queue module), MergeQueuePreferenceKeys (already preference-based)
 **Exploration:** quick
 **Status:** captured
+
+## D3: Worker wiring — one worker per category
+
+**Choice:** 5 dedicated workers, each registered for its category's capabilities
+**Alternatives:**
+- Generic dispatcher + strategy — one CDI bean reads category from input and dispatches to strategy classes. Fewer beans but adds a routing layer on top of the engine's existing capability-based routing.
+- Introspect/apply split — 5 introspection classes paired with a generic apply worker. Separates analysis from execution but creates artificial coupling through the shared output format.
+**Rationale:** Each category has distinct tuning targets (different preference keys, different health metrics, different adjustment algorithms). Dedicated workers keep each category's logic self-contained and testable in isolation. The engine's capability-based dispatch already handles routing — no need for another routing layer.
+**Trade-offs:** More CDI beans (5 vs 1). Acceptable given each worker is focused and small.
+**Depends on:** D1 (workers write preferences directly)
+**Sources:** DependencyUpdateWorker pattern (engine), DevtownCategoryProvider 5 categories, self-improvement.yaml capability bindings
+**Exploration:** quick
+**Status:** captured
