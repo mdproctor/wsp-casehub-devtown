@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-268-evolution-standalone-app
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -11,6 +11,7 @@ design-repo:
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#268 — Issue #268 ← active
   - [x] Batch 1: Backend safety
