@@ -127,6 +127,7 @@ domain/src/main/java/io/casehub/devtown/domain/evolution/
   AdjustmentStrategy.java              -- strategy interface
   ProportionalAdjustmentStrategy.java  -- default: bounded proportional
   CbrInformedAdjustmentStrategy.java   -- auto-promotes when precedents >= min
+  OutcomeQuery.java                    -- functional interface for CBR data access
   AdjustmentResult.java                -- record: parameter, oldValue, newValue, method
   AdjustmentBounds.java                -- record: per-parameter safety bounds
 
@@ -258,33 +259,43 @@ public interface AdjustmentStrategy {
 - Direction determined by parameter semantics (some parameters increase when health is low, others decrease)
 
 **`CbrInformedAdjustmentStrategy`** (auto-promotes):
-- Queries `ImprovementOutcomeStore.findByCategory()` for completed improvement outcomes in the same category
+- Takes an `OutcomeQuery` functional interface as a constructor parameter (not a direct dependency on `ImprovementOutcomeStore`):
+  ```java
+  @FunctionalInterface
+  public interface OutcomeQuery {
+      List<ImprovementOutcome> findByCategory(String category, int limit);
+  }
+  ```
+  The CDI producer in `app/` wires this to `outcomeStore::findByCategory`. This keeps the strategy as pure domain computation with no engine-runtime-core dependency — consistent with `ProportionalAdjustmentStrategy` and `SlaEstimator`. `ImprovementOutcome` (the record type) is in `casehub-engine-api`, which `domain/` can depend on; only `ImprovementOutcomeStore` (the runtime storage class) is in engine-runtime-core.
+- Queries completed improvement outcomes in the same category via `OutcomeQuery`
 - Reads CBR comparison data from `ImprovementOutcome.metadata()` (see CBR Metadata Contract below)
 - Filters for outcomes with similar health gap (within configurable tolerance, e.g. +/- 0.1)
 - If matching precedents >= configurable minimum (default 5): picks the adjustment that produced the best health improvement
 - CBR recommendation still constrained by proportional bounds (safety guardrail)
 - If insufficient precedents: delegates to `ProportionalAdjustmentStrategy`
 
-This reuses the engine's existing `ImprovementOutcomeStore` rather than querying `EventLogRepository` directly. `ImprovementCbrProjector` already projects outcomes to the store; the strategy reads from it.
+This reuses the engine's existing `ImprovementOutcomeStore` (via the `OutcomeQuery` functional interface) rather than querying `EventLogRepository` directly. `ImprovementCbrProjector` already projects outcomes to the store; the strategy reads from it through the interface boundary.
 
 **CBR Metadata Contract:**
 
 `ImprovementOutcome` has `metadata: Map<String, String>` but `ImprovementOutcomeEventCapture` currently hardcodes it to `Map.of()`. Two changes are needed:
 
-1. **Workers write health data to output:** Each worker includes `healthBefore` (captured at adjustment time) in its output map. The observe stage (after apply) captures `healthAfter` from the capability area and writes it to the case context.
+1. **Workers write health data to output:** Each worker includes `healthBefore` (captured at adjustment time) and adjustment details in its output map.
 
-2. **Engine event capture passes metadata through (cross-repo change):** `ImprovementOutcomeEventCapture.onOutcome()` must read well-known keys from `improvementData` (the `_improvement` context in the case file snapshot) and populate `ImprovementOutcome.metadata` instead of hardcoding `Map.of()`. The conductor enriches `_improvement` with the health/adjustment data from the apply stage output.
+2. **Engine event capture passes metadata through (cross-repo change):** `ImprovementOutcomeEventCapture.onOutcome()` must read well-known keys from `improvementData` (the `_improvement` context in the case file snapshot) and populate `ImprovementOutcome.metadata` instead of hardcoding `Map.of()`. The conductor enriches `_improvement` with health/adjustment data from the apply stage output.
+
+3. **`healthAfter` captured by the evolution conductor, not a template binding:** The engine's `self-improvement.yaml` template has no observe binding — the complete flow is `introspect → implement → submit-pr → review → integrate → record-outcome`. `DevtownCategoryProvider` declares an observe stage descriptor, but stage descriptors are metadata — the engine does not automatically create bindings from them. Rather than adding a template binding (which would require the engine to access harness-specific capability areas), `healthAfter` is captured by the evolution conductor's periodic health polling. After an improvement case completes for a category, the conductor records the category's health at the next poll cycle and updates the outcome metadata. This is a natural fit: the conductor already polls capability area health to detect drift — it simply records the post-adjustment value alongside the completed improvement case ID. The conductor spec (not yet created) will define the exact mechanism.
 
 Well-known metadata keys (string constants defined in devtown `domain/`):
 
 | Key | Type | Source |
 |-----|------|--------|
 | `evolution.healthBefore` | `Double` (as string) | Apply worker output |
-| `evolution.healthAfter` | `Double` (as string) | Observe stage output |
+| `evolution.healthAfter` | `Double` (as string) | Evolution conductor (next health poll after case completion) |
 | `evolution.adjustments` | JSON array (as string) | Apply worker output |
 | `evolution.category` | `String` | Case context |
 
-The `CbrInformedAdjustmentStrategy` parses these from `ImprovementOutcome.metadata()` with fallback to empty/absent (outcomes recorded before this change simply lack CBR data and are skipped during similarity filtering).
+The `CbrInformedAdjustmentStrategy` parses these from `ImprovementOutcome.metadata()` with fallback to empty/absent. Outcomes lacking `healthAfter` (before the conductor implements this capture) are used for category/health-gap matching but excluded from effectiveness ranking. CBR degrades gracefully: with `healthBefore` only, it can select precedents with similar starting conditions; without `healthAfter`, it cannot rank them by outcome quality and falls back to proportional.
 
 **In-memory limitation:** `ImprovementOutcomeStore` uses `ConcurrentHashMap` with no persistence — CBR data is lost on application restart. The proportional fallback is safe (the strategy delegates to `ProportionalAdjustmentStrategy` when insufficient precedents), so this is a quality-of-learning limitation, not a correctness bug. For long-lived deployments, precedents accumulate naturally. For environments with frequent restarts, a persistent `ImprovementOutcomeStore` backing (JPA or file-based) is a follow-up item — file an issue against `casehub-engine` to track this.
 
@@ -438,6 +449,8 @@ public record AdjustmentBounds(
 | Failure rate alert threshold | `MergeQueuePreferenceKeys.FAILURE_RATE_ALERT_THRESHOLD` | `devtown.merge-queue` / `failure-rate-alert-threshold` | 0.5 | [0.2, 0.8] | DECREASE when low health |
 
 **Migration required:** `DefaultBatchCompositionPolicy.HIGH_RISK_THRESHOLD` (hardcoded `0.5` in `queue/`) must be migrated to a new `MergeQueuePreferenceKeys.HIGH_RISK_THRESHOLD` constant and read from preferences, with the hardcoded value as the default.
+
+**Batch size ordering constraint:** After computing adjustments for both `MIN_BATCH_SIZE` and `MAX_BATCH_SIZE` independently, the worker enforces `MIN_BATCH_SIZE ≤ MAX_BATCH_SIZE`. Their bounds overlap (MIN ceiling 5 > MAX floor 2), so independent adjustments can produce MIN > MAX — an impossible constraint that would prevent `MergeQueueService.formBatchesTransactional()` from forming any batches. If violated, MIN is clamped down to MAX. Clamping is logged in the adjustment rationale.
 
 **Preference scope path:** `casehubio/devtown/merge-queue`
 
