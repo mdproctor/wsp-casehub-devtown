@@ -13,3 +13,10 @@ flyway-next-v:
 
 ## Queue
 - [ ] casehubio/devtown#266 — Issue #266 ← active
+  - [ ] Batch 1: Foundation
+    - [ ] Task 1: AdjustmentBounds + ProportionalStrategy
+    - [ ] Task 2: OutcomeQuery + CbrInformedStrategy
+  - [ ] Batch 2: Workers
+    - [ ] Task 3: DevtownEvolutionCaseHub augment + ReviewerCalibrationWorker
+    - [ ] Task 4: RoutingAdjustmentWorker + SlaThresholdWorker
+    - [ ] Task 5: GateStrictnessWorker + QueuePriorityWorker
