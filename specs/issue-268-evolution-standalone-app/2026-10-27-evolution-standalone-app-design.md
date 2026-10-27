@@ -76,7 +76,7 @@ The fetch is fire-and-forget — if it fails or returns no origin, the badge sim
 
 The `DevtownImprovementStreamView` gains a `deepLink` field populated by the backend enricher. The evolution workbench's streams tab renders these as clickable links. Clicking navigates to `/?caseId={prCaseId}` — full page navigation to the review dashboard with the PR case selected.
 
-The review dashboard's `start()` function reads `caseId` from URL query params and passes it to the PR Cases workbench for auto-selection. This is a new capability — today the dashboard doesn't read query params.
+The review dashboard's `start()` function reads `caseId` from URL search params (`new URLSearchParams(window.location.search).get('caseId')`). If present, it passes `initialCaseId` as a property to the PR Cases workbench `hostPanel()` call. The workbench uses this to auto-select the case on mount. This is a new capability — today the dashboard doesn't read query params.
 
 ## Backend Changes
 
