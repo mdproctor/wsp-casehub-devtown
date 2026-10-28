@@ -1,1 +1,1 @@
-# Design Journal — issue-271-preference-reader
+# Design Journal — issue-260-github-write-back-observers
