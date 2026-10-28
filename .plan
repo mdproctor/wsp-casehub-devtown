@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-260-github-write-back-observers
-state: closing:review
+state: closing:verified
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -10,7 +10,7 @@ covers: 260
 design-repo: 
 design-section-hashes: 
 flyway-next-v: 
-
 evidence-era: true
+
 ## Queue
-- [ ] casehubio/devtown#260 — Issue #260 ← active
+- [x] casehubio/devtown#260 — Issue #260
