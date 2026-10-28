@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 420" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#3b82f6"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="780" height="420" rx="8" fill="#fafaf9"/>
+
+  <!-- Title -->
+  <text x="390" y="32" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">Write-Back Observer Flow</text>
+
+  <!-- CDI Event Bus -->
+  <rect x="40" y="60" width="160" height="100" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="120" y="82" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">CDI Events</text>
+  <text x="120" y="100" text-anchor="middle" font-size="9" fill="#78350f">PlanItemStateChanged</text>
+  <text x="120" y="114" text-anchor="middle" font-size="9" fill="#78350f">ReviewCompleted</text>
+  <text x="120" y="128" text-anchor="middle" font-size="9" fill="#78350f">WorkItemLifecycle</text>
+  <text x="120" y="142" text-anchor="middle" font-size="9" fill="#78350f">CaseLifecycle</text>
+
+  <!-- Config guard -->
+  <rect x="260" y="80" width="140" height="60" rx="20" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="330" y="105" text-anchor="middle" font-size="10" font-weight="600" fill="#4338ca">write-back</text>
+  <text x="330" y="120" text-anchor="middle" font-size="10" font-weight="600" fill="#4338ca">enabled?</text>
+
+  <!-- Arrows from events to guard -->
+  <line x1="200" y1="110" x2="255" y2="110" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- false path -->
+  <line x1="330" y1="140" x2="330" y2="180" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <rect x="270" y="185" width="120" height="32" rx="4" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1"/>
+  <text x="330" y="205" text-anchor="middle" font-size="9" fill="#64748b">LOG.info [dev-mode]</text>
+  <text x="345" y="168" font-size="9" fill="#94a3b8">false</text>
+
+  <!-- true path -->
+  <line x1="400" y1="110" x2="460" y2="110" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="430" y="100" font-size="9" fill="#3b82f6">true</text>
+
+  <!-- Observer fan-out -->
+  <rect x="465" y="55" width="280" height="280" rx="6" fill="#f0fdf4" stroke="#22c55e" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="605" y="74" text-anchor="middle" font-size="10" font-weight="600" fill="#166534">Observers</text>
+
+  <!-- CheckRunObserver -->
+  <rect x="480" y="86" width="250" height="28" rx="4" fill="#fff" stroke="#22c55e" stroke-width="1"/>
+  <text x="490" y="104" font-size="9" font-weight="600" fill="#166534">CheckRunObserver</text>
+  <text x="680" y="104" text-anchor="end" font-size="8" fill="#6b7280">check runs per capability</text>
+
+  <!-- PrCommentObserver -->
+  <rect x="480" y="122" width="250" height="28" rx="4" fill="#fff" stroke="#22c55e" stroke-width="1"/>
+  <text x="490" y="140" font-size="9" font-weight="600" fill="#166534">PrCommentObserver</text>
+  <text x="680" y="140" text-anchor="end" font-size="8" fill="#6b7280">inline review comments</text>
+
+  <!-- ReviewRequestObserver -->
+  <rect x="480" y="158" width="250" height="28" rx="4" fill="#fff" stroke="#22c55e" stroke-width="1"/>
+  <text x="490" y="176" font-size="9" font-weight="600" fill="#166534">ReviewRequestObserver</text>
+  <text x="680" y="176" text-anchor="end" font-size="8" fill="#6b7280">request human reviewers</text>
+
+  <!-- SummaryCommentObserver -->
+  <rect x="480" y="194" width="250" height="28" rx="4" fill="#fff" stroke="#22c55e" stroke-width="1"/>
+  <text x="490" y="212" font-size="9" font-weight="600" fill="#166534">SummaryCommentObserver</text>
+  <text x="680" y="212" text-anchor="end" font-size="8" fill="#6b7280">dispatch + completion posts</text>
+
+  <!-- GitHub API -->
+  <rect x="520" y="248" width="190" height="70" rx="6" fill="#fff" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="615" y="272" text-anchor="middle" font-size="11" font-weight="600" fill="#1e293b">GitHub API</text>
+  <text x="615" y="288" text-anchor="middle" font-size="9" fill="#6b7280">Check Runs · PR Reviews</text>
+  <text x="615" y="302" text-anchor="middle" font-size="9" fill="#6b7280">Review Requests · Comments</text>
+
+  <!-- Arrows from observers to GitHub -->
+  <line x1="615" y1="222" x2="615" y2="243" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Graceful failure note -->
+  <rect x="40" y="350" width="700" height="50" rx="6" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
+  <text x="390" y="372" text-anchor="middle" font-size="10" font-weight="600" fill="#991b1b">Graceful Degradation</text>
+  <text x="390" y="388" text-anchor="middle" font-size="9" fill="#7f1d1d">All observers catch exceptions and log warnings — no GitHub credentials means no-op, not crash</text>
+</svg>
