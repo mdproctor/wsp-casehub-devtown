@@ -1,23 +1,15 @@
-# Work Plan — issue-266-evolution-apply-workers
+# Work Plan — issue-271-preference-reader
 
 ## State
-branch: issue-266-evolution-apply-workers
-state: closing:stamped
+branch: issue-271-preference-reader
+state: scaffolded
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
-covers: 266
+covers: 271
 design-repo: 
 design-section-hashes: 
 flyway-next-v: 
 
-evidence-era: true
 ## Queue
-- [ ] casehubio/devtown#266 — Issue #266 ← active
-  - [x] Batch 1: Foundation
-    - [x] Task 1: AdjustmentBounds + ProportionalStrategy
-    - [x] Task 2: OutcomeQuery + CbrInformedStrategy
-  - [x] Batch 2: Workers
-    - [x] Task 3: DevtownEvolutionCaseHub augment + ReviewerCalibrationWorker
-    - [x] Task 4: RoutingAdjustmentWorker + SlaThresholdWorker
-    - [x] Task 5: GateStrictnessWorker + QueuePriorityWorker
+- [ ] casehubio/devtown#271 — Issue #271 ← active
