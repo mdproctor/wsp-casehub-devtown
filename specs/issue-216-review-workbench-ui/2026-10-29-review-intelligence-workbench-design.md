@@ -45,7 +45,7 @@ A toggle chip in the filter bar switches between spine and table views. Both sha
 - **Spine view:** Vertical list of cases, each with a header card and indented event nodes. Cases with in-progress or attention-needed nodes expand automatically; completed cases collapse to a summary row with status dot indicators (D14).
 - **Table view:** Dense sortable table with columns: PR#, repo, author, status, lines, wait time. Equivalent to current PR Cases list for ops scanning scenarios.
 
-Filter chips carry over: All, In Review, Needs Decision.
+Filter chips carry over: All, In Review, Needs Decision. The Review Workbench scopes to review-lifecycle cases only — QUEUED and BATCHED PRs are excluded at the data level (filtered from the unified model before rendering) and appear exclusively in the Merge Queue tab. The "All" chip shows all review-lifecycle cases across stages, not all PRs system-wide.
 
 **Scalability (D4):** At high volume (50+ active cases), the spine is a flat scrollable list of uniform-ish height divs. Virtual scrolling can be added as a standard windowing solution without architectural changes — the flat-div spine (D7) was chosen specifically to enable this.
 
@@ -55,15 +55,17 @@ A single `<intelligence-pane>` component that switches content based on which ti
 
 | Node type | Sections shown | Data sources |
 |-----------|---------------|--------------|
-| **Case header** | Contributor profile, similar past cases (CBR), code classification, policy context, SLA estimate | `GET /reviews/{caseId}`, `GET /reviews/contributors/{actorId}`, `GET /mcp/devtown/model/similarCases?repo=...&prNumber=...` |
-| **Dispatch** | Selection rationale (with alternatives), agent profile, routing strategy | `GET /trust/{actorId}/routing-history/{entryId}`, `GET /reviews/reviewers/{actorId}` |
-| **Findings** | Finding list (severity, file, confidence), precedent comparison (CBR confirmation rate) | `GET /reviews/{caseId}` (findings data), `GET /mcp/devtown/model/similarCases` (aggregate confirmation rate client-side) |
+| **Case header** | Contributor profile, similar past cases (CBR), code classification, policy context, SLA estimate | `GET /reviews/{caseId}`, `GET /reviews/contributors/{actorId}`, `GET /reviews/{caseId}/similar-cases` (§5.1) |
+| **Dispatch** | Selection rationale (with alternatives), agent profile, routing strategy | `GET /trust/{actorId}/routing-history/{entryId}` (`entryId` from enriched `RoutingDecision` — §5.2), `GET /reviews/reviewers/{actorId}` |
+| **Findings** | Finding list (severity, file, confidence), precedent comparison (CBR confirmation rate) | `GET /reviews/{caseId}` (findings data), `GET /reviews/{caseId}/similar-cases` (aggregate confirmation rate client-side) |
 | **Human gate** | WorkItem status, what needs deciding, decision history for candidate group | Triage data from unified model, `GET /reviews/contributors/{candidateGroup}` |
 | **CI / Lifecycle** | Event detail, timestamp, status | Inline from spine event data (no additional fetch) |
 
 When a case is selected from the table view (not a specific node), the intelligence pane defaults to the **case header** view.
 
 For **queue, triage, and batch** contexts, the existing `pr-detail.ts` component renders in the detail slot instead of the intelligence pane (D11). The workbench knows the context from the `UnifiedPrRow.stage` field.
+
+**Known data gaps:** `TrustScoreSnapshot` has been removed from the ledger (pending replacement entity). This affects the dispatch view: trust trend data (`TrustQueryService.trustTrend()`) returns empty, and gate decision before/after scores are unavailable (`0.0` placeholders). Current trust scores remain available via `TrustGateService.currentScore()`. The intelligence pane renders "Data unavailable" for trend charts and "—" for zeroed gate scores rather than displaying misleading zeros.
 
 ### 3.3 Timeline Spine Component
 
@@ -89,15 +91,17 @@ A dedicated strategy module (not `reviewTimelineStrategy`) that synthesizes comp
 
 Shares category icon mapping and status colour logic with `reviewTimelineStrategy` via shared imports — the synthesis logic (combining event type + capability + actor + outcome into a label) is strategy-specific.
 
+Labels for expanded event nodes are synthesised from the `GET /reviews/{caseId}` timeline response — event metadata includes `capabilityName` and `actorId`, which are sufficient for labels like "Security review → agent-3". Collapsed rows do not show per-event labels — they show only the coarse status indicator derived from the unified model (see collapse/expand section above).
+
 **Collapse/expand behaviour (D14):**
 
-- **Collapsed row:** Case header with PR number, short title, author, line count, status summary text, and status dot indicators (coloured dots: green=complete, yellow=in-progress, red=attention, grey=pending).
-- **Expanded view:** Case header (clickable to collapse) followed by indented event nodes with `●/◐/○` indicators and timestamps.
-- **Smart default:** Cases are expanded if they have any node in `in-progress`, `reviewing`, or `pending-decision` state. Cases where all nodes are `complete` or `approved` are collapsed.
+- **Collapsed row:** Case header with PR number, short title, author, line count, and a single status indicator derived from the unified model's `stage` and `status` fields. No per-event dots — collapsed rows use only data available from the initial unified model fetch (no `GET /reviews/{caseId}` needed). Status indicator mapping: REVIEW+ANALYSING → blue (early stage), REVIEW+IN_REVIEW → yellow (in progress), HUMAN_GATE → red (needs attention), APPROVED/COMPLETED → green (done).
+- **Expanded view:** Case header (clickable to collapse) followed by indented event nodes with `●/◐/○` indicators and timestamps. Per-event data comes from `GET /reviews/{caseId}` fetched on expand.
+- **Smart default:** Cases are expanded if their unified model `stage` is `REVIEW` (with `status` not `APPROVED`/`COMPLETED`) or `HUMAN_GATE`. Cases with `stage` in `QUEUED`, `BATCHED`, or with `status` `APPROVED`/`COMPLETED` are collapsed. This uses only data from the initial unified model fetch — no per-event data is required for expand/collapse decisions.
 - **Manual override:** Clicking a case header toggles expand/collapse. The user's manual choices persist until the data refreshes.
 - **Edge case:** A case with all review nodes complete but not yet merged (awaiting queue entry) will be collapsed by the smart default. The "Needs Decision" filter chip surfaces these if the user is looking for them.
 
-**Border colour:** Left border of collapsed rows reflects overall case status: green (all clear), yellow (in progress), red (needs attention / human gate), blue (early stage / analysing).
+**Border colour:** Left border of collapsed rows reflects overall case status derived from the unified model's `stage` and `status` fields: green (`status` = APPROVED/COMPLETED), yellow (`stage` = REVIEW, `status` = IN_REVIEW), red (`stage` = HUMAN_GATE), blue (`stage` = REVIEW, `status` = ANALYSING).
 
 ### 3.4 Intelligence Pane Component
 
@@ -123,7 +127,17 @@ Each section fires its own `fetch()` on mount. A lightweight dedup cache (`Map<s
 
 ### 3.5 Real-Time Updates
 
-The spine data set uses the `triggerUrl + triggerFilter` pattern from `datasets.ts` (D6). WebSocket events from `/api/governance/events` trigger selective REST re-fetches of spine data. This is consistent with how `plan-items`, `goal-status`, and `case-context` datasets already work — the `pages-data` framework manages WebSocket connection, reconnection, and trigger filtering.
+The spine data refreshes via WebSocket-triggered re-fetch using the `triggerUrl + triggerFilter` pattern from `datasets.ts` (D6). The existing `queue-status` dataset entry in `createDatasets()` gains `triggerUrl` and `triggerFilter` properties:
+
+| Property | Value |
+|----------|-------|
+| Dataset ID | `queue-status` (existing entry, enhanced) |
+| REST URL | `/api/devtown/governance/queue-status` |
+| Trigger URL | `ws[s]://{host}/api/governance/events` (same WebSocket used by `plan-items`, `goal-status`, `case-context`) |
+| Trigger filter | `(e) => e.topic === "case.status" \|\| e.topic === "planitem.state"` |
+| Data path | `reviews` |
+
+This is consistent with how `plan-items`, `goal-status`, and `case-context` datasets already work — the `pages-data` framework manages WebSocket connection, reconnection, and trigger filtering. The spine component consumes the `queue-status` dataset via framework-managed data binding.
 
 No manual WebSocket subscription or client-side case-ID filtering is needed.
 
@@ -146,9 +160,9 @@ No manual WebSocket subscription or client-side case-ID filtering is needed.
 | `src/index.ts` | Register new panels (`review-spine`, `intelligence-pane`), remove `session-workbench` and `definitions` registrations, mount `operations-workbench` | Panel registration block |
 | `src/components/pr-cases-workbench.ts` | Add spine/table toggle chip, integrate `<review-spine>` in list slot, switch detail slot between `<intelligence-pane>` (review context) and `<devtown-pr-detail>` (queue/triage/batch) | List slot content, detail slot switching, toggle state |
 | `src/components/pr-detail.ts` | Remove review-mode rendering (trust section, routing, timeline, findings) — narrow to queue context (priority lane, trust score, wait time, dependencies), triage context (decision type, escalation), and batch context only | Remove ~150 lines of review-mode rendering |
-| `src/components/operations-workbench.ts` | Add collapsible "Sessions" section sourcing from `/api/sessions` (previously Workers tab content) | New section at bottom |
+| `src/components/operations-workbench.ts` | (1) Add collapsible "Sessions" section sourcing from `/api/sessions` — currently a dev-mode stub (`DevModeStubResource.sessions()`) returning empty data; section renders "No session data" when empty. (2) Fix `_navigateToReview()`: replace brittle `textContent?.trim() === 'Reviews'` tab selector with `data-panel-id` attribute matching (current selector is already broken against the `'PR Cases'` tab label). (3) `setInterval` polling migration to WebSocket triggers deferred — acknowledged as inconsistent with §3.5 pattern | Sessions section, navigation fix, scope note |
 | `src/components/system-workbench.ts` | Remove problems display and active data. Focus on SLA calibration table, merge queue configuration, fleet settings | Remove problems table, health cards refocused |
-| `src/datasets.ts` | Add spine data set binding with `triggerUrl` for WebSocket-triggered re-fetch | New dataset entry |
+| `src/datasets.ts` | Enhance existing `queue-status` dataset entry with `triggerUrl` and `triggerFilter` for WebSocket-triggered re-fetch (§3.5). No new dataset entry needed — the existing binding is augmented | WebSocket trigger properties on existing entry |
 
 ### 4.3 Deleted/Retired Files
 
@@ -170,16 +184,36 @@ No manual WebSocket subscription or client-side case-ID filtering is needed.
 
 ## 5. Backend Changes
 
-None required. All intelligence data is already served by existing endpoints:
+Two targeted backend changes are required.
 
-- `GET /api/devtown/reviews/{caseId}` — review detail with timeline, capabilities, routing, findings
+### 5.1 REST endpoint for CBR similar cases
+
+`MemoryQueryResolver.similarCases()` is exposed via GraphQL and MCP protocol only — it uses `@GraphQLApi` + `@Query` without `basePath`/`@PlatformQuery`/`@RestPath`. The frontend intelligence pane cannot call it via `fetch()`.
+
+**Change:** Add a REST endpoint to `DevtownReviewApi`:
+
+| Annotation | Value |
+|------------|-------|
+| `@PlatformQuery` | `"Find similar cases by CBR"` |
+| `@RestPath` | `"/{caseId}/similar-cases"` |
+
+This delegates to `CbrRetrievalService.findSimilar()`, extracting PR parameters (`repo`, `prNumber`, `contributor`, `linesChanged`, `changedPaths`) from the case's `PrPayload`. The frontend calls `GET /api/devtown/reviews/{caseId}/similar-cases` with only the case ID — no need to pass CBR parameters explicitly.
+
+### 5.2 Routing entry ID in ReviewDetail
+
+The intelligence pane's dispatch view needs `GET /trust/{actorId}/routing-history/{entryId}` for full routing rationale with alternatives. Currently, `ReviewDetail.RoutingDecision` contains `(capability, reason, confidence, bindingName)` but no `entryId` — the `WorkerDecisionEntry.id` is not in the AGENT_ROUTED event metadata.
+
+**Change:** Enrich `GovernanceQueryService.reviewDetail()` to correlate routing decisions with `WorkerDecisionEntry` records by `caseId` + `capabilityTag`, adding the `entryId` to each `RoutingDecision`. Update the record: `RoutingDecision(capability, reason, confidence, bindingName, entryId)`.
+
+### Existing endpoints (no changes)
+
+- `GET /api/devtown/reviews/{caseId}` — review detail with timeline, capabilities, routing (now enriched with `entryId`), findings
 - `GET /api/devtown/reviews/contributors/{actorId}` — contributor profile with GitHub intelligence
 - `GET /api/devtown/reviews/reviewers/{actorId}` — reviewer health with trust scores
 - `GET /api/devtown/trust/{actorId}/routing-history/{entryId}` — routing decision rationale with candidates
-- `similarCases` query via `MemoryQueryResolver` (`@McpDomain`) — CBR precedents with capability outcomes
 - `GET /api/devtown/governance/sla-comparison` — SLA calibration data
 
-CBR confirmation rate is computed client-side from the `capabilityOutcomes` in the `similarCases` response (D5). If the precedent pool grows beyond ~20 results, server-side aggregation becomes a separate decision.
+CBR confirmation rate is computed client-side from the `capabilityOutcomes` in the similar cases response (D5). If the precedent pool grows beyond ~20 results, server-side aggregation becomes a separate decision.
 
 ## 6. Testing Strategy
 
@@ -210,12 +244,12 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 |-----------|---------------|
 | Timeline renders case lifecycle as clickable decision nodes | `review-spine.ts` with `spineNodeStrategy` — each event is a clickable node |
 | Intelligence pane shows contributor, code, reviewer, policy context | `intelligence-pane.ts` case header view — parallel fetches for ContributorDetail, CodeAnalysisResult, routing policy |
-| Dispatch nodes show trust-based selection rationale with alternatives | `intelligence-pane.ts` dispatch view — `GET /trust/{actorId}/routing-history/{entryId}` returns CandidateScore list |
-| Findings nodes show precedent comparison from CBR | `intelligence-pane.ts` findings view — `similarCases` query, client-side confirmation rate |
+| Dispatch nodes show trust-based selection rationale with alternatives | `intelligence-pane.ts` dispatch view — `entryId` from enriched `RoutingDecision` (§5.2), then `GET /trust/{actorId}/routing-history/{entryId}` for CandidateScore list |
+| Findings nodes show precedent comparison from CBR | `intelligence-pane.ts` findings view — `GET /reviews/{caseId}/similar-cases` (§5.1), client-side confirmation rate |
 | Human gate nodes show WorkItem status, what needs deciding, decision history | `intelligence-pane.ts` human gate view — triage data + contributor decision history |
 | Contributor click-through shows full ContributorDetail including GitHubIntelligence | `GET /reviews/contributors/{actorId}` already returns full profile with `githubIntelligence` |
 | Timeline updates in real-time via WebSocket events | `triggerUrl + triggerFilter` pattern in `datasets.ts` — existing WebSocket triggers re-fetch |
-| Data from existing services — no new backend | All endpoints exist; no backend changes |
+| Data from existing services — minimal backend | Two targeted backend additions (§5): REST exposure for `similarCases` via `DevtownReviewApi`, `entryId` enrichment in `RoutingDecision`. All other intelligence data served by existing endpoints |
 
 ## 8. Decisions
 
@@ -240,6 +274,6 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 - `app/src/main/webui/src/components/shared/` — shared rendering primitives (trust-bar, dimension-grid, badge, etc.)
 - `app/src/main/java/io/casehub/devtown/app/governance/GovernanceQueryService.java` — central query service
 - `app/src/main/java/io/casehub/devtown/app/governance/TrustQueryService.java` — trust scores and routing history
-- `app/src/main/java/io/casehub/devtown/app/mcp/MemoryQueryResolver.java` — similarCases CBR query
+- `app/src/main/java/io/casehub/devtown/app/mcp/MemoryQueryResolver.java` — similarCases CBR query (GraphQL/MCP only; REST access via `DevtownReviewApi` §5.1)
 - Issue #216 — full requirements and acceptance criteria
 - Visual companion mockups: `before-after-tabs.html`, `spine-collapse-expand.html`
