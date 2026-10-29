@@ -1,0 +1,15 @@
+# Work Plan — issue-216-review-workbench-ui
+
+## State
+branch: issue-216-review-workbench-ui
+state: scaffolded
+project-sha: 5941f5a
+date: 2026-10-29
+issue-repo: casehubio/devtown
+covers: 216
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [ ] casehubio/devtown#216 — Issue #216 ← active
