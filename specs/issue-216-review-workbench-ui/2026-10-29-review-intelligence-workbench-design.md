@@ -42,7 +42,7 @@ The Review Workbench uses the existing `pages-split-workbench` split-pane layout
 
 A toggle chip in the filter bar switches between spine and table views. Both share the same data source (`UnifiedPrRow` model) and selection mechanism — clicking a case in either view populates the intelligence pane.
 
-- **Spine view:** Vertical list of cases, each with a header card and indented event nodes. Cases with in-progress or attention-needed nodes expand automatically; completed cases collapse to a summary row with status dot indicators (D14).
+- **Spine view:** Vertical list of cases, each with a header card and indented event nodes. Cases with in-progress or attention-needed nodes expand automatically; completed cases collapse to a summary row with a single status indicator (D14).
 - **Table view:** Dense sortable table with columns: PR#, repo, author, status, lines, wait time. Equivalent to current PR Cases list for ops scanning scenarios.
 
 Filter chips carry over: All, In Review, Needs Decision. The Review Workbench scopes to review-lifecycle cases only — QUEUED and BATCHED PRs are excluded at the data level (filtered from the unified model before rendering) and appear exclusively in the Merge Queue tab. The "All" chip shows all review-lifecycle cases across stages, not all PRs system-wide.
@@ -225,8 +225,9 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 ### 6.1 Unit Tests
 
 - `spine-node-strategy.ts` — label synthesis for each event type, status colour mapping, category icon selection
-- `intelligence-pane.ts` — node-type switching renders correct sections, dedup cache TTL behaviour
+- `intelligence-pane.ts` — node-type switching renders correct sections, dedup cache TTL behaviour, two-tier dispatch rendering (entryId null → basic rationale + "full rationale available" message; entryId present → full routing detail with candidate alternatives)
 - `review-spine.ts` — smart default expand logic (expand active, collapse done), manual toggle override
+- `merge-queue-workbench.ts` — selection ↔ pr-detail binding (queue mode for queued PR selection, batch mode for batch selection), filter/sort behaviour on queued PRs table, active batches display
 
 ### 6.2 Integration Tests
 

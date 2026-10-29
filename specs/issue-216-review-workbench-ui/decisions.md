@@ -124,18 +124,18 @@
 **Exploration:** surfaced by review (R1-03)
 **Status:** captured
 
-## D11: pr-detail coexists with intelligence pane, narrowed to queue/triage/batch modes
+## D11: pr-detail moves to Merge Queue tab for queue/batch modes
 
-**Choice:** pr-detail retains queue, triage, and batch rendering modes. The intelligence pane handles review-mode detail with node-type-specific rendering. The split workbench's detail slot switches between intelligence pane (review case selected — from either spine or table mode per D1) and pr-detail (queue/triage/batch context active).
+**Choice:** pr-detail retains queue and batch rendering modes only. Its sole consumer is `merge-queue-workbench` (not `pr-cases-workbench`). The Review Workbench detail slot always renders the intelligence pane. Triage/human-gate rendering is removed from pr-detail — handled by the intelligence pane's human gate node type.
 **Alternatives:**
-- Retire pr-detail entirely — forces replication of queue/triage/batch rendering in the intelligence pane, which has different concerns
-- Keep pr-detail for all modes — defeats the purpose of the intelligence pane for review detail
+- Retire pr-detail entirely — forces replication of queue/batch rendering in the intelligence pane or merge-queue-workbench
+- Keep pr-detail in Review Workbench — after R1-09 scoping (QUEUED/BATCHED excluded), pr-detail has no trigger condition in the Review Workbench
 - Merge everything into intelligence pane with mode switching — creates a god-component handling both review intelligence and operational context
-**Rationale:** `pr-detail.ts` (lines 63-70) serves three distinct modes: review detail, queue context (priority lane, trust score, wait time, dependencies), and triage context (decision type, candidate group, escalation stage). The intelligence pane replaces review-mode detail with richer, node-type-specific views. Queue and triage modes are operational views with different concerns — they show queue position and decision urgency, not review intelligence. Keeping pr-detail for these modes avoids scope creep in the intelligence pane.
-**Trade-offs:** Two detail components in the detail slot, requiring mode-switching logic. Straightforward — the workbench already knows whether the selection is a review case (from spine or table) vs queue/triage entry.
-**Sources:** pr-detail.ts mode/stage/queueContext/triageContext properties, pr-cases-workbench.ts detail slot rendering
-**Exploration:** surfaced by review (R1-11)
-**Status:** captured
+**Rationale:** After R1-09 scoped the Review Workbench to review-lifecycle cases only, QUEUED/BATCHED PRs are excluded and HUMAN_GATE is handled by the intelligence pane's human gate view. pr-detail's remaining queue and batch modes belong in the Merge Queue tab, which uses its own `pages-split-workbench` layout with pr-detail in the detail slot.
+**Trade-offs:** pr-detail's consumer changes from pr-cases-workbench to merge-queue-workbench. Triage mode is removed (~30 lines) — handled by intelligence pane instead.
+**Sources:** pr-detail.ts mode/stage/queueContext properties, merge-queue-workbench.ts detail slot rendering
+**Exploration:** surfaced by review (R1-11), revised after R1-09 scoping
+**Status:** revised (R1-09 scoping change, D11 clause review in Round 2)
 
 ## D12: Parallel client-side fetches for intelligence pane (no backend aggregation)
 
