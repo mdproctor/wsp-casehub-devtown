@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-216-review-workbench-ui
-state: active
+state: closing:review
 project-sha: 5941f5a
 date: 2026-10-29
 issue-repo: casehubio/devtown
@@ -11,6 +11,7 @@ design-repo: project
 design-section-hashes: 
 flyway-next-v: unknown
 
+evidence-era: true
 ## Queue
 - [ ] casehubio/devtown#216 — Issue #216 ← active
   - [x] Batch 1: Backend Foundation
