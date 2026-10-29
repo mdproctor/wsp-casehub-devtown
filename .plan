@@ -1,0 +1,15 @@
+# Work Plan — issue-286-prdiff-client-mosaic-prune
+
+## State
+branch: issue-286-prdiff-client-mosaic-prune
+state: scaffolded
+project-sha: 
+date: 
+issue-repo: casehubio/devtown
+covers: 286,290
+design-repo: 
+design-section-hashes: 
+flyway-next-v: 
+
+## Queue
+- [ ] casehubio/devtown#286 — Issue #286 ← active
