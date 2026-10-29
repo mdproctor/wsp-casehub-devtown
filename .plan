@@ -13,15 +13,15 @@ flyway-next-v: unknown
 
 ## Queue
 - [ ] casehubio/devtown#216 — Issue #216 ← active
-  - [ ] Batch 1: Backend Foundation
-    - [ ] Task 1: CBR similar-cases REST endpoint
-    - [ ] Task 2: RoutingDecision entryId enrichment
-  - [ ] Batch 2: Spine + Strategy
-    - [ ] Task 3: Spine node strategy module
-    - [ ] Task 4: Review spine component
-  - [ ] Batch 3: Intelligence Pane + Integration
-    - [ ] Task 5: Intelligence pane component
-    - [ ] Task 6: Tab restructure + workbench integration
-  - [ ] Batch 4: Merge Queue + Cleanup
-    - [ ] Task 7: Merge queue workbench
-    - [ ] Task 8: pr-detail narrowing + Operations/System cleanup
+  - [x] Batch 1: Backend Foundation
+    - [x] Task 1: CBR similar-cases REST endpoint
+    - [x] Task 2: RoutingDecision entryId enrichment
+  - [x] Batch 2: Spine + Strategy
+    - [x] Task 3: Spine node strategy module
+    - [x] Task 4: Review spine component
+  - [x] Batch 3: Intelligence Pane + Integration
+    - [x] Task 5: Intelligence pane component
+    - [x] Task 6: Tab restructure + workbench integration
+  - [x] Batch 4: Merge Queue + Cleanup
+    - [x] Task 7: Merge queue workbench
+    - [x] Task 8: pr-detail narrowing + Operations/System cleanup
