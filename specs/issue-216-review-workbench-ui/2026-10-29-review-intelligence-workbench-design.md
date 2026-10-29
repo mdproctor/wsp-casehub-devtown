@@ -27,7 +27,7 @@ Six tabs, reordered by daily-use priority:
 |-----|---------|-----------|---------------|
 | **Review Workbench** (default) | Spine/table + intelligence pane | `pr-cases-workbench` (modified) | `/api/devtown/governance/queue-status`, `/api/devtown/reviews` |
 | **Operations** | Live: problems, active reviews, event stream, sessions | `operations-workbench` (now mounted + sessions section) | `/api/devtown/governance/problems`, `/api/devtown/governance/recent-events` |
-| **Merge Queue** | Batches, wait times, throughput, ordering | Extracted from PR Cases "Queued" filter | `/api/devtown/governance/merge-queue`, `/api/devtown/governance/merge-queue/metrics` |
+| **Merge Queue** | Batches, wait times, throughput, ordering | `merge-queue-workbench` (new — extracted from PR Cases "Queued" filter + active batches) | `/api/devtown/governance/merge-queue`, `/api/devtown/governance/merge-queue/metrics` |
 | **Reviewers** | Trust scores, routing effectiveness, decision history | `reviewer-workbench` (unchanged) | `/api/devtown/reviews/reviewers` |
 | **Contributors** | Trust, intake lanes, quality, GitHub intelligence | `contributor-workbench` (unchanged) | `/api/devtown/reviews/contributors` |
 | **System** | SLA calibration, merge queue config, fleet settings | `system-workbench` (refactored) | `/api/devtown/governance/sla-comparison`, `/api/devtown/governance/preferences` |
@@ -47,15 +47,17 @@ A toggle chip in the filter bar switches between spine and table views. Both sha
 
 Filter chips carry over: All, In Review, Needs Decision.
 
+**Scalability (D4):** At high volume (50+ active cases), the spine is a flat scrollable list of uniform-ish height divs. Virtual scrolling can be added as a standard windowing solution without architectural changes — the flat-div spine (D7) was chosen specifically to enable this.
+
 **Right region — Intelligence Pane:**
 
 A single `<intelligence-pane>` component that switches content based on which timeline node (or table row) is clicked. Five primary node types, each with its own data requirements and layout:
 
 | Node type | Sections shown | Data sources |
 |-----------|---------------|--------------|
-| **Case header** | Contributor profile, similar past cases (CBR), code classification, policy context, SLA estimate | `GET /reviews/{caseId}`, `GET /reviews/contributors/{actorId}`, `similarCases` MCP query |
+| **Case header** | Contributor profile, similar past cases (CBR), code classification, policy context, SLA estimate | `GET /reviews/{caseId}`, `GET /reviews/contributors/{actorId}`, `GET /mcp/devtown/model/similarCases?repo=...&prNumber=...` |
 | **Dispatch** | Selection rationale (with alternatives), agent profile, routing strategy | `GET /trust/{actorId}/routing-history/{entryId}`, `GET /reviews/reviewers/{actorId}` |
-| **Findings** | Finding list (severity, file, confidence), precedent comparison (CBR confirmation rate) | `GET /reviews/{caseId}` (findings data), `similarCases` MCP query (aggregate client-side) |
+| **Findings** | Finding list (severity, file, confidence), precedent comparison (CBR confirmation rate) | `GET /reviews/{caseId}` (findings data), `GET /mcp/devtown/model/similarCases` (aggregate confirmation rate client-side) |
 | **Human gate** | WorkItem status, what needs deciding, decision history for candidate group | Triage data from unified model, `GET /reviews/contributors/{candidateGroup}` |
 | **CI / Lifecycle** | Event detail, timestamp, status | Inline from spine event data (no additional fetch) |
 
@@ -93,6 +95,7 @@ Shares category icon mapping and status colour logic with `reviewTimelineStrateg
 - **Expanded view:** Case header (clickable to collapse) followed by indented event nodes with `●/◐/○` indicators and timestamps.
 - **Smart default:** Cases are expanded if they have any node in `in-progress`, `reviewing`, or `pending-decision` state. Cases where all nodes are `complete` or `approved` are collapsed.
 - **Manual override:** Clicking a case header toggles expand/collapse. The user's manual choices persist until the data refreshes.
+- **Edge case:** A case with all review nodes complete but not yet merged (awaiting queue entry) will be collapsed by the smart default. The "Needs Decision" filter chip surfaces these if the user is looking for them.
 
 **Border colour:** Left border of collapsed rows reflects overall case status: green (all clear), yellow (in progress), red (needs attention / human gate), blue (early stage / analysing).
 
@@ -133,6 +136,7 @@ No manual WebSocket subscription or client-side case-ID filtering is needed.
 | `src/components/review-spine.ts` | `<review-spine>` | ~300 | Flat-list spine with collapse/expand, smart default, filter chips, data binding |
 | `src/components/spine-node-strategy.ts` | (module) | ~100 | Label synthesis, shared category icons, status colour mapping |
 | `src/components/intelligence-pane.ts` | `<intelligence-pane>` | ~400 | Node-type switching, section composition, dedup cache, parallel fetches |
+| `src/components/merge-queue-workbench.ts` | `<merge-queue-workbench>` | ~250 | Merge queue tab: queued PRs table, active batches, wait times, throughput metrics. Extracted from PR Cases "Queued" filter + active batches section |
 
 ### 4.2 Modified Files
 
