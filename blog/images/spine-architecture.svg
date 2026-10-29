@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" font-family="system-ui, -apple-system, sans-serif">
+
+  <!-- Title -->
+  <text x="380" y="24" font-size="13" font-weight="600" fill="#333" text-anchor="middle">Why Flat Divs, Not N Timeline Instances</text>
+
+  <!-- LEFT: N instances approach (crossed out) -->
+  <rect x="20" y="44" width="340" height="260" rx="6" fill="#fff8f8" stroke="#e8a0a0"/>
+  <text x="190" y="68" font-size="11" font-weight="600" fill="#b91c1c" text-anchor="middle">Option A: One &lt;agency-timeline&gt; per case</text>
+
+  <!-- Shadow DOM boxes -->
+  <rect x="40" y="84" width="300" height="50" rx="4" fill="#fff" stroke="#ddd"/>
+  <text x="50" y="100" font-size="10" fill="#666">Shadow Root #1</text>
+  <text x="50" y="116" font-size="9" fill="#999">filter categories · pagination · detail expansion · endpoint binding</text>
+  <rect x="44" y="88" width="8" height="8" rx="1" fill="#e8a0a0" opacity="0.5"/>
+
+  <rect x="40" y="142" width="300" height="50" rx="4" fill="#fff" stroke="#ddd"/>
+  <text x="50" y="158" font-size="10" fill="#666">Shadow Root #2</text>
+  <text x="50" y="174" font-size="9" fill="#999">filter categories · pagination · detail expansion · endpoint binding</text>
+  <rect x="44" y="146" width="8" height="8" rx="1" fill="#e8a0a0" opacity="0.5"/>
+
+  <rect x="40" y="200" width="300" height="50" rx="4" fill="#fff" stroke="#ddd"/>
+  <text x="50" y="216" font-size="10" fill="#666">Shadow Root #N</text>
+  <text x="50" y="232" font-size="9" fill="#999">filter categories · pagination · detail expansion · endpoint binding</text>
+  <rect x="44" y="204" width="8" height="8" rx="1" fill="#e8a0a0" opacity="0.5"/>
+
+  <text x="190" y="274" font-size="10" fill="#b91c1c" text-anchor="middle">20 cases = 20 shadow DOM subtrees</text>
+  <text x="190" y="290" font-size="10" fill="#b91c1c" text-anchor="middle">Each carries unused features</text>
+
+  <!-- Cross -->
+  <line x1="30" y1="54" x2="350" y2="294" stroke="#dc2626" stroke-width="2" opacity="0.3"/>
+  <line x1="350" y1="54" x2="30" y2="294" stroke="#dc2626" stroke-width="2" opacity="0.3"/>
+
+  <!-- RIGHT: Flat div approach -->
+  <rect x="400" y="44" width="340" height="260" rx="6" fill="#f0fdf4" stroke="#86efac"/>
+  <text x="570" y="68" font-size="11" font-weight="600" fill="#166534" text-anchor="middle">Option B: Flat &lt;div&gt; list</text>
+
+  <!-- Flat divs -->
+  <rect x="420" y="84" width="300" height="24" rx="3" fill="#fff" stroke="#86efac"/>
+  <rect x="420" y="84" width="3" height="24" rx="1" fill="#fbbf24"/>
+  <text x="432" y="100" font-size="10" fill="#333">PR #101 case header</text>
+
+  <rect x="440" y="114" width="260" height="16" rx="2" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="452" y="126" font-size="9" fill="#4ade80">● Opened</text>
+  <rect x="440" y="134" width="260" height="16" rx="2" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="452" y="146" font-size="9" fill="#4ade80">● Code analysis: security-sensitive</text>
+  <rect x="440" y="154" width="260" height="16" rx="2" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="452" y="166" font-size="9" fill="#fbbf24">◐ Security review: 2 findings</text>
+
+  <rect x="420" y="180" width="300" height="24" rx="3" fill="#fff" stroke="#86efac"/>
+  <rect x="420" y="180" width="3" height="24" rx="1" fill="#4ade80"/>
+  <text x="432" y="196" font-size="10" fill="#333">PR #98 case header (collapsed)</text>
+
+  <rect x="420" y="210" width="300" height="24" rx="3" fill="#fff" stroke="#86efac"/>
+  <rect x="420" y="210" width="3" height="24" rx="1" fill="#f87171"/>
+  <text x="432" y="226" font-size="10" fill="#333">PR #95 case header (collapsed)</text>
+
+  <text x="570" y="260" font-size="10" fill="#166534" text-anchor="middle">Single DOM tree, uniform heights</text>
+  <text x="570" y="276" font-size="10" fill="#166534" text-anchor="middle">Virtual scrolling trivial to add</text>
+  <text x="570" y="292" font-size="10" fill="#166534" text-anchor="middle">Shared strategy imports, no wasted features</text>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" font-family="system-ui, -apple-system, sans-serif">
+
+  <text x="380" y="24" font-size="13" font-weight="600" fill="#333" text-anchor="middle">Intelligence Pane: Click a Node, See Its Context</text>
+
+  <!-- Node types on the left -->
+  <rect x="20" y="50" width="140" height="200" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="90" y="70" font-size="10" font-weight="600" fill="#64748b" text-anchor="middle">CLICKED NODE</text>
+
+  <!-- Node type boxes -->
+  <rect x="32" y="82" width="116" height="24" rx="3" fill="#dbeafe" stroke="#60a5fa"/>
+  <text x="90" y="98" font-size="10" fill="#1e40af" text-anchor="middle">Case Header</text>
+
+  <rect x="32" y="114" width="116" height="24" rx="3" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="90" y="130" font-size="10" fill="#92400e" text-anchor="middle">Dispatch</text>
+
+  <rect x="32" y="146" width="116" height="24" rx="3" fill="#fce7f3" stroke="#ec4899"/>
+  <text x="90" y="162" font-size="10" fill="#9d174d" text-anchor="middle">Findings</text>
+
+  <rect x="32" y="178" width="116" height="24" rx="3" fill="#fee2e2" stroke="#ef4444"/>
+  <text x="90" y="194" font-size="10" fill="#991b1b" text-anchor="middle">Human Gate</text>
+
+  <rect x="32" y="210" width="116" height="24" rx="3" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="90" y="226" font-size="10" fill="#475569" text-anchor="middle">Lifecycle / CI</text>
+
+  <!-- Arrows to data sources -->
+  <!-- Case Header arrows -->
+  <line x1="148" y1="94" x2="300" y2="76" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="148" y1="94" x2="300" y2="116" stroke="#60a5fa" stroke-width="1.5"/>
+  <line x1="148" y1="94" x2="300" y2="156" stroke="#60a5fa" stroke-width="1.5"/>
+
+  <!-- Dispatch arrows -->
+  <line x1="148" y1="126" x2="300" y2="116" stroke="#f59e0b" stroke-width="1.5"/>
+  <line x1="148" y1="126" x2="300" y2="196" stroke="#f59e0b" stroke-width="1.5"/>
+
+  <!-- Findings arrows -->
+  <line x1="148" y1="158" x2="300" y2="76" stroke="#ec4899" stroke-width="1.5"/>
+  <line x1="148" y1="158" x2="300" y2="156" stroke="#ec4899" stroke-width="1.5"/>
+
+  <!-- Human Gate arrow -->
+  <line x1="148" y1="190" x2="300" y2="236" stroke="#ef4444" stroke-width="1.5"/>
+
+  <!-- Data sources in the middle -->
+  <rect x="300" y="50" width="200" height="210" rx="6" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="400" y="70" font-size="10" font-weight="600" fill="#64748b" text-anchor="middle">REST ENDPOINTS (parallel)</text>
+
+  <text x="312" y="90" font-size="9" fill="#333">/reviews/{caseId}</text>
+  <text x="312" y="130" font-size="9" fill="#333">/reviews/reviewers/{actorId}</text>
+  <text x="312" y="170" font-size="9" fill="#333">/reviews/{caseId}/similar-cases</text>
+  <text x="312" y="210" font-size="9" fill="#333">/trust/{id}/routing-history/{eid}</text>
+  <text x="312" y="250" font-size="9" fill="#333">triage data (from unified model)</text>
+
+  <!-- Cache -->
+  <rect x="540" y="80" width="200" height="120" rx="6" fill="#fefce8" stroke="#facc15"/>
+  <text x="640" y="100" font-size="10" font-weight="600" fill="#854d0e" text-anchor="middle">DEDUP CACHE</text>
+  <text x="640" y="120" font-size="10" fill="#854d0e" text-anchor="middle">Map&lt;url, {promise, ts}&gt;</text>
+  <text x="640" y="145" font-size="9" fill="#a16207" text-anchor="middle">30-second TTL</text>
+  <text x="640" y="165" font-size="9" fill="#a16207" text-anchor="middle">Same URL → returns cached promise</text>
+  <text x="640" y="185" font-size="9" fill="#a16207" text-anchor="middle">No duplicate concurrent requests</text>
+
+  <!-- Arrow from endpoints to cache -->
+  <line x1="500" y1="140" x2="540" y2="140" stroke="#facc15" stroke-width="1.5"/>
+
+  <!-- Label -->
+  <text x="380" y="274" font-size="9" fill="#64748b" text-anchor="middle">Each node type fires its own parallel fetches. Cache prevents re-fetch on click-around.</text>
+</svg>
