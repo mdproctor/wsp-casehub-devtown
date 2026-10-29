@@ -160,3 +160,16 @@
 **Sources:** review-timeline-strategy.ts (toNodes field mapping), issue #216 spine mockup node labels
 **Exploration:** surfaced by review (R1-13)
 **Status:** captured
+
+## D14: Smart default expand — expand active, collapse done
+
+**Choice:** Cases with in-progress or attention-needed nodes expand automatically; completed/approved cases stay collapsed
+**Alternatives:**
+- All collapsed by default — scannable but hides the decision flow that is the workbench's value proposition; requires click to see anything
+- All expanded by default — works for 3-5 cases but becomes unwieldy at 10+; wastes space on completed cases
+**Rationale:** Focuses attention where it matters. Active cases show their full event timeline; completed cases compress to a single summary row with status dots. The spine naturally adapts to volume — with few active cases, most are expanded; as volume grows, completed cases collapse and the view stays manageable.
+**Trade-offs:** Expand logic needs a clear definition of "active" (has in-progress, reviewing, or pending-decision nodes). Edge case: a case with all nodes complete but not yet merged — collapsed even though it might need attention. Mitigated by the "Needs Decision" filter chip.
+**Depends on:** D7 (flat-list spine architecture supports per-case expand state)
+**Sources:** Visual companion mockup (spine-collapse-expand.html), user feedback
+**Exploration:** quick
+**Status:** captured
