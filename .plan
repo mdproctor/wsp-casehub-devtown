@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-216-review-workbench-ui
-state: closing:review
+state: closing:verified
 project-sha: 5941f5a
 date: 2026-10-29
 issue-repo: casehubio/devtown
