@@ -56,14 +56,14 @@ A single `<intelligence-pane>` component that switches content based on which ti
 | Node type | Sections shown | Data sources |
 |-----------|---------------|--------------|
 | **Case header** | Contributor profile, similar past cases (CBR), code classification, policy context, SLA estimate | `GET /reviews/{caseId}`, `GET /reviews/contributors/{actorId}`, `GET /reviews/{caseId}/similar-cases` (§5.1) |
-| **Dispatch** | Selection rationale (with alternatives), agent profile, routing strategy | `GET /trust/{actorId}/routing-history/{entryId}` (`entryId` from enriched `RoutingDecision` — §5.2), `GET /reviews/reviewers/{actorId}` |
+| **Dispatch** | Selection rationale, agent profile, routing strategy. **Two tiers:** in-progress dispatches show basic rationale (`reason`, `confidence`, `bindingName` from AGENT_ROUTED event metadata) + agent profile; completed dispatches additionally show candidate alternatives via full routing detail | In-progress: `ReviewDetail.routing` (event metadata), `GET /reviews/reviewers/{actorId}`. Completed: additionally `GET /trust/{actorId}/routing-history/{entryId}` (`entryId` from §5.2 enrichment) |
 | **Findings** | Finding list (severity, file, confidence), precedent comparison (CBR confirmation rate) | `GET /reviews/{caseId}` (findings data), `GET /reviews/{caseId}/similar-cases` (aggregate confirmation rate client-side) |
 | **Human gate** | WorkItem status, what needs deciding, decision history for candidate group | Triage data from unified model, `GET /reviews/contributors/{candidateGroup}` |
 | **CI / Lifecycle** | Event detail, timestamp, status | Inline from spine event data (no additional fetch) |
 
 When a case is selected from the table view (not a specific node), the intelligence pane defaults to the **case header** view.
 
-For **queue, triage, and batch** contexts, the existing `pr-detail.ts` component renders in the detail slot instead of the intelligence pane (D11). The workbench knows the context from the `UnifiedPrRow.stage` field.
+The Review Workbench detail slot always renders the intelligence pane for the selected case. Queue/batch detail rendering has moved to the Merge Queue tab, which uses `pr-detail.ts` in its own split-pane layout (see §4.1 `merge-queue-workbench`). The D11 coexistence clause no longer applies to the Review Workbench after R1-09's scoping change.
 
 **Known data gaps:** `TrustScoreSnapshot` has been removed from the ledger (pending replacement entity). This affects the dispatch view: trust trend data (`TrustQueryService.trustTrend()`) returns empty, and gate decision before/after scores are unavailable (`0.0` placeholders). Current trust scores remain available via `TrustGateService.currentScore()`. The intelligence pane renders "Data unavailable" for trend charts and "—" for zeroed gate scores rather than displaying misleading zeros.
 
@@ -134,7 +134,7 @@ The spine data refreshes via WebSocket-triggered re-fetch using the `triggerUrl 
 | Dataset ID | `queue-status` (existing entry, enhanced) |
 | REST URL | `/api/devtown/governance/queue-status` |
 | Trigger URL | `ws[s]://{host}/api/governance/events` (same WebSocket used by `plan-items`, `goal-status`, `case-context`) |
-| Trigger filter | `(e) => e.topic === "case.status" \|\| e.topic === "planitem.state"` |
+| Trigger filter | `(e) => e.topic === "case.state" \|\| e.topic === "planitem.state" \|\| e.topic === "workitem.lifecycle"` |
 | Data path | `reviews` |
 
 This is consistent with how `plan-items`, `goal-status`, and `case-context` datasets already work — the `pages-data` framework manages WebSocket connection, reconnection, and trigger filtering. The spine component consumes the `queue-status` dataset via framework-managed data binding.
@@ -150,7 +150,7 @@ No manual WebSocket subscription or client-side case-ID filtering is needed.
 | `src/components/review-spine.ts` | `<review-spine>` | ~300 | Flat-list spine with collapse/expand, smart default, filter chips, data binding |
 | `src/components/spine-node-strategy.ts` | (module) | ~100 | Label synthesis, shared category icons, status colour mapping |
 | `src/components/intelligence-pane.ts` | `<intelligence-pane>` | ~400 | Node-type switching, section composition, dedup cache, parallel fetches |
-| `src/components/merge-queue-workbench.ts` | `<merge-queue-workbench>` | ~250 | Merge queue tab: queued PRs table, active batches, wait times, throughput metrics. Extracted from PR Cases "Queued" filter + active batches section |
+| `src/components/merge-queue-workbench.ts` | `<merge-queue-workbench>` | ~300 | Merge queue tab: `pages-split-workbench` layout with queued PRs table + active batches in the list slot, `<devtown-pr-detail>` in queue/batch mode in the detail slot. Extracted from PR Cases "Queued" filter + active batches section. Sole consumer of `pr-detail`'s queue and batch modes after D11 scoping change |
 
 ### 4.2 Modified Files
 
@@ -158,8 +158,8 @@ No manual WebSocket subscription or client-side case-ID filtering is needed.
 |------|--------|-------|
 | `src/views/review.ts` | Replace 6-tab definition with new tab structure (§3.1) | Tab labels, panel references, endpoints |
 | `src/index.ts` | Register new panels (`review-spine`, `intelligence-pane`), remove `session-workbench` and `definitions` registrations, mount `operations-workbench` | Panel registration block |
-| `src/components/pr-cases-workbench.ts` | Add spine/table toggle chip, integrate `<review-spine>` in list slot, switch detail slot between `<intelligence-pane>` (review context) and `<devtown-pr-detail>` (queue/triage/batch) | List slot content, detail slot switching, toggle state |
-| `src/components/pr-detail.ts` | Remove review-mode rendering (trust section, routing, timeline, findings) — narrow to queue context (priority lane, trust score, wait time, dependencies), triage context (decision type, escalation), and batch context only | Remove ~150 lines of review-mode rendering |
+| `src/components/pr-cases-workbench.ts` | Add spine/table toggle chip, integrate `<review-spine>` in list slot, detail slot always renders `<intelligence-pane>` (review-lifecycle cases only after R1-09 scoping) | List slot content, detail slot simplified, toggle state |
+| `src/components/pr-detail.ts` | Remove review-mode rendering (trust section, routing, timeline, findings) — narrow to queue context (priority lane, trust score, wait time, dependencies) and batch context only. Consumer is now `merge-queue-workbench` (not `pr-cases-workbench`). Triage/human-gate rendering removed — handled by intelligence pane's human gate node type | Remove ~150 lines of review-mode rendering, consumer change |
 | `src/components/operations-workbench.ts` | (1) Add collapsible "Sessions" section sourcing from `/api/sessions` — currently a dev-mode stub (`DevModeStubResource.sessions()`) returning empty data; section renders "No session data" when empty. (2) Fix `_navigateToReview()`: replace brittle `textContent?.trim() === 'Reviews'` tab selector with `data-panel-id` attribute matching (current selector is already broken against the `'PR Cases'` tab label). (3) `setInterval` polling migration to WebSocket triggers deferred — acknowledged as inconsistent with §3.5 pattern | Sessions section, navigation fix, scope note |
 | `src/components/system-workbench.ts` | Remove problems display and active data. Focus on SLA calibration table, merge queue configuration, fleet settings | Remove problems table, health cards refocused |
 | `src/datasets.ts` | Enhance existing `queue-status` dataset entry with `triggerUrl` and `triggerFilter` for WebSocket-triggered re-fetch (§3.5). No new dataset entry needed — the existing binding is augmented | WebSocket trigger properties on existing entry |
@@ -205,6 +205,11 @@ The intelligence pane's dispatch view needs `GET /trust/{actorId}/routing-histor
 
 **Change:** Enrich `GovernanceQueryService.reviewDetail()` to correlate routing decisions with `WorkerDecisionEntry` records by `caseId` + `capabilityTag`, adding the `entryId` to each `RoutingDecision`. Update the record: `RoutingDecision(capability, reason, confidence, bindingName, entryId)`.
 
+**Timing constraint:** `WorkerDecisionEntry` is written by `WorkerDecisionEventCapture` on worker *completion* (fired from `WorkflowExecutionCompletedHandler`), not at dispatch time. For in-progress dispatches, `entryId` is null and the correlation query returns empty. The intelligence pane handles this with two-tier dispatch intelligence:
+
+- **In-progress dispatches** (`entryId` = null): Show basic rationale from AGENT_ROUTED event metadata (`reason`, `confidence`, `bindingName`) plus agent profile from `GET /reviews/reviewers/{actorId}`. No candidate alternatives. Display "Full rationale available after review completes."
+- **Completed dispatches** (`entryId` present): Full rationale with candidate alternatives, trust scores, and selection strategy via `GET /trust/{actorId}/routing-history/{entryId}`.
+
 ### Existing endpoints (no changes)
 
 - `GET /api/devtown/reviews/{caseId}` — review detail with timeline, capabilities, routing (now enriched with `entryId`), findings
@@ -228,12 +233,12 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 - Tab restructure — all 6 tabs render without errors, correct panel content
 - Spine ↔ intelligence pane interaction — clicking spine node populates correct intelligence pane content
 - Table ↔ intelligence pane interaction — clicking table row shows case header intelligence
-- Detail slot switching — review context shows intelligence pane, queue/triage context shows pr-detail
+- Detail slot — Review Workbench always shows intelligence pane; Merge Queue tab shows pr-detail for queue/batch selection
 - WebSocket trigger — simulated event triggers spine data re-fetch
 
 ### 6.3 Visual Verification
 
-- Collapsed spine row renders status dots correctly
+- Collapsed spine row renders single status indicator correctly (blue/yellow/red/green mapped from `stage` + `status`)
 - Expanded spine shows event nodes with correct `●/◐/○` indicators
 - Intelligence pane sections render shared primitives (trust bars, dimension grids, badges) correctly
 - Spine/table toggle preserves selection state
@@ -244,7 +249,7 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 |-----------|---------------|
 | Timeline renders case lifecycle as clickable decision nodes | `review-spine.ts` with `spineNodeStrategy` — each event is a clickable node |
 | Intelligence pane shows contributor, code, reviewer, policy context | `intelligence-pane.ts` case header view — parallel fetches for ContributorDetail, CodeAnalysisResult, routing policy |
-| Dispatch nodes show trust-based selection rationale with alternatives | `intelligence-pane.ts` dispatch view — `entryId` from enriched `RoutingDecision` (§5.2), then `GET /trust/{actorId}/routing-history/{entryId}` for CandidateScore list |
+| Dispatch nodes show trust-based selection rationale with alternatives | `intelligence-pane.ts` dispatch view — two tiers: in-progress shows basic rationale from event metadata + agent profile; completed shows full CandidateScore list via `GET /trust/{actorId}/routing-history/{entryId}` (§5.2) |
 | Findings nodes show precedent comparison from CBR | `intelligence-pane.ts` findings view — `GET /reviews/{caseId}/similar-cases` (§5.1), client-side confirmation rate |
 | Human gate nodes show WorkItem status, what needs deciding, decision history | `intelligence-pane.ts` human gate view — triage data + contributor decision history |
 | Contributor click-through shows full ContributorDetail including GitHubIntelligence | `GET /reviews/contributors/{actorId}` already returns full profile with `githubIntelligence` |
@@ -259,7 +264,7 @@ CBR confirmation rate is computed client-side from the `capabilityOutcomes` in t
 - **D3:** Inline fetch with 30s dedup cache (not a data service layer)
 - **D7:** Custom flat-div spine (not N agency-timeline instances)
 - **D8:** Single intelligence pane with conditional render (not separate pane per node type)
-- **D11:** pr-detail coexists for queue/triage/batch modes
+- **D11:** pr-detail moves to Merge Queue tab for queue/batch modes (no longer in Review Workbench after R1-09 scoping)
 - **D14:** Smart default expand — expand active cases, collapse completed
 
 ## References
