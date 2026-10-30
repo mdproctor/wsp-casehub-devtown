@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 380" font-family="system-ui, sans-serif">
+  <style>
+    .frame { fill: none; stroke: #d4d4d4; stroke-width: 1; rx: 6; }
+    .header { font-size: 11px; font-weight: 600; fill: #404040; }
+    .label { font-size: 9px; fill: #737373; }
+    .card { fill: #fafafa; stroke: #e5e5e5; stroke-width: 1; rx: 4; }
+    .selected { fill: #dbeafe; stroke: #93c5fd; }
+    .met { fill: #dcfce7; stroke: #86efac; rx: 8; }
+    .partial { fill: #fef3c7; stroke: #fcd34d; rx: 8; }
+    .met-text { font-size: 8px; fill: #166534; font-weight: 600; }
+    .partial-text { font-size: 8px; fill: #92400e; font-weight: 600; }
+    .section { font-size: 10px; fill: #404040; font-weight: 600; }
+    .dim { font-size: 9px; fill: #525252; }
+    .divider { stroke: #e5e5e5; stroke-width: 1; }
+    .mosaic-tag { font-size: 7px; fill: #6366f1; font-style: italic; }
+  </style>
+
+  <!-- Outer frame -->
+  <rect x="10" y="10" width="680" height="360" class="frame"/>
+  <text x="20" y="30" class="header">Compliance Workbench</text>
+
+  <!-- Divider -->
+  <line x1="200" y1="40" x2="200" y2="360" class="divider"/>
+
+  <!-- Left: Case list -->
+  <text x="20" y="55" class="section">CASES (4)</text>
+  <rect x="20" y="62" width="170" height="36" class="card selected"/>
+  <text x="30" y="78" class="dim" font-weight="600">PR #142</text>
+  <text x="30" y="90" class="label">alice · engine</text>
+  <rect x="20" y="102" width="170" height="36" class="card"/>
+  <text x="30" y="118" class="dim" font-weight="600">PR #218</text>
+  <text x="30" y="130" class="label">bob · devtown</text>
+  <rect x="20" y="142" width="170" height="36" class="card"/>
+  <text x="30" y="158" class="dim" font-weight="600">PR #97</text>
+  <text x="30" y="170" class="label">carol · ledger</text>
+  <rect x="20" y="182" width="170" height="36" class="card"/>
+  <text x="30" y="198" class="dim" font-weight="600">PR #55</text>
+  <text x="30" y="210" class="label">dave · qhorus</text>
+
+  <!-- Right: Compliance evidence -->
+  <text x="212" y="55" class="section">COMPLIANCE OVERVIEW</text>
+  <text x="530" y="55" class="mosaic-tag">agency-compliance-summary</text>
+
+  <!-- Summary grid (table) -->
+  <rect x="212" y="62" width="466" height="20" fill="#f5f5f5" rx="2"/>
+  <text x="220" y="76" class="label" font-weight="600">Regulation</text>
+  <text x="370" y="76" class="label" font-weight="600">Requirement</text>
+  <text x="530" y="76" class="label" font-weight="600">Status</text>
+
+  <text x="220" y="96" class="dim">EU AI Act Art.12</text>
+  <text x="370" y="96" class="dim">Logging Requirements</text>
+  <rect x="530" y="86" width="30" height="14" class="met"/><text x="536" y="96" class="met-text">MET</text>
+
+  <text x="220" y="116" class="dim">Engineering SLA</text>
+  <text x="370" y="116" class="dim">Human Oversight</text>
+  <rect x="530" y="106" width="30" height="14" class="met"/><text x="536" y="116" class="met-text">MET</text>
+
+  <text x="220" y="136" class="dim">Trust Routing Policy</text>
+  <text x="370" y="136" class="dim">Trust Routing</text>
+  <rect x="530" y="126" width="30" height="14" class="met"/><text x="536" y="136" class="met-text">MET</text>
+
+  <text x="220" y="156" class="dim">GDPR Art.17/Art.22</text>
+  <text x="370" y="156" class="dim">Right to Erasure</text>
+  <rect x="530" y="146" width="50" height="14" class="partial"/><text x="536" y="156" class="partial-text">PARTIAL</text>
+
+  <!-- Collapsible cards -->
+  <text x="212" y="185" class="section">DETAIL CARDS</text>
+
+  <rect x="212" y="192" width="466" height="28" class="card"/>
+  <text x="222" y="210" class="dim">▸ Audit Chain</text>
+  <rect x="580" y="198" width="30" height="14" class="met"/><text x="586" y="208" class="met-text">MET</text>
+  <text x="622" y="208" class="mosaic-tag">audit-trail-viewer</text>
+
+  <rect x="212" y="224" width="466" height="28" class="card"/>
+  <text x="222" y="242" class="dim">▸ Review SLA</text>
+  <rect x="580" y="230" width="30" height="14" class="met"/><text x="586" y="240" class="met-text">MET</text>
+
+  <rect x="212" y="256" width="466" height="28" class="card"/>
+  <text x="222" y="274" class="dim">▸ Trust Routing</text>
+  <rect x="580" y="262" width="30" height="14" class="met"/><text x="586" y="272" class="met-text">MET</text>
+
+  <rect x="212" y="288" width="466" height="60" class="card" style="fill: #fefce8"/>
+  <text x="222" y="306" class="dim">▾ GDPR</text>
+  <rect x="580" y="294" width="50" height="14" class="partial"/><text x="586" y="304" class="partial-text">PARTIAL</text>
+  <text x="232" y="322" class="label">Erasure capable: Yes · Pseudonymisation: Active · Erasure: No</text>
+  <text x="232" y="338" class="dim" font-weight="600">Request Erasure</text>
+  <text x="330" y="338" class="mosaic-tag">gdpr-erasure-action</text>
+</svg>

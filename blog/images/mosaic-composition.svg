@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 260" font-family="system-ui, sans-serif">
+  <style>
+    .box { rx: 6; ry: 6; stroke-width: 1.5; }
+    .backend { fill: #ede9fe; stroke: #8b5cf6; }
+    .wrapper { fill: #fef3c7; stroke: #f59e0b; }
+    .mosaic { fill: #dbeafe; stroke: #3b82f6; }
+    .rendered { fill: #dcfce7; stroke: #22c55e; }
+    .box-label { font-size: 10px; font-weight: 600; fill: #404040; text-anchor: middle; }
+    .box-detail { font-size: 8px; fill: #737373; text-anchor: middle; }
+    .arrow { fill: none; stroke: #a1a1aa; stroke-width: 1.5; marker-end: url(#arr); }
+    .layer-label { font-size: 9px; fill: #737373; font-weight: 600; text-transform: uppercase; }
+    .example { font-size: 8px; fill: #6366f1; font-style: italic; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#a1a1aa"/>
+    </marker>
+  </defs>
+
+  <!-- Layer labels -->
+  <text x="10" y="22" class="layer-label">Backend</text>
+  <text x="10" y="102" class="layer-label">Wrapper</text>
+  <text x="10" y="182" class="layer-label">Mosaic</text>
+
+  <!-- Row 1: Backend APIs -->
+  <rect x="80" y="8" width="150" height="40" class="box backend"/>
+  <text x="155" y="26" class="box-label">DevtownComplianceApi</text>
+  <text x="155" y="38" class="box-detail">code-review · erasure · erase-memory</text>
+
+  <rect x="260" y="8" width="140" height="40" class="box backend"/>
+  <text x="330" y="26" class="box-label">DevtownTrustApi</text>
+  <text x="330" y="38" class="box-detail">score · trend · routing-history</text>
+
+  <rect x="430" y="8" width="170" height="40" class="box backend"/>
+  <text x="515" y="26" class="box-label">GovernanceQueryService</text>
+  <text x="515" y="38" class="box-detail">merge-queue · batch · metrics</text>
+
+  <!-- Arrows down -->
+  <path d="M 155 48 L 155 78" class="arrow"/>
+  <path d="M 330 48 L 330 78" class="arrow"/>
+  <path d="M 515 48 L 515 78" class="arrow"/>
+
+  <!-- Row 2: Thin wrappers -->
+  <rect x="70" y="80" width="170" height="40" class="box wrapper"/>
+  <text x="155" y="98" class="box-label">compliance-workbench.ts</text>
+  <text x="155" y="110" class="box-detail">DTO transform · case picker · card layout</text>
+
+  <rect x="260" y="80" width="140" height="40" class="box wrapper"/>
+  <text x="330" y="98" class="box-label">trust-workbench-view.ts</text>
+  <text x="330" y="110" class="box-detail">actor selector · event wiring</text>
+
+  <rect x="420" y="80" width="180" height="40" class="box wrapper"/>
+  <text x="510" y="98" class="box-label">merge-queue-workbench.ts</text>
+  <text x="510" y="110" class="box-detail">batch detail render · trust bars</text>
+
+  <!-- Arrows down -->
+  <path d="M 110 120 L 110 155" class="arrow"/>
+  <path d="M 155 120 L 155 155" class="arrow"/>
+  <path d="M 200 120 L 200 155" class="arrow"/>
+  <path d="M 330 120 L 330 155" class="arrow"/>
+
+  <!-- Row 3: Mosaic packages -->
+  <rect x="60" y="157" width="90" height="35" class="box mosaic"/>
+  <text x="105" y="173" class="box-label" font-size="8">compliance-summary</text>
+  <text x="105" y="185" class="box-detail">requirement grid</text>
+
+  <rect x="155" y="157" width="90" height="35" class="box mosaic"/>
+  <text x="200" y="173" class="box-label" font-size="8">audit-trail-viewer</text>
+  <text x="200" y="185" class="box-detail">ledger + verification</text>
+
+  <rect x="250" y="157" width="90" height="35" class="box mosaic"/>
+  <text x="295" y="173" class="box-label" font-size="8">gdpr-erasure-action</text>
+  <text x="295" y="185" class="box-detail">form + receipt</text>
+
+  <rect x="355" y="157" width="100" height="35" class="box mosaic"/>
+  <text x="405" y="173" class="box-label" font-size="8">trust-workbench</text>
+  <text x="405" y="185" class="box-detail">score + history + rationale</text>
+
+  <!-- Summary text -->
+  <text x="155" y="220" class="example">3 mosaic packages → 1 workbench</text>
+  <text x="405" y="220" class="example">1 mosaic package → 1 view</text>
+  <text x="510" y="138" class="example">0 mosaic packages — shared primitives</text>
+
+  <!-- Wrapper sizing -->
+  <rect x="60" y="238" width="600" height="18" fill="none" stroke="none"/>
+  <text x="155" y="250" class="box-detail" font-size="9">~350 lines</text>
+  <text x="405" y="250" class="box-detail" font-size="9">~120 lines</text>
+  <text x="510" y="250" class="box-detail" font-size="9">~60 lines added</text>
+</svg>
