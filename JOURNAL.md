@@ -1,1 +1,1 @@
-# Design Journal — issue-216-review-workbench-ui
+# Design Journal — issue-287-trust-visibility-gap

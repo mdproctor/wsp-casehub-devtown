@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 500" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#475569"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="820" height="500" rx="8" fill="#fafaf9"/>
+
+  <!-- Title -->
+  <text x="410" y="30" text-anchor="middle" font-size="15" font-weight="600" fill="#1e293b">Trust Score Visibility — From Attestation to UI</text>
+
+  <!-- Phase labels -->
+  <text x="410" y="55" text-anchor="middle" font-size="10" fill="#94a3b8">The data pipeline that was complete except for the last two queries</text>
+
+  <!-- Row 1: Event chain (what the ledger does) -->
+  <rect x="30" y="72" width="760" height="22" rx="4" fill="#f1f5f9"/>
+  <text x="410" y="87" text-anchor="middle" font-size="10" font-weight="600" fill="#64748b">LEDGER (already working)</text>
+
+  <!-- Attestation event -->
+  <rect x="40" y="105" width="150" height="80" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="115" y="127" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">Attestation</text>
+  <text x="115" y="143" text-anchor="middle" font-size="9" fill="#78350f">verdict: FLAGGED</text>
+  <text x="115" y="155" text-anchor="middle" font-size="9" fill="#78350f">dimension: thoroughness</text>
+  <text x="115" y="167" text-anchor="middle" font-size="9" fill="#78350f">occurredAt: T+0</text>
+
+  <!-- Arrow -->
+  <line x1="190" y1="145" x2="228" y2="145" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Trust recomputation -->
+  <rect x="230" y="105" width="150" height="80" rx="6" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="305" y="127" text-anchor="middle" font-size="11" font-weight="600" fill="#4338ca">Trust Recompute</text>
+  <text x="305" y="143" text-anchor="middle" font-size="9" fill="#3730a3">PerActorTrustComputer</text>
+  <text x="305" y="155" text-anchor="middle" font-size="9" fill="#3730a3">Bayesian update</text>
+  <text x="305" y="167" text-anchor="middle" font-size="9" fill="#3730a3">all score types</text>
+
+  <!-- Arrow -->
+  <line x1="380" y1="145" x2="418" y2="145" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Snapshot saved -->
+  <rect x="420" y="105" width="170" height="80" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="505" y="127" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">Snapshot Saved</text>
+  <text x="505" y="143" text-anchor="middle" font-size="9" fill="#14532d">score: 0.65</text>
+  <text x="505" y="155" text-anchor="middle" font-size="9" fill="#14532d">previousScore: 0.72</text>
+  <text x="505" y="167" text-anchor="middle" font-size="9" fill="#14532d">occurredAt: T+0</text>
+
+  <!-- Arrow to DB -->
+  <line x1="590" y1="145" x2="628" y2="145" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+
+  <!-- Database -->
+  <rect x="630" y="110" width="140" height="70" rx="6" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="700" y="132" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">trust_score_snapshot</text>
+  <text x="700" y="148" text-anchor="middle" font-size="9" fill="#14532d">GLOBAL snapshots</text>
+  <text x="700" y="160" text-anchor="middle" font-size="9" fill="#14532d">CAPABILITY snapshots</text>
+  <text x="700" y="172" text-anchor="middle" font-size="9" fill="#14532d">DIMENSION snapshots</text>
+
+  <!-- Row 2: The gap -->
+  <rect x="30" y="205" width="760" height="22" rx="4" fill="#fef2f2"/>
+  <text x="410" y="220" text-anchor="middle" font-size="10" font-weight="600" fill="#dc2626">THE GAP (before this fix)</text>
+
+  <!-- trustTrend stub -->
+  <rect x="40" y="240" width="190" height="70" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="135" y="262" text-anchor="middle" font-size="11" font-weight="600" fill="#991b1b">trustTrend()</text>
+  <text x="135" y="278" text-anchor="middle" font-size="9" fill="#7f1d1d">return Collections.emptyList()</text>
+  <text x="135" y="294" text-anchor="middle" font-size="9" fill="#991b1b">// TODO: restore</text>
+
+  <!-- X mark -->
+  <text x="270" y="280" font-size="24" fill="#dc2626" font-weight="bold">✕</text>
+
+  <!-- loadFeedback stub -->
+  <rect x="320" y="240" width="190" height="70" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="415" y="262" text-anchor="middle" font-size="11" font-weight="600" fill="#991b1b">loadFeedback()</text>
+  <text x="415" y="278" text-anchor="middle" font-size="9" fill="#7f1d1d">trustScoreBefore: 0.0</text>
+  <text x="415" y="294" text-anchor="middle" font-size="9" fill="#7f1d1d">trustScoreAfter: 0.0</text>
+
+  <!-- X mark -->
+  <text x="545" y="280" font-size="24" fill="#dc2626" font-weight="bold">✕</text>
+
+  <!-- UI shows nothing -->
+  <rect x="590" y="240" width="180" height="70" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="680" y="262" text-anchor="middle" font-size="11" font-weight="600" fill="#991b1b">Governance UI</text>
+  <text x="680" y="278" text-anchor="middle" font-size="9" fill="#7f1d1d">Trend: "Data unavailable"</text>
+  <text x="680" y="294" text-anchor="middle" font-size="9" fill="#7f1d1d">Gate scores: "—"</text>
+
+  <!-- Row 3: The fix -->
+  <rect x="30" y="332" width="760" height="22" rx="4" fill="#f0fdf4"/>
+  <text x="410" y="347" text-anchor="middle" font-size="10" font-weight="600" fill="#16a34a">THE FIX (two queries, zero new classes)</text>
+
+  <!-- trustTrend fixed -->
+  <rect x="40" y="367" width="190" height="80" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="135" y="389" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">trustTrend()</text>
+  <text x="135" y="405" text-anchor="middle" font-size="9" fill="#14532d">Named query:</text>
+  <text x="135" y="417" text-anchor="middle" font-size="9" fill="#14532d">findByActorAndCapability</text>
+  <text x="135" y="431" text-anchor="middle" font-size="9" fill="#14532d">→ TrustTrendPoint[]</text>
+
+  <!-- Arrow up to DB -->
+  <line x1="230" y1="405" x2="700" y2="180" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-green)"/>
+
+  <!-- loadFeedback fixed -->
+  <rect x="320" y="367" width="190" height="80" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="415" y="389" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">loadFeedback()</text>
+  <text x="415" y="405" text-anchor="middle" font-size="9" fill="#14532d">Batch query by time range</text>
+  <text x="415" y="417" text-anchor="middle" font-size="9" fill="#14532d">Match by dimension + time</text>
+  <text x="415" y="431" text-anchor="middle" font-size="9" fill="#14532d">→ GateDecision.before/after</text>
+
+  <!-- Arrow up to DB -->
+  <line x1="510" y1="405" x2="700" y2="180" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow-green)"/>
+
+  <!-- UI works -->
+  <rect x="590" y="367" width="180" height="80" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="680" y="389" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">Governance UI</text>
+  <text x="680" y="405" text-anchor="middle" font-size="9" fill="#14532d">Trend: score over time</text>
+  <text x="680" y="417" text-anchor="middle" font-size="9" fill="#14532d">Gate scores: Δ per event</text>
+  <text x="680" y="431" text-anchor="middle" font-size="9" fill="#14532d">Routing: full trust profile</text>
+
+  <!-- Arrows from fixed queries to UI -->
+  <line x1="230" y1="415" x2="588" y2="415" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="510" y1="415" x2="588" y2="415" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Caption -->
+  <text x="410" y="480" text-anchor="middle" font-size="10" fill="#64748b">The ledger pipeline (top) was complete. The query layer (middle) was stubbed.</text>
+  <text x="410" y="494" text-anchor="middle" font-size="10" fill="#64748b">The fix (bottom) connects two named queries to the existing data. No new tables, no new services.</text>
+</svg>
