@@ -2,30 +2,37 @@
 
 ## Last Session
 
-Implemented three issues from epic #289 (Wire new foundation SPIs):
+Closed epic #289 (Wire new foundation SPIs) — all 5 child issues complete:
 
-- **#292 — Wire TriageHandler SPI.** `ReviewTriageHandler` in `review/` module, `@ApplicationScoped @Priority(1)`. Classifies DECLINED → Retry (engine re-routes), unrecoverable → Abandon, transient/unknown → Retry while budget remains. 14 unit tests + 2 CDI displacement integration tests. Displaces both `NoOpTriageHandler` and `LlmTriageHandler`.
+- **#292 — Wire TriageHandler SPI.** `ReviewTriageHandler` in `review/`, `@ApplicationScoped @Priority(1)`. Classifies DECLINED → Retry, unrecoverable → Abandon, transient → Retry while budget remains. Displaces both `NoOpTriageHandler` and `LlmTriageHandler`.
 
-- **#293 — Wire PlaybookWorkerFunctionProvider.** CDI producer in `app/spi/PlaybookProviderProducer.java` registers `PlaybookWorkerFunctionProvider` as a bean. Style-review playbook YAML created in `review/src/main/resources/devtown/playbooks/style-review.yaml` (3-step agent-session flow). 3 compilation tests + 1 CDI wiring test. Contributor guide updated with both triage and playbook SPI documentation.
+- **#293 — Wire PlaybookWorkerFunctionProvider.** CDI producer in `app/spi/PlaybookProviderProducer.java`. Style-review playbook YAML as proof of concept. Contributor guide updated.
 
-- **#294 — Wire SubCaseGroup bindingName.** Engine already populates `SubCaseGroup.bindingName` from binding name during sub-case creation. Added `BisectionSubCase` record to `BatchStatus` and query from `SubCaseGroupRepository` in `GovernanceQueryService.batchStatus()`. Tests updated.
+- **#294 — Wire SubCaseGroup bindingName.** `BisectionSubCase` record in `BatchStatus`. Governance query joins `SubCaseGroupRepository` to surface bisection role.
+
+- **#295 — Evaluate HTTP agent sidecar.** Rejected — ADR-0002. Devtown invokes `AgentProvider` directly in-JVM; HTTP endpoint adds overhead for zero gain.
+
+- **#296 — Evaluate protocol lifecycle hooks.** Rejected — ADR-0003. Review state belongs in CasePlanModel context, not qhorus channel-level hooks.
+
+Epic #289 closed. Blog entry revised: "The SPIs That Were Already There."
 
 ## Immediate Next Step
 
-`work continue` on branch `issue-289-wire-foundation-spis`. Start with **#295 — Evaluate HTTP agent sidecar for Claudony invocation**. This is a research/evaluation task — read platform #666 SPI contract and compare with current Claudony wiring. May close as rejected-with-ADR.
+**#285 — Replace NoOp clients with real GitHub implementations.** Highest-value concrete issue remaining. Replaces `NoOpMergeClient`, `NoOpCiStatusClient`, `NoOpBatchBranchClient`, `NoOpRevertClient` with real GitHub implementations. Same CDI displacement pattern used throughout this epic.
 
-## Queue — Epic #289
+## Open Issues
 
-| # | Title | Scale | Complexity | Status |
-|---|-------|-------|------------|--------|
-| #292 | Wire TriageHandler SPI | M | Med | Done |
-| #293 | Wire PlaybookWorkerFunctionProvider | M | Med | Done |
-| #294 | Wire SubCaseGroup bindingName | S | Low | Done |
-| #295 | Evaluate HTTP agent sidecar for Claudony invocation | S | Med | Next |
-| #296 | Evaluate protocol lifecycle hooks for reviewer interaction state | S | Med | Queued |
+| # | Title | Scale | Complexity | Notes |
+|---|-------|-------|------------|-------|
+| #285 | Replace NoOp clients with real GitHub implementations | L | Med | Recommended next |
+| #224 | Epic: Intelligence workbench — wire 20+ blocks-ui | XL | Med | Needs decomposition |
+| #208 | Epic: Production readiness — close gaps | XL | High | Needs decomposition |
+| #200 | Engine GOAP / LLM Decomposition | L | High | Blocked on engine GOAP |
+| #178 | Per-domain contributor trust splitting | M | Med | Idea |
+| #177 | Federated contributor trust | L | High | Blocked on P2.1 |
 
 ## References
 
-- Epic: casehubio/devtown#289
-- Branch: `issue-289-wire-foundation-spis`
-- Commits: `9c7885a`, `ad04c85`, `1bdacea`, `c799173`
+- Landed: epic #289 as `fd3eef2` + `d741375` on main
+- ADRs: `docs/adr/0002-reject-http-agent-sidecar.md`, `docs/adr/0003-reject-protocol-lifecycle-hooks.md`
+- Blog: `blog/2026-11-01-mdp01-the-spis-that-were-already-there.md`
