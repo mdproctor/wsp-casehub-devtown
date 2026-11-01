@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400" font-family="Inter, system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="platformGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <linearGradient id="agencyGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#bfdbfe"/>
+    </linearGradient>
+    <linearGradient id="devtownGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d1fae5"/>
+      <stop offset="100%" stop-color="#a7f3d0"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.1"/>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="360" y="28" text-anchor="middle" font-size="14" font-weight="600" fill="#1e293b">CDI Displacement: Who Wins the TriageHandler Injection?</text>
+
+  <!-- Layer labels -->
+  <text x="18" y="72" font-size="11" font-weight="600" fill="#64748b" text-anchor="start">PLATFORM</text>
+  <text x="18" y="172" font-size="11" font-weight="600" fill="#64748b" text-anchor="start">AGENCY</text>
+  <text x="18" y="292" font-size="11" font-weight="600" fill="#64748b" text-anchor="start">DEVTOWN</text>
+
+  <!-- Platform layer -->
+  <rect x="100" y="50" width="220" height="60" rx="8" fill="url(#platformGrad)" filter="url(#shadow)"/>
+  <text x="210" y="74" text-anchor="middle" font-size="12" font-weight="600" fill="#475569">NoOpTriageHandler</text>
+  <text x="210" y="92" text-anchor="middle" font-size="10" fill="#64748b">@DefaultBean</text>
+  <text x="210" y="104" text-anchor="middle" font-size="10" fill="#94a3b8">→ Abandon("no handler")</text>
+
+  <!-- Arrow: platform → interface -->
+  <rect x="400" y="50" width="280" height="60" rx="8" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="540" y="74" text-anchor="middle" font-size="12" font-weight="600" fill="#475569">TriageHandler</text>
+  <text x="540" y="92" text-anchor="middle" font-size="10" fill="#94a3b8">interface — platform-api</text>
+  <text x="540" y="104" text-anchor="middle" font-size="10" fill="#64748b">evaluate(TriageContext) → TriageDecision</text>
+
+  <!-- Agency layer -->
+  <rect x="100" y="150" width="220" height="60" rx="8" fill="url(#agencyGrad)" filter="url(#shadow)"/>
+  <text x="210" y="174" text-anchor="middle" font-size="12" font-weight="600" fill="#1e40af">LlmTriageHandler</text>
+  <text x="210" y="192" text-anchor="middle" font-size="10" fill="#3b82f6">@ApplicationScoped</text>
+  <text x="210" y="204" text-anchor="middle" font-size="10" fill="#64748b">→ LLM-backed decision</text>
+
+  <!-- Devtown layer -->
+  <rect x="100" y="270" width="220" height="60" rx="8" fill="url(#devtownGrad)" filter="url(#shadow)" stroke="#059669" stroke-width="2"/>
+  <text x="210" y="294" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">ReviewTriageHandler</text>
+  <text x="210" y="312" text-anchor="middle" font-size="10" fill="#059669">@ApplicationScoped @Priority(1)</text>
+  <text x="210" y="324" text-anchor="middle" font-size="10" fill="#065f46">→ domain-specific triage</text>
+
+  <!-- Displacement arrows -->
+  <line x1="210" y1="110" x2="210" y2="148" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+  <line x1="210" y1="210" x2="210" y2="268" stroke="#059669" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <!-- Labels on arrows -->
+  <text x="224" y="134" font-size="9" fill="#94a3b8">displaces</text>
+  <text x="224" y="246" font-size="9" font-weight="600" fill="#059669">displaces (Priority wins)</text>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrowGrey" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#059669" stroke-width="2"/>
+    </marker>
+  </defs>
+
+  <!-- Engine consumer box -->
+  <rect x="400" y="230" width="280" height="100" rx="8" fill="#fefce8" filter="url(#shadow)" stroke="#ca8a04" stroke-width="1"/>
+  <text x="540" y="254" text-anchor="middle" font-size="12" font-weight="600" fill="#854d0e">DefaultRecoveryCoordinator</text>
+  <text x="540" y="272" text-anchor="middle" font-size="10" fill="#a16207">Instance&lt;TriageHandler&gt;</text>
+  <text x="540" y="296" text-anchor="middle" font-size="10" fill="#78716c">structural recovery exhausted</text>
+  <text x="540" y="310" text-anchor="middle" font-size="10" fill="#78716c">↓ triage handler invoked</text>
+  <text x="540" y="324" text-anchor="middle" font-size="10" fill="#78716c">↓ Retry or Abandon</text>
+
+  <!-- Connection from devtown to engine -->
+  <path d="M 320 300 Q 360 300 400 280" fill="none" stroke="#059669" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowGreen)"/>
+
+  <!-- Legend -->
+  <rect x="400" y="355" width="12" height="12" rx="2" fill="url(#platformGrad)"/>
+  <text x="418" y="365" font-size="10" fill="#64748b">Platform default</text>
+  <rect x="500" y="355" width="12" height="12" rx="2" fill="url(#agencyGrad)"/>
+  <text x="518" y="365" font-size="10" fill="#64748b">Agency (generic)</text>
+  <rect x="610" y="355" width="12" height="12" rx="2" fill="url(#devtownGrad)" stroke="#059669" stroke-width="1"/>
+  <text x="628" y="365" font-size="10" fill="#065f46">Devtown (wins)</text>
+</svg>
