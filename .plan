@@ -1,0 +1,19 @@
+# Work Plan — issue-289-wire-foundation-spis
+
+## State
+branch: issue-289-wire-foundation-spis
+state: active
+project-sha: 5f872e3a9901f853cd5aa77ae1dd2ef66894c7d2
+date: 2026-11-01
+issue-repo: 
+covers: 
+design-repo: project
+design-section-hashes: 
+flyway-next-v: unknown
+
+## Queue
+- [ ] casehubio/devtown#292 — Wire
+- [ ] casehubio/devtown#293 — Wire
+- [ ] casehubio/devtown#294 — Wire
+- [ ] casehubio/devtown#295 — Evaluate
+- [ ] casehubio/devtown#296 — Evaluate
