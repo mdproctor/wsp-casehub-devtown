@@ -45,17 +45,17 @@ Issue #178 states preconditions for per-domain scoring: sufficient observation c
 
 ## D4: Data flow — domain info into attestation
 
-**Choice:** Enrich at the `PrLifecycleAttestationObserver` level. The observer pattern-matches the event subtype; for subtypes that carry `caseId` (Merged, Rejected, ChangesRequested), it looks up which FINDINGS_CAPABILITIES bindings were activated from the case context. For `TriageRejected` (no caseId, no case, no review), the observer produces aggregate-only attestations. PrLifecycleEvent remains unchanged.
+**Choice:** Enrich `PrLifecycleEvent` with `Set<String> reviewDomains` on all subtypes. Merged, Rejected, ChangesRequested carry the set of FINDINGS_CAPABILITIES bindings that fired on the case. TriageRejected carries `Set.of()` (empty — no case exists yet). The caller (event producer) already has case context; this pushes domain resolution to event creation time and keeps the attestation observer domain-agnostic.
 **Alternatives:**
-- Enrich PrLifecycleEvent with `Set<String> reviewDomains` — forces a semantically invalid field onto TriageRejected (no review domains exist before case creation)
+- Observer-level enrichment via PlanItemStore — adds engine SPI dependency to the observer; responsibility expansion
 - Query the case at attestation time from the policy — adds engine runtime dependency at policy level
 - Separate event per domain — cleaner separation but more events and event types
-**Rationale:** The observer already has full CDI context (`@ApplicationScoped`, injected dependencies) and already pattern-matches event subtypes. `ContributorOutcomeLedgerWriter.extractCaseId()` performs the same subtype dispatch. The case context is accessible from the observer for Merged/Rejected/ChangesRequested. TriageRejected continues producing aggregate-only attestations with `FLAGGED`/`confidence:0.3`, preserving the trust signal for low-quality submissions.
-**Trade-offs:** The observer becomes domain-aware (it needs to look up binding activation from the case). This is a responsibility expansion, but the observer is already the translation layer between lifecycle events and attestation intents.
+**Rationale:** `Set.of()` correctly represents "no review domains" for TriageRejected — sealed interfaces permit different subtypes to carry different data (TriageRejected already lacks caseId and reviewRounds). Event enrichment keeps the observer domain-agnostic and avoids coupling it to PlanItemStore. The event producer has the case context needed to resolve domains.
+**Trade-offs:** All PrLifecycleEvent subtypes gain a new field. The caller must look up activated bindings before constructing the event.
 **Depends on:** D1 (domain source)
-**Sources:** PrLifecycleEvent.java (sealed interface, TriageRejected has no caseId), PrLifecycleAttestationObserver.java (subtype pattern matching), ContributorOutcomeLedgerWriter.java:87-91 (extractCaseId pattern), ContributorAttestationPolicy.java:56-59 (TRIAGE_REJECTED attestation)
+**Sources:** PrLifecycleEvent.java (sealed interface), PrLifecycleAttestationObserver.java, spec review R1-08/R1-12 (event enrichment reconsidered)
 **Exploration:** quick
-**Status:** revised — R1-04: changed from PrLifecycleEvent enrichment to observer-level enrichment; PrLifecycleEvent sealed interface unchanged; TriageRejected produces aggregate-only attestations
+**Status:** revised — post-spec review: reversed from observer-level enrichment back to event enrichment; `Set.of()` is semantically valid for TriageRejected
 
 ## D5: Capability name modeling
 
