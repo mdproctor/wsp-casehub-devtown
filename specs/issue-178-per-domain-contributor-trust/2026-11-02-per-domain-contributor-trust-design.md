@@ -56,7 +56,7 @@ Domains are derived from the `FINDINGS_CAPABILITIES` review bindings the PR case
 
 `PrLifecycleAttestationObserver` is extended:
 
-1. For events with `caseId` (Merged, Rejected, ChangesRequested): look up which `FINDINGS_CAPABILITIES` bindings were activated on the case
+1. For events with `caseId` (Merged, Rejected, ChangesRequested): query `PlanItemStore.findByCaseId(caseId)` and filter for records whose `capabilityName` is in `ReviewDomain.FINDINGS_CAPABILITIES` — this gives the set of review domains the case activated
 2. For each activated domain: produce a domain-scoped attestation tagged with `ContributorTrustCapability.forDomain(domain)`
 3. The existing aggregate `pr-contribution` attestation continues unchanged
 4. `TriageRejected` (no caseId): produces aggregate-only attestations — no domain signal exists before case creation
