@@ -1,15 +1,16 @@
 # Work Plan — main
 
 ## State
-branch: main
-state: scaffolded
+branch: issue-178-per-domain-contributor-trust
+state: active
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
-covers: 285
+covers: 178
 design-repo: 
 design-section-hashes: 
 flyway-next-v: 
 
 ## Queue
-- [ ] casehubio/devtown#285 — Issue #285 ← active
+- [x] casehubio/devtown#285 — Issue #285
+- [ ] casehubio/devtown#178 — Per-domain contributor trust splitting ← active
