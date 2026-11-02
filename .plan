@@ -2,7 +2,7 @@
 
 ## State
 branch: issue-178-per-domain-contributor-trust
-state: active
+state: closing:review
 project-sha: 
 date: 
 issue-repo: casehubio/devtown
@@ -11,6 +11,18 @@ design-repo:
 design-section-hashes: 
 flyway-next-v: 
 
+evidence-era: true
 ## Queue
 - [x] casehubio/devtown#285 — Issue #285
 - [ ] casehubio/devtown#178 — Per-domain contributor trust splitting ← active
+  - [x] Batch 1: Domain Model
+    - [x] Task 1: ContributorTrustCapability forDomain
+    - [x] Task 2: PrLifecycleEvent reviewDomains
+  - [x] Batch 2: Attestation
+    - [x] Task 3: ContributorAttestationPolicy per-domain
+    - [x] Task 4: PrReviewCaseService domain resolution
+    - [x] Task 5: Observer wiring
+  - [x] Batch 3: Consumer
+    - [x] Task 6: CapabilityRegistry policies
+    - [x] Task 7: ContributorTrustResolver
+    - [x] Task 8: GovernanceQueryService per-domain
